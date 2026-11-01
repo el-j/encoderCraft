@@ -12,6 +12,7 @@ pub enum InspectorTab {
     Video,
     Audio,
     Effects,
+    Captions,
     Loudness,
     Metadata,
 }
@@ -102,6 +103,7 @@ fn render_inspector_content(ui: &mut Ui, spec: &mut CraftJobSpec, active_tab: &m
             ui.selectable_value(active_tab, InspectorTab::Video, "Video");
             ui.selectable_value(active_tab, InspectorTab::Audio, "Audio");
             ui.selectable_value(active_tab, InspectorTab::Effects, "Effects & Overlays");
+            ui.selectable_value(active_tab, InspectorTab::Captions, "Captions");
             ui.selectable_value(active_tab, InspectorTab::Loudness, "Loudness & Mastering");
             ui.selectable_value(active_tab, InspectorTab::Metadata, "Metadata");
         });
@@ -112,6 +114,7 @@ fn render_inspector_content(ui: &mut Ui, spec: &mut CraftJobSpec, active_tab: &m
             InspectorTab::Video => render_video_tab(ui, target),
             InspectorTab::Audio => render_audio_tab(ui, target),
             InspectorTab::Effects => render_effects_tab(ui, target),
+            InspectorTab::Captions => render_captions_tab(ui, target),
             InspectorTab::Loudness => render_loudness_tab(ui, target),
             InspectorTab::Metadata => render_metadata_tab(ui, spec),
         }
@@ -135,6 +138,59 @@ fn render_effects_tab(ui: &mut Ui, target: &mut OutputTarget) {
             } else {
                 target.lut_path = Some(std::path::PathBuf::from(lut_str.trim()));
             }
+        }
+    });
+}
+
+fn render_captions_tab(ui: &mut Ui, target: &mut OutputTarget) {
+    ui.heading("Closed Captions & Subtitles");
+    ui.add_space(4.0);
+
+    let mut cap_str = target.caption_path.as_ref().and_then(|p| p.to_str()).unwrap_or("").to_string();
+    ui.horizontal(|ui| {
+        ui.label("Caption File (.srt, .vtt, .scc, .ttml):");
+        if ui.text_edit_singleline(&mut cap_str).changed() {
+            if cap_str.trim().is_empty() {
+                target.caption_path = None;
+            } else {
+                target.caption_path = Some(std::path::PathBuf::from(cap_str.trim()));
+            }
+        }
+    });
+
+    ui.add_space(6.0);
+
+    ui.checkbox(&mut target.burn_captions, "Burn Captions into Video (Open Captions)");
+
+    ui.add_space(6.0);
+
+    ui.horizontal(|ui| {
+        let mut has_sidecar = target.caption_format.is_some();
+        if ui.checkbox(&mut has_sidecar, "Generate Sidecar File").changed() {
+            if has_sidecar {
+                target.caption_format = Some(encodercraft_core::CaptionExportFormat::WebVtt);
+            } else {
+                target.caption_format = None;
+            }
+        }
+
+        if let Some(ref mut fmt) = target.caption_format {
+            egui::ComboBox::from_id_salt("caption_sidecar_format_combo").selected_text(format!("{:?}", fmt)).show_ui(ui, |ui| {
+                ui.selectable_value(fmt, encodercraft_core::CaptionExportFormat::WebVtt, "WebVTT (.vtt)");
+                ui.selectable_value(fmt, encodercraft_core::CaptionExportFormat::Srt, "SubRip (.srt)");
+                ui.selectable_value(fmt, encodercraft_core::CaptionExportFormat::Scc, "Scenarist SCC (.scc)");
+                ui.selectable_value(fmt, encodercraft_core::CaptionExportFormat::Ttml, "TTML IMSC1 (.ttml)");
+            });
+        }
+    });
+
+    ui.add_space(6.0);
+
+    let mut offset = target.caption_offset_ms.unwrap_or(0);
+    ui.horizontal(|ui| {
+        ui.label("Timecode Offset (ms):");
+        if ui.add(egui::DragValue::new(&mut offset).range(-60000..=60000).speed(50)).changed() {
+            target.caption_offset_ms = if offset == 0 { None } else { Some(offset) };
         }
     });
 }

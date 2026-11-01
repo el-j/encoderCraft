@@ -232,6 +232,33 @@ flowchart LR
 
 ---
 
+### Milestone 8: Multi-Clip Stitching, Captions & Preset Editor
+**Focus:** Full AME parity for multi-clip stitching, subtitle sidecar import/export and burn-in, custom preset creation UI, and automated benchmarking.
+
+#### Deliverables:
+1. **Multi-Clip Concatenation Engine (`crates/pipeline/src/stitch.rs`):**
+   - Implemented `ClipStitcher`: stitches multiple video and audio inputs into continuous timeline outputs.
+   - Built `stitch_audio_buffers`: normalizes sample rates, remixes channels, and stitches continuous planar PCM.
+   - Built `stitch_video_sequences`: handles resolution scaling with `FrameScaler`, continuous PTS/DTS timeline advances, and multiplexing into MP4/MOV.
+   - Extended `SourceDescriptor::StitchedClips` in `crates/core/src/job.rs`.
+2. **Sidecar Captions & Video Burn-In (`crates/pipeline/src/captions.rs`):**
+   - Integrated `filmcraft-captions` upstream library for subtitle format detection (`detect`), parsing, and serialization.
+   - Supports sidecar generation across SubRip (`.srt`), WebVTT (`.vtt`), Scenarist (`.scc`), MacCaption (`.mcc`), and TTML (`.ttml`).
+   - Implemented `CaptionBurner`: rasterizes subtitle cues onto video frames with dark pill background and high-contrast typography at frame presentation timestamps.
+   - Integrated into `OutputTarget` schema and `TranscodePipeline::execute_target`.
+3. **Custom Preset Editor Dialog & Inspector Captions Tab (`crates/ui-egui`):**
+   - Built `PresetEditorState` and `render_preset_editor` modal dialog for creating and validating user presets with resolution, bitrate, audio channels, and LUFS targets.
+   - Added `Captions` tab to the Export Settings Inspector for toggling open captions burn-in, sidecar generation, and timecode offsets.
+   - Added `+ New` button in the Preset Browser and `Preset > Create Encoding Preset...` top menu item.
+4. **Automated Benchmarking Suite (`xtask/src/bench.rs`):**
+   - Added `cargo xtask bench` command benchmarking throughput and speed factors across Frame Scaler, 3D LUT Color Engine, H.264, ProRes, Audio Sinc Resampling, EBU R128 Loudness, and Caption Burn-In.
+
+#### Verification Gate:
+- `cargo xtask ci` passes 100% with 117 automated tests, zero clippy warnings, and zero layer violations.
+- Benchmarks verify high-performance real-time multiples across all transcoding operations.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

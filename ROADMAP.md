@@ -23,7 +23,7 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
 | **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
 | **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **94 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Automated Tests** | **>80 tests** | **117 passed** | Unit, fuzz, and integration tests across L0-L7. |
 | **Workspace Crates** | **17 crates** | 17 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
@@ -104,3 +104,9 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Wired native pure-Rust audio encoders: AAC-LC (`filmcraft-aac`), and universal audio decoding / FLAC & AIFF encoding (`soundcraft-audio-io`).
   - Extended end-to-end transcode pipeline to execute FLAC, AIFF, and dynamic H.264/ProRes/HEVC/AV1/VP9 muxing.
   - Verified 100% layer compliance and test suite (94 tests passing with zero warnings under `cargo xtask ci`).
+- [x] **M8: Multi-Clip Stitching, Captions & Preset Editor (2026-11-02)**
+  - Implemented `ClipStitcher` (`crates/pipeline/src/stitch.rs`) for seamless multi-clip concatenation, timescale/framerate normalization, audio buffer stitching, and video resolution scaling (AME "Stitch Clips" parity).
+  - Wired `filmcraft-captions` into pipeline (`crates/pipeline/src/captions.rs`): sidecar export (SRT, WebVTT, SCC, MCC, TTML), timecode offset shifting, and subtitle burn-in compositing onto RGB8/RGBA8 video frames.
+  - Created interactive Custom Preset Editor dialog (`crates/ui-egui/src/preset_editor.rs`) and integrated Captions tab into Export Settings Inspector.
+  - Built automated benchmarking & stress test harness (`xtask/src/bench.rs` via `cargo xtask bench`) profiling FPS and realtime multipliers across encoders, DSP, LUTs, and captions.
+  - Verified 100% layer compliance and test suite (117 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).

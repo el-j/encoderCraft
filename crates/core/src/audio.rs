@@ -20,6 +20,13 @@ pub enum ChannelLayout {
     Surround71 = 8,
 }
 
+impl ChannelLayout {
+    /// Number of discrete audio channels in this layout.
+    pub fn channel_count(self) -> usize {
+        self as usize
+    }
+}
+
 /// A buffer of audio samples stored in 32-bit floating point planar format.
 #[derive(Debug, Clone)]
 pub struct AudioSampleBuffer {
@@ -30,6 +37,10 @@ pub struct AudioSampleBuffer {
 }
 
 impl AudioSampleBuffer {
+    /// Read-only slice access to planar channel data vectors.
+    pub fn channels(&self) -> &[Vec<f32>] {
+        &self.channels
+    }
     /// Creates an empty buffer with pre-allocated zero samples for all channels.
     pub fn new_silent(sample_rate: u32, layout: ChannelLayout, samples_per_channel: usize, start_sample_index: i64) -> Result<Self, EncoderError> {
         if sample_rate == 0 {

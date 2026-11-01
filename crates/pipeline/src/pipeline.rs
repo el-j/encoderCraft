@@ -56,6 +56,12 @@ impl TranscodePipeline {
             std::fs::create_dir_all(parent).map_err(|e| EncoderError::Io(format!("failed to create output directory: {e}")))?;
         }
 
+        // Export sidecar subtitle file if requested
+        if let (Some(cap_path), Some(cap_format)) = (&target.caption_path, target.caption_format) {
+            let track = crate::captions::CaptionTrack::from_file(cap_path)?;
+            track.export_sidecar(&target.output_path, cap_format, target.caption_offset_ms)?;
+        }
+
         match target.container {
             ContainerType::Wave => self.execute_audio_wav(target, start_time),
             ContainerType::Flac => self.execute_audio_flac(target, start_time),
@@ -189,6 +195,17 @@ impl TranscodePipeline {
 
         let tc_overlay = if target.burn_timecode { Some(crate::overlay::TimecodeOverlay::default()) } else { None };
 
+        let (caption_burner, caption_track) = if target.burn_captions {
+            if let Some(cap_path) = &target.caption_path {
+                let track = crate::captions::CaptionTrack::from_file(cap_path)?;
+                (Some(crate::captions::CaptionBurner::default()), Some(track))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
         for f in 0..total_frames {
             if self.progress.is_cancelled() {
                 return Err(EncoderError::Internal("job cancelled by user".into()));
@@ -204,6 +221,11 @@ impl TranscodePipeline {
             if let Some(ref tc) = tc_overlay {
                 let timecode = encodercraft_core::MediaTimecode::new(0, 0, (f / 24) as u8, (f % 24) as u8, false, fps);
                 tc.draw(&mut scaled_frame, &timecode)?;
+            }
+
+            if let (Some(burner), Some(track)) = (&caption_burner, &caption_track) {
+                let pts_seconds = f as f64 / fps.as_f64();
+                burner.burn(&mut scaled_frame, track, pts_seconds)?;
             }
 
             let packets = encoder.encode_frame(&scaled_frame)?;
@@ -375,5 +397,47 @@ mod tests {
         pipeline.execute().unwrap();
         assert!(target_file.exists());
         assert!(target_file.metadata().unwrap().len() > 100);
+    }
+
+    #[test]
+    fn test_execute_video_with_captions_sidecar_and_burn_in() {
+        let dir = tempdir().unwrap();
+        let target_video = dir.path().join("output_with_captions.mp4");
+        let srt_file = dir.path().join("subtitles.srt");
+
+        std::fs::write(&srt_file, "1\n00:00:00,000 --> 00:00:02,000\nHello ArtCraft Subtitles!\n").unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-caption-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: target_video.clone(),
+                preset_name: "YouTube 1080p".into(),
+                container: ContainerType::IsoBmffMp4,
+                custom_width: Some(640),
+                custom_height: Some(360),
+                custom_frame_rate: Some(Rational64::FPS_24),
+                caption_path: Some(srt_file),
+                caption_format: Some(encodercraft_core::CaptionExportFormat::WebVtt),
+                burn_captions: true,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(target_video.exists());
+        // Verify WebVTT sidecar was written
+        let vtt_sidecar = dir.path().join("output_with_captions.vtt");
+        assert!(vtt_sidecar.exists());
+        let vtt_text = std::fs::read_to_string(vtt_sidecar).unwrap();
+        assert!(vtt_text.contains("WEBVTT"));
+        assert!(vtt_text.contains("Hello ArtCraft Subtitles!"));
     }
 }

@@ -82,6 +82,13 @@ impl EncoderCraftApp {
                     }
                 });
 
+                ui.menu_button("Preset", |ui| {
+                    if ui.button("Create Encoding Preset...").clicked() {
+                        self.preset_state.editor.open_new();
+                        ui.close();
+                    }
+                });
+
                 ui.menu_button("Help", |ui| {
                     if ui.button("About encoderCraft").clicked() {
                         self.show_about_dialog = true;

@@ -18,6 +18,19 @@ pub struct Lut3D {
 }
 
 impl Lut3D {
+    /// Creates a 3D LUT directly from a raw table of RGB triplets.
+    pub fn from_raw_table(size: usize, data: Vec<[f32; 3]>) -> Result<Self, EncoderError> {
+        if !(2..=256).contains(&size) {
+            return Err(EncoderError::InvalidJobSpec(format!("unsupported LUT size {size} (must be 2..=256)")));
+        }
+        let expected =
+            size.checked_mul(size).and_then(|s| s.checked_mul(size)).ok_or_else(|| EncoderError::InvalidJobSpec("LUT size overflow".into()))?;
+        if data.len() != expected {
+            return Err(EncoderError::InvalidJobSpec(format!("data length mismatch: expected {expected}, got {}", data.len())));
+        }
+        Ok(Self { title: "Raw Table LUT".into(), size, domain_min: [0.0, 0.0, 0.0], domain_max: [1.0, 1.0, 1.0], data })
+    }
+
     /// Parses a 3D LUT from standard Adobe `.cube` file format string.
     pub fn parse_cube(cube_str: &str) -> Result<Self, EncoderError> {
         let mut title = "Untitled LUT".to_string();

@@ -140,6 +140,7 @@ fn render_job_row(
             // Source Name
             let source_name = match &job.spec.source {
                 encodercraft_core::SourceDescriptor::File { path, .. } => path.file_name().and_then(|s| s.to_str()).unwrap_or("File"),
+                encodercraft_core::SourceDescriptor::StitchedClips { .. } => "Stitched Sequence",
                 encodercraft_core::SourceDescriptor::Pipe { endpoint, .. } => endpoint.as_str(),
                 encodercraft_core::SourceDescriptor::ProjectReference { composition_id, .. } => composition_id.as_str(),
             };

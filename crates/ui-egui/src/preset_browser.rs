@@ -15,6 +15,7 @@ pub struct PresetBrowserState {
     pub search_query: String,
     pub selected_category: Option<PresetCategory>,
     pub selected_preset: Option<EncodingPreset>,
+    pub editor: crate::preset_editor::PresetEditorState,
 }
 
 /// Renders the preset browser pane.
@@ -30,10 +31,13 @@ pub fn render_preset_browser(
         ui.heading(RichText::new("Preset Browser").size(15.0));
         ui.add_space(4.0);
 
-        // Search input
+        // Search input & New Preset action
         ui.horizontal(|ui| {
             ui.label(icons::SEARCH);
             ui.add(egui::TextEdit::singleline(&mut state.search_query).hint_text("Search presets..."));
+            if ui.button(RichText::new("+ New").strong().color(tokens.accent_primary)).clicked() {
+                state.editor.open_new();
+            }
         });
 
         ui.add_space(4.0);
@@ -136,6 +140,9 @@ pub fn render_preset_browser(
                 });
         }
     });
+
+    // Render preset editor modal dialog if active
+    crate::preset_editor::render_preset_editor(ui.ctx(), &mut state.editor, registry, tokens);
 }
 
 fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {

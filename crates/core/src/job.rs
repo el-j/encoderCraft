@@ -52,6 +52,39 @@ pub struct ClientInfo {
     pub user_notes: Option<String>,
 }
 
+/// Single clip descriptor inside a multi-clip stitched sequence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StitchedClipSource {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub in_point_ticks: Option<u64>,
+    #[serde(default)]
+    pub out_point_ticks: Option<u64>,
+}
+
+/// Caption export format for sidecar generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CaptionExportFormat {
+    Srt,
+    WebVtt,
+    Scc,
+    Mcc,
+    Ttml,
+}
+
+impl CaptionExportFormat {
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Srt => "srt",
+            Self::WebVtt => "vtt",
+            Self::Scc => "scc",
+            Self::Mcc => "mcc",
+            Self::Ttml => "ttml",
+        }
+    }
+}
+
 /// Mode of media source ingestion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -66,6 +99,8 @@ pub enum SourceDescriptor {
         #[serde(default)]
         timebase: Option<Rational64>,
     },
+    /// Multiple sequential clips stitched together into a single continuous sequence.
+    StitchedClips { clips: Vec<StitchedClipSource> },
     /// Live frame streaming over local IPC domain socket or named pipe.
     Pipe { endpoint: String, width: u32, height: u32, frame_rate: Rational64, sample_rate: u32, channels: u32 },
     /// Headless project delegation (renders via origin app's CLI).
@@ -113,6 +148,14 @@ pub struct OutputTarget {
     pub lut_path: Option<PathBuf>,
     #[serde(default)]
     pub burn_timecode: bool,
+    #[serde(default)]
+    pub caption_path: Option<PathBuf>,
+    #[serde(default)]
+    pub caption_format: Option<CaptionExportFormat>,
+    #[serde(default)]
+    pub burn_captions: bool,
+    #[serde(default)]
+    pub caption_offset_ms: Option<i64>,
 }
 
 impl Default for OutputTarget {
@@ -129,6 +172,10 @@ impl Default for OutputTarget {
             target_lufs: None,
             lut_path: None,
             burn_timecode: false,
+            caption_path: None,
+            caption_format: None,
+            burn_captions: false,
+            caption_offset_ms: None,
         }
     }
 }
@@ -209,6 +256,7 @@ mod tests {
                 target_lufs: Some(-14.0),
                 lut_path: None,
                 burn_timecode: false,
+                ..Default::default()
             }],
         };
 

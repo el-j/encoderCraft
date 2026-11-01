@@ -9,4 +9,10 @@ publish = false
 workspace = true
 
 [dependencies]
+encodercraft-core = { workspace = true }
+encodercraft-geom = { workspace = true }
+encodercraft-color = { workspace = true }
+encodercraft-video-codecs = { workspace = true }
+encodercraft-audio-dsp = { workspace = true }
+encodercraft-pipeline = { workspace = true }
 serde_json = { workspace = true }

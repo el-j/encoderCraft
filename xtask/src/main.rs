@@ -2,6 +2,7 @@
 //!
 //! Pure Rust. External tools (`cargo`) are invoked through `std::process::Command`.
 
+mod bench;
 mod layers;
 
 use std::process::{Command, ExitCode};
@@ -12,6 +13,7 @@ usage: cargo xtask <command>
 commands:
   layers          enforce the crate dependency layering (docs/architecture.md §2)
   test            run workspace tests
+  bench           run automated transcoding performance benchmark suite
   ci              fmt --check, clippy -D warnings, test, layers (stops at first failure)
 ";
 
@@ -20,6 +22,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("layers") => cmd_layers(),
         Some("test") => cmd_test(),
+        Some("bench") => bench::run_benchmarks(),
         Some("ci") => cmd_ci(),
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");

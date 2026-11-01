@@ -13,5 +13,8 @@ pub mod timecode;
 pub use audio::{AudioSampleBuffer, ChannelLayout};
 pub use error::EncoderError;
 pub use frame::{MAX_FRAME_BUFFER_BYTES, PlaneDescriptor, VideoFrame};
-pub use job::{ClientInfo, ContainerType, CraftJobSpec, JobPriority, JobStatus, OutputTarget, SourceDescriptor, StartPolicy};
+pub use job::{
+    CaptionExportFormat, ClientInfo, ContainerType, CraftJobSpec, JobPriority, JobStatus, OutputTarget, SourceDescriptor, StartPolicy,
+    StitchedClipSource,
+};
 pub use timecode::{MediaTimecode, Rational64};

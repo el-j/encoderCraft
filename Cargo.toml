@@ -68,6 +68,8 @@ filmcraft-bitstream = { path = "../filmcraft/crates/bitstream" }
 filmcraft-h264enc = { path = "../filmcraft/crates/h264enc" }
 filmcraft-prores = { path = "../filmcraft/crates/prores" }
 filmcraft-aac = { path = "../filmcraft/crates/aac" }
+filmcraft-captions = { path = "../filmcraft/crates/captions" }
+filmcraft-time = { path = "../filmcraft/crates/time" }
 effectcraft-hevcenc = { path = "../effectcraft/crates/hevcenc" }
 effectcraft-av1enc = { path = "../effectcraft/crates/av1enc" }
 effectcraft-vp9enc = { path = "../effectcraft/crates/vp9enc" }

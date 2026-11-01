@@ -18,6 +18,8 @@ encodercraft-audio-dsp = { workspace = true }
 encodercraft-muxers = { workspace = true }
 encodercraft-video-codecs = { workspace = true }
 encodercraft-image-codecs = { workspace = true }
+filmcraft-captions = { workspace = true }
+filmcraft-time = { workspace = true }
 crossbeam-channel = { workspace = true }
 rayon = { workspace = true }
 chrono = { workspace = true }

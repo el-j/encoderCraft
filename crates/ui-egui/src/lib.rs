@@ -10,9 +10,11 @@ pub mod app;
 pub mod icons;
 pub mod inspector;
 pub mod preset_browser;
+pub mod preset_editor;
 pub mod preview_panel;
 pub mod queue_panel;
 pub mod theme;
 
 pub use app::EncoderCraftApp;
+pub use preset_editor::{PresetEditorState, render_preset_editor};
 pub use theme::{Brightness, Tokens, apply_theme};
