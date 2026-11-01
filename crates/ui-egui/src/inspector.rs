@@ -11,6 +11,7 @@ pub enum InspectorTab {
     #[default]
     Video,
     Audio,
+    Effects,
     Loudness,
     Metadata,
 }
@@ -100,6 +101,7 @@ fn render_inspector_content(ui: &mut Ui, spec: &mut CraftJobSpec, active_tab: &m
         ui.horizontal(|ui| {
             ui.selectable_value(active_tab, InspectorTab::Video, "Video");
             ui.selectable_value(active_tab, InspectorTab::Audio, "Audio");
+            ui.selectable_value(active_tab, InspectorTab::Effects, "Effects & Overlays");
             ui.selectable_value(active_tab, InspectorTab::Loudness, "Loudness & Mastering");
             ui.selectable_value(active_tab, InspectorTab::Metadata, "Metadata");
         });
@@ -109,10 +111,32 @@ fn render_inspector_content(ui: &mut Ui, spec: &mut CraftJobSpec, active_tab: &m
         match active_tab {
             InspectorTab::Video => render_video_tab(ui, target),
             InspectorTab::Audio => render_audio_tab(ui, target),
+            InspectorTab::Effects => render_effects_tab(ui, target),
             InspectorTab::Loudness => render_loudness_tab(ui, target),
             InspectorTab::Metadata => render_metadata_tab(ui, spec),
         }
     }
+}
+
+fn render_effects_tab(ui: &mut Ui, target: &mut OutputTarget) {
+    ui.heading("Effects, Overlays & 3D LUTs");
+    ui.add_space(4.0);
+
+    ui.checkbox(&mut target.burn_timecode, "Burn SMPTE Timecode (HH:MM:SS:FF)");
+
+    ui.add_space(6.0);
+
+    let mut lut_str = target.lut_path.as_ref().and_then(|p| p.to_str()).unwrap_or("").to_string();
+    ui.horizontal(|ui| {
+        ui.label("3D LUT (.cube):");
+        if ui.text_edit_singleline(&mut lut_str).changed() {
+            if lut_str.trim().is_empty() {
+                target.lut_path = None;
+            } else {
+                target.lut_path = Some(std::path::PathBuf::from(lut_str.trim()));
+            }
+        }
+    });
 }
 
 fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget) {
