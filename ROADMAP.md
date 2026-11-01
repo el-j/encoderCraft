@@ -11,7 +11,8 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 - [docs/file-format-matrix.md](docs/file-format-matrix.md) (exhaustive 6-dimension format matrix)
 - [docs/inter-app-dispatch-protocol.md](docs/inter-app-dispatch-protocol.md) (inter-app IPC and streaming protocol)
 - [docs/preset-system-and-watchfolders.md](docs/preset-system-and-watchfolders.md) (preset engine & automated ingest)
-- [docs/implementation-milestones.md](docs/implementation-milestones.md) (M0 through M6 execution plan)
+- [docs/craft-libs-codecs-migration-plan.md](docs/craft-libs-codecs-migration-plan.md) (unifying codecs into craft-libs as One True Source)
+- [docs/implementation-milestones.md](docs/implementation-milestones.md) (M0 through M8 execution plan)
 
 ---
 

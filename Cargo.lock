@@ -4322,9 +4322,33 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "craft-cms"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "craft-crw"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "craft-docpath"
 version = "0.1.0"
 
 [[patch.unused]]
+name = "craft-i18n"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "craft-jpeg"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "craft-keymap"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "craft-ui"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "craft-update"
 version = "0.1.0"

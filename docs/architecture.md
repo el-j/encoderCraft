@@ -92,6 +92,16 @@ The repository is structured as a Cargo workspace with distinct architectural la
 | **L7** | `encodercraft-cli` | `apps/encodercraft-cli` | Headless CLI binary: `encode`, `queue`, `watch`, `presets`, `mcp`, `daemon`. |
 | **L7** | `encodercraft-daemon`| `apps/encodercraft-daemon`| Lightweight background service runner. |
 
+### 2.3 Canonical Shared Codec Strategy (`craft-libs` as One True Source)
+
+As specified in [docs/craft-libs-codecs-migration-plan.md](craft-libs-codecs-migration-plan.md), media codecs must not remain siloed inside single applications. The Storytold ArtCraft organization designates `craft-libs` (`github.com/storytold/craft-libs`) as the central home for all pure-Rust media codecs:
+- **Video Encoders:** H.264, Apple ProRes, HEVC/H.265, AV1, and VP9.
+- **Audio Codecs & I/O:** Universal audio decoder (MP3, FLAC, Ogg Vorbis, AAC, ALAC, CAF, WAV) and encoders (AAC-LC, FLAC, AIFF).
+- **Captions & Subtitles:** Universal subtitle import, sidecar export (SRT, WebVTT, SCC, MCC, TTML), and video frame burn-in.
+- **Bitstream Primitives:** Exp-Golomb bitstream readers/writers and NAL framing.
+
+`encoderCraft` links to the official repositories via canonical Git dependencies (`git = "https://github.com/storytold/..."`), utilizing localized Cargo patches (`[patch."https://github.com/storytold/..."]`) for local workspace development. Once the upstream migration into `craft-libs` is completed, all sibling dependencies will be collapsed into unified `craft-*` crates.
+
 ---
 
 ## 3. Concurrency & Memory Architecture
