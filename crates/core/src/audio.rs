@@ -86,6 +86,11 @@ impl AudioSampleBuffer {
         self.channels.first().map(Vec::len).unwrap_or(0)
     }
 
+    /// Consumes the buffer and returns the planar channel vectors.
+    pub fn into_planar_channels(self) -> Vec<Vec<f32>> {
+        self.channels
+    }
+
     /// Read-only access to a specific channel's planar sample slice.
     pub fn channel(&self, index: usize) -> Result<&[f32], EncoderError> {
         self.channels.get(index).map(Vec::as_slice).ok_or_else(|| EncoderError::InvalidJobSpec(format!("channel index {index} out of range")))
