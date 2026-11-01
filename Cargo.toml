@@ -10,6 +10,7 @@ members = [
     "crates/image-codecs",
     "crates/video-codecs",
     "crates/spatial-io",
+    "crates/pipeline",
     "xtask",
 ]
 default-members = [
@@ -22,6 +23,7 @@ default-members = [
     "crates/image-codecs",
     "crates/video-codecs",
     "crates/spatial-io",
+    "crates/pipeline",
     "xtask",
 ]
 

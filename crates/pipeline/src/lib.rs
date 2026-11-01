@@ -1,0 +1,17 @@
+//! Transcoding execution pipeline and multi-threaded concurrency coordination.
+//!
+//! Includes bounded frame channels, bilinear frame scaling with aspect-ratio preservation,
+//! lockless atomic progress reporters, and transcode pipeline execution.
+
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![forbid(unsafe_code)]
+
+pub mod channel_buffer;
+pub mod pipeline;
+pub mod progress;
+pub mod scale;
+
+pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
+pub use pipeline::TranscodePipeline;
+pub use progress::JobProgress;
+pub use scale::FrameScaler;
