@@ -9,6 +9,7 @@ members = [
     "crates/muxers",
     "crates/image-codecs",
     "crates/video-codecs",
+    "crates/spatial-io",
     "xtask",
 ]
 default-members = [
@@ -20,6 +21,7 @@ default-members = [
     "crates/muxers",
     "crates/image-codecs",
     "crates/video-codecs",
+    "crates/spatial-io",
     "xtask",
 ]
 
