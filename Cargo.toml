@@ -8,6 +8,7 @@ members = [
     "crates/audio-dsp",
     "crates/muxers",
     "crates/image-codecs",
+    "crates/video-codecs",
     "xtask",
 ]
 default-members = [
@@ -18,6 +19,7 @@ default-members = [
     "crates/audio-dsp",
     "crates/muxers",
     "crates/image-codecs",
+    "crates/video-codecs",
     "xtask",
 ]
 
