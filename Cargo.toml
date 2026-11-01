@@ -14,6 +14,8 @@ members = [
     "crates/presets",
     "crates/watch",
     "crates/engine",
+    "crates/ui-egui",
+    "apps/encodercraft",
     "xtask",
 ]
 default-members = [
@@ -30,6 +32,8 @@ default-members = [
     "crates/presets",
     "crates/watch",
     "crates/engine",
+    "crates/ui-egui",
+    "apps/encodercraft",
     "xtask",
 ]
 
@@ -103,6 +107,8 @@ log = "0.4"
 env_logger = "0.11"
 proptest = "1"
 tempfile = "3"
+egui = "0.37"
+eframe = { version = "0.37", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

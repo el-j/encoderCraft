@@ -1,0 +1,21 @@
+[package]
+name = "encodercraft"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+default-run = "encodercraft"
+
+[lints]
+workspace = true
+
+[dependencies]
+encodercraft-core = { workspace = true }
+encodercraft-engine = { workspace = true }
+encodercraft-presets = { workspace = true }
+encodercraft-ui-egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu"] }
+egui = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
