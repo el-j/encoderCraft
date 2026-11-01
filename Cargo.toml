@@ -4,12 +4,14 @@ members = [
     "crates/geom",
     "crates/color",
     "crates/core",
+    "crates/demux",
     "xtask",
 ]
 default-members = [
     "crates/geom",
     "crates/color",
     "crates/core",
+    "crates/demux",
     "xtask",
 ]
 
@@ -23,7 +25,7 @@ authors = ["el-j", "ArtCraft Contributors"]
 
 [workspace.dependencies]
 # Upstream shared ArtCraft libraries (craft-libs)
-craft-media = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["isobmff", "matroska"] }
+craft-media = { path = "../craft-libs/crates/media", default-features = false, features = ["isobmff", "matroska"] }
 craft-cms = { git = "https://github.com/storytold/craft-libs" }
 craft-jpeg = { git = "https://github.com/storytold/craft-libs" }
 craft-crw = { git = "https://github.com/storytold/craft-libs" }

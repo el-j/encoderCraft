@@ -1,0 +1,23 @@
+[package]
+name = "encodercraft-demux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+encodercraft-core = { workspace = true }
+encodercraft-geom = { workspace = true }
+encodercraft-color = { workspace = true }
+craft-media = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

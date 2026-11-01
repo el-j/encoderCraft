@@ -62,7 +62,13 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Setup root `Cargo.toml`, strict lints (`clippy::unwrap_used`), `xtask` quality gates (`ci`, `layers`).
   - Implemented `CraftJobSpec`, `MediaTimecode`, `AudioSampleBuffer`, `VideoFrame`, `Rational64`, and typed error enums.
   - Verified 100% pass across 20 unit and property-based fuzz tests; verified layer compliance.
-- [ ] **M1: Ingestion, Demuxers & Probing Engine (Active)**
+- [x] **M1: Ingestion, Demuxers & Probing Engine (2026-11-01)**
+  - Implemented `encodercraft-demux` (L2) with sub-millisecond container sniffing for 27 media formats.
+  - Implemented clean-room RIFF/RF64 WAVE parser with Broadcast Wave (`bext`) metadata and sample decoding.
+  - Implemented clean-room Apple AIFF/AIFC parser with IEEE 754 80-bit extended sample rate parsing.
+  - Implemented fast image header probers (PNG, JPEG, WebP) and high-level `probe_bytes` / `probe_file`.
+  - Integrated `craft-media` upstream demuxers; passed 18 unit and property-based fuzz tests.
+- [ ] **M2: Core Transcoding Pipelines & Native Codecs (Active)**
   - Fast format probers for ISO BMFF, Matroska, MXF, WAV, AIFF, EXR, glTF, USD.
   - Bounded packet stream extractors and keyframe indexers.
 - [ ] **M2: Core Transcoding Pipelines & Native Codecs**

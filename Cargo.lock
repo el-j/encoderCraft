@@ -117,6 +117,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-media"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "encodercraft-color"
 version = "0.1.0"
 dependencies = [
@@ -132,6 +139,21 @@ dependencies = [
  "bytemuck",
  "chrono",
  "encodercraft-color",
+ "encodercraft-geom",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "encodercraft-demux"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "craft-media",
+ "encodercraft-color",
+ "encodercraft-core",
  "encodercraft-geom",
  "proptest",
  "serde",
