@@ -5,6 +5,7 @@ members = [
     "crates/color",
     "crates/core",
     "crates/demux",
+    "crates/audio-dsp",
     "xtask",
 ]
 default-members = [
@@ -12,6 +13,7 @@ default-members = [
     "crates/color",
     "crates/core",
     "crates/demux",
+    "crates/audio-dsp",
     "xtask",
 ]
 
