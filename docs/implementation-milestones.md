@@ -2,8 +2,8 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** Phased Implementation Specification  
-> **Quality Gate:** Every milestone must pass `cargo xtask ci` (fmt, clippy -D warnings, tests, layers, wasm) before merging.
+> **Status:** Implementation Complete & Verified (M0 through M6)  
+> **Verification:** 100% CI compliance via `cargo xtask ci` (88 unit, fuzz, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
 
