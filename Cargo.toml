@@ -1,10 +1,19 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/*", "xtask"]
-default-members = ["crates/*", "apps/encodercraft", "apps/encodercraft-cli", "xtask"]
+members = [
+    "crates/geom",
+    "crates/color",
+    "crates/core",
+    "xtask",
+]
+default-members = [
+    "crates/geom",
+    "crates/color",
+    "crates/core",
+    "xtask",
+]
 
 [workspace.package]
-name = "encodercraft"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"

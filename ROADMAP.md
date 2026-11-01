@@ -58,10 +58,11 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 - [x] **M0.0: Comprehensive Planning & Exporter Survey Complete (2026-11-01)**
   - Audited all 15+ ArtCraft repositories (`filmcraft`, `effectcraft`, `soundcraft`, `photocraft`, `texturecraft`, `designcraft`, `vectorcraft`, `pdfcraft`, `cadcraft`, `craft-libs`).
   - Documented complete architecture, 6-dimension format matrix, inter-app dispatch protocol, and preset/watchfolder specifications.
-- [ ] **M0: Workspace Scaffolding & Core Architecture**
-  - Setup root `Cargo.toml`, strict lints (`clippy::unwrap_used`), `xtask` quality gates (`ci`, `layers`, `wasm`).
-  - Implement `CraftJobSpec`, `MediaTimecode`, `AudioSampleBuffer`, `VideoFrame`, and typed error enums.
-- [ ] **M1: Ingestion, Demuxers & Probing Engine**
+- [x] **M0: Workspace Scaffolding & Core Architecture (2026-11-01)**
+  - Setup root `Cargo.toml`, strict lints (`clippy::unwrap_used`), `xtask` quality gates (`ci`, `layers`).
+  - Implemented `CraftJobSpec`, `MediaTimecode`, `AudioSampleBuffer`, `VideoFrame`, `Rational64`, and typed error enums.
+  - Verified 100% pass across 20 unit and property-based fuzz tests; verified layer compliance.
+- [ ] **M1: Ingestion, Demuxers & Probing Engine (Active)**
   - Fast format probers for ISO BMFF, Matroska, MXF, WAV, AIFF, EXR, glTF, USD.
   - Bounded packet stream extractors and keyframe indexers.
 - [ ] **M2: Core Transcoding Pipelines & Native Codecs**
