@@ -171,8 +171,111 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
                 duration_seconds: None,
             });
         }
+        ContainerKind::IsoBmffMp4 | ContainerKind::QuickTimeMov => {
+            if let Ok(mp4) = craft_media::isobmff::open(bytes) {
+                let dur = if mp4.timescale > 0 { Some(mp4.duration as f64 / mp4.timescale as f64) } else { None };
+                duration_seconds = dur;
+
+                for (idx, track) in mp4.tracks.iter().enumerate() {
+                    match track.kind {
+                        craft_media::isobmff::TrackKind::Video => {
+                            if let Some(v) = track.video()
+                                && let Ok(dims) = Dimensions::new(v.width as u32, v.height as u32)
+                            {
+                                let codec_str = track.codec().map(|c| c.name().to_string()).unwrap_or_else(|| "video".to_string());
+                                let bit_depth = if v.depth > 0 { (v.depth & 0xFF) as u8 } else { 8 };
+                                video_streams.push(VideoStreamInfo {
+                                    stream_index: idx,
+                                    codec_name: codec_str,
+                                    dimensions: dims,
+                                    pixel_format: PixelFormat::Yuv420p,
+                                    color_space: ColorSpaceTag::REC709,
+                                    frame_rate: Rational64::new(track.timescale as i64, 1).unwrap_or(Rational64::FPS_24),
+                                    bit_depth,
+                                    duration_seconds: dur,
+                                });
+                            }
+                        }
+                        craft_media::isobmff::TrackKind::Audio => {
+                            if let Some(a) = track.audio() {
+                                let layout = match a.channels {
+                                    1 => ChannelLayout::Mono,
+                                    2 => ChannelLayout::Stereo,
+                                    6 => ChannelLayout::Surround51,
+                                    8 => ChannelLayout::Surround71,
+                                    _ => ChannelLayout::Stereo,
+                                };
+                                let codec_str = track.codec().map(|c| c.name().to_string()).unwrap_or_else(|| "audio".to_string());
+                                audio_streams.push(AudioStreamInfo {
+                                    stream_index: idx,
+                                    codec_name: codec_str,
+                                    sample_rate: a.sample_rate as u32,
+                                    channels: a.channels as u16,
+                                    layout,
+                                    bits_per_sample: a.sample_size,
+                                    duration_seconds: dur,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                metadata.insert("container".into(), container.display_name().into());
+            }
+        }
+        ContainerKind::Matroska | ContainerKind::WebM => {
+            if let Ok(mkv) = craft_media::matroska::open(bytes) {
+                let dur = mkv.duration_ns().map(|ns| ns as f64 / 1_000_000_000.0);
+                duration_seconds = dur;
+
+                for (idx, track) in mkv.tracks.iter().enumerate() {
+                    match track.kind {
+                        craft_media::matroska::TrackKind::Video => {
+                            if let Some(v) = &track.video
+                                && let Ok(dims) = Dimensions::new(v.pixel_width, v.pixel_height)
+                            {
+                                video_streams.push(VideoStreamInfo {
+                                    stream_index: idx,
+                                    codec_name: format!("{:?}", track.codec),
+                                    dimensions: dims,
+                                    pixel_format: PixelFormat::Yuv420p,
+                                    color_space: ColorSpaceTag::REC709,
+                                    frame_rate: Rational64::FPS_24,
+                                    bit_depth: 8,
+                                    duration_seconds: dur,
+                                });
+                            }
+                        }
+                        craft_media::matroska::TrackKind::Audio => {
+                            if let Some(a) = &track.audio {
+                                let layout = match a.channels {
+                                    1 => ChannelLayout::Mono,
+                                    2 => ChannelLayout::Stereo,
+                                    6 => ChannelLayout::Surround51,
+                                    8 => ChannelLayout::Surround71,
+                                    _ => ChannelLayout::Stereo,
+                                };
+                                audio_streams.push(AudioStreamInfo {
+                                    stream_index: idx,
+                                    codec_name: format!("{:?}", track.codec),
+                                    sample_rate: a.sampling_frequency as u32,
+                                    channels: a.channels as u16,
+                                    layout,
+                                    bits_per_sample: a.bit_depth.unwrap_or(16) as u16,
+                                    duration_seconds: dur,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                metadata.insert("container".into(), container.display_name().into());
+            }
+        }
         _ => {
-            // For other formats (MP4, MKV, glTF, USD), record the detected container
+            // For other formats (glTF, USD, etc.), record the detected container
             metadata.insert("container".into(), container.display_name().into());
         }
     }
@@ -194,6 +297,86 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
 
     let mut info = probe_bytes(&header_buf)?;
     info.file_size_bytes = file_size;
+
+    // If streams were not found in the initial header chunk (e.g. `moov` at file end), open full file source
+    if info.video_streams.is_empty() && info.audio_streams.is_empty() {
+        if matches!(info.container, ContainerKind::IsoBmffMp4 | ContainerKind::QuickTimeMov)
+            && let Ok(file_handle) = File::open(path)
+            && let Ok(mp4) = craft_media::isobmff::open(file_handle)
+        {
+            let dur = if mp4.timescale > 0 { Some(mp4.duration as f64 / mp4.timescale as f64) } else { None };
+            info.duration_seconds = dur;
+            for (idx, track) in mp4.tracks.iter().enumerate() {
+                if let Some(v) = track.video()
+                    && let Ok(dims) = Dimensions::new(v.width as u32, v.height as u32)
+                {
+                    let codec_str = track.codec().map(|c| c.name().to_string()).unwrap_or_else(|| "video".to_string());
+                    let bit_depth = if v.depth > 0 { (v.depth & 0xFF) as u8 } else { 8 };
+                    info.video_streams.push(VideoStreamInfo {
+                        stream_index: idx,
+                        codec_name: codec_str,
+                        dimensions: dims,
+                        pixel_format: PixelFormat::Yuv420p,
+                        color_space: ColorSpaceTag::REC709,
+                        frame_rate: Rational64::new(track.timescale as i64, 1).unwrap_or(Rational64::FPS_24),
+                        bit_depth,
+                        duration_seconds: dur,
+                    });
+                } else if let Some(a) = track.audio() {
+                    let layout = match a.channels {
+                        1 => ChannelLayout::Mono,
+                        2 => ChannelLayout::Stereo,
+                        6 => ChannelLayout::Surround51,
+                        8 => ChannelLayout::Surround71,
+                        _ => ChannelLayout::Stereo,
+                    };
+                    let codec_str = track.codec().map(|c| c.name().to_string()).unwrap_or_else(|| "audio".to_string());
+                    info.audio_streams.push(AudioStreamInfo {
+                        stream_index: idx,
+                        codec_name: codec_str,
+                        sample_rate: a.sample_rate as u32,
+                        channels: a.channels as u16,
+                        layout,
+                        bits_per_sample: a.sample_size,
+                        duration_seconds: dur,
+                    });
+                }
+            }
+        } else if matches!(info.container, ContainerKind::Matroska | ContainerKind::WebM)
+            && let Ok(file_handle) = File::open(path)
+            && let Ok(mkv) = craft_media::matroska::open(file_handle)
+        {
+            let dur = mkv.duration_ns().map(|ns| ns as f64 / 1_000_000_000.0);
+            info.duration_seconds = dur;
+            for (idx, track) in mkv.tracks.iter().enumerate() {
+                if let Some(v) = &track.video
+                    && let Ok(dims) = Dimensions::new(v.pixel_width, v.pixel_height)
+                {
+                    info.video_streams.push(VideoStreamInfo {
+                        stream_index: idx,
+                        codec_name: format!("{:?}", track.codec),
+                        dimensions: dims,
+                        pixel_format: PixelFormat::Yuv420p,
+                        color_space: ColorSpaceTag::REC709,
+                        frame_rate: Rational64::FPS_24,
+                        bit_depth: 8,
+                        duration_seconds: dur,
+                    });
+                } else if let Some(a) = &track.audio {
+                    let layout = if a.channels == 1 { ChannelLayout::Mono } else { ChannelLayout::Stereo };
+                    info.audio_streams.push(AudioStreamInfo {
+                        stream_index: idx,
+                        codec_name: format!("{:?}", track.codec),
+                        sample_rate: a.sampling_frequency as u32,
+                        channels: a.channels as u16,
+                        layout,
+                        bits_per_sample: a.bit_depth.unwrap_or(16) as u16,
+                        duration_seconds: dur,
+                    });
+                }
+            }
+        }
+    }
 
     Ok(info)
 }
