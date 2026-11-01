@@ -203,6 +203,35 @@ flowchart LR
 
 ---
 
+### Milestone 7: Sibling Codec & Upstream Reuse Integration
+**Focus:** Connect local pure-Rust exporters from sibling ArtCraft repositories directly into the encoding pipeline, eliminating redundant code.
+
+#### Deliverables:
+1. **Local Sibling Path Integration:**
+   - Updated root `Cargo.toml` workspace dependencies to link directly to local sibling paths (`../filmcraft`, `../effectcraft`, `../soundcraft`, `../craft-libs`).
+   - Configured `[patch."https://github.com/storytold/craft-libs"]` redirecting transitive git dependencies to local working copies.
+2. **Video Codecs Wiring (`crates/video-codecs`):**
+   - Implemented wrappers implementing `VideoEncoder`:
+     - `H264EncoderWrapper` -> `filmcraft-h264enc::Encoder`
+     - `ProResEncoderWrapper` -> `filmcraft-prores::Encoder`
+     - `HevcEncoderWrapper` -> `effectcraft-hevcenc::Encoder`
+     - `Av1EncoderWrapper` -> `effectcraft-av1enc::Encoder`
+     - `Vp9EncoderWrapper` -> `effectcraft-vp9enc::Vp9Encoder`
+   - Added `crates/video-codecs/src/yuv.rs` providing safe, zero-panic conversion from RGB/RGBA frames to planar YUV 4:2:0 and 4:2:2.
+   - Updated `create_video_encoder` dispatcher factory to route to all 7 native codecs.
+3. **Audio DSP & Codec Wiring (`crates/audio-dsp`):**
+   - Implemented `AacEncoderWrapper` -> `filmcraft-aac::Encoder` (CBR AAC-LC with AudioSpecificConfig generation).
+   - Implemented `crates/audio-dsp/src/io.rs` -> `soundcraft-audio-io` (universal audio decode for MP3/FLAC/Ogg/AAC/CAF, and native FLAC & AIFF encoding).
+4. **End-to-End Pipeline Expansion (`crates/pipeline`):**
+   - Added FLAC and AIFF target execution paths.
+   - Dynamic codec routing based on preset names and target containers in MP4/MOV multiplexing.
+
+#### Verification Gate:
+- `cargo xtask ci` passes 100% with 94 automated tests, zero clippy warnings, and zero layer violations.
+- End-to-end integration tests verify real frame encoding across H.264, ProRes, HEVC, AV1, VP9, AAC, FLAC, and AIFF.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |
