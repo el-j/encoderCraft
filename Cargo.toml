@@ -1,0 +1,100 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+default-members = ["crates/*", "apps/encodercraft", "apps/encodercraft-cli", "xtask"]
+
+[workspace.package]
+name = "encodercraft"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/el-j/encodercraft"
+authors = ["el-j", "ArtCraft Contributors"]
+
+[workspace.dependencies]
+# Upstream shared ArtCraft libraries (craft-libs)
+craft-media = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["isobmff", "matroska"] }
+craft-cms = { git = "https://github.com/storytold/craft-libs" }
+craft-jpeg = { git = "https://github.com/storytold/craft-libs" }
+craft-crw = { git = "https://github.com/storytold/craft-libs" }
+craft-i18n = { git = "https://github.com/storytold/craft-libs" }
+craft-keymap = { git = "https://github.com/storytold/craft-libs", features = ["egui", "ui"] }
+craft-update = { git = "https://github.com/storytold/craft-libs", features = ["egui"] }
+
+# Sibling Craft app codecs (pinned git dependencies)
+filmcraft-h264enc = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-prores = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-dnx = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-apv = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-mxf = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-aac = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-captions = { git = "https://github.com/storytold/filmcraft" }
+effectcraft-hevcenc = { git = "https://github.com/storytold/effectcraft" }
+effectcraft-av1enc = { git = "https://github.com/storytold/effectcraft" }
+effectcraft-vp9enc = { git = "https://github.com/storytold/effectcraft" }
+effectcraft-opusenc = { git = "https://github.com/storytold/effectcraft" }
+effectcraft-lottie = { git = "https://github.com/storytold/effectcraft" }
+soundcraft-audio-io = { git = "https://github.com/storytold/soundcraft" }
+photocraft-codecs = { git = "https://github.com/storytold/photocraft" }
+texturecraft-formats = { git = "https://github.com/storytold/texturecraft" }
+
+# Internal workspace crates (encodercraft-*)
+encodercraft-core = { path = "crates/core" }
+encodercraft-geom = { path = "crates/geom" }
+encodercraft-color = { path = "crates/color" }
+encodercraft-demux = { path = "crates/demux" }
+encodercraft-video-codecs = { path = "crates/video-codecs" }
+encodercraft-audio-dsp = { path = "crates/audio-dsp" }
+encodercraft-image-codecs = { path = "crates/image-codecs" }
+encodercraft-spatial-io = { path = "crates/spatial-io" }
+encodercraft-muxers = { path = "crates/muxers" }
+encodercraft-platform = { path = "crates/platform" }
+encodercraft-pipeline = { path = "crates/pipeline" }
+encodercraft-presets = { path = "crates/presets" }
+encodercraft-watch = { path = "crates/watch" }
+encodercraft-ipc = { path = "crates/ipc" }
+encodercraft-engine = { path = "crates/engine" }
+encodercraft-ui-egui = { path = "crates/ui-egui" }
+encodercraft-mcp = { path = "crates/mcp" }
+craft-dispatch = { path = "crates/dispatch" }
+
+# Foundations & utilities
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+rayon = "1"
+crossbeam-channel = "0.5"
+notify = "8"
+kurbo = { version = "0.13", features = ["serde"] }
+bytemuck = "1"
+log = "0.4"
+env_logger = "0.11"
+proptest = "1"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+todo = "warn"
+type_complexity = "allow"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = 0

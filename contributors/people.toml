@@ -1,0 +1,12 @@
+# Contributor names for the About window.
+#
+# Everyone who contributes is credited by GitHub username automatically.
+# Copy this block, replacing your-github-username (every field is optional):
+#
+#   [people.your-github-username]
+#   real_name = "Your Name"        # shown when the viewer picks "Real name"
+#   display_name = "Nickname"      # shown when the viewer picks "Display name"
+#   sync_github_name = true        # or: use the name on your public GitHub profile as display name
+
+[people.el-j]
+sync_github_name = true
