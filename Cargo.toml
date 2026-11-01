@@ -13,9 +13,13 @@ members = [
     "crates/pipeline",
     "crates/presets",
     "crates/watch",
+    "crates/ipc",
     "crates/engine",
     "crates/ui-egui",
+    "crates/mcp",
+    "crates/dispatch",
     "apps/encodercraft",
+    "apps/encodercraft-cli",
     "xtask",
 ]
 default-members = [
@@ -31,9 +35,13 @@ default-members = [
     "crates/pipeline",
     "crates/presets",
     "crates/watch",
+    "crates/ipc",
     "crates/engine",
     "crates/ui-egui",
+    "crates/mcp",
+    "crates/dispatch",
     "apps/encodercraft",
+    "apps/encodercraft-cli",
     "xtask",
 ]
 
@@ -90,6 +98,7 @@ encodercraft-ipc = { path = "crates/ipc" }
 encodercraft-engine = { path = "crates/engine" }
 encodercraft-ui-egui = { path = "crates/ui-egui" }
 encodercraft-mcp = { path = "crates/mcp" }
+encodercraft-dispatch = { path = "crates/dispatch" }
 craft-dispatch = { path = "crates/dispatch" }
 
 # Foundations & utilities

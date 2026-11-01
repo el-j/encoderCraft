@@ -1,0 +1,25 @@
+[package]
+name = "encodercraft-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+encodercraft-core = { workspace = true }
+encodercraft-demux = { workspace = true }
+encodercraft-pipeline = { workspace = true }
+encodercraft-presets = { workspace = true }
+encodercraft-watch = { workspace = true }
+encodercraft-engine = { workspace = true }
+encodercraft-ipc = { workspace = true }
+encodercraft-dispatch = { workspace = true }
+encodercraft-mcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }

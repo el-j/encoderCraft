@@ -715,6 +715,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "encodercraft-cli"
+version = "0.1.0"
+dependencies = [
+ "encodercraft-core",
+ "encodercraft-demux",
+ "encodercraft-dispatch",
+ "encodercraft-engine",
+ "encodercraft-ipc",
+ "encodercraft-mcp",
+ "encodercraft-pipeline",
+ "encodercraft-presets",
+ "encodercraft-watch",
+ "env_logger",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "encodercraft-color"
 version = "0.1.0"
 dependencies = [
@@ -753,6 +772,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "encodercraft-dispatch"
+version = "0.1.0"
+dependencies = [
+ "encodercraft-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "encodercraft-engine"
 version = "0.1.0"
 dependencies = [
@@ -786,6 +816,34 @@ dependencies = [
  "miniz_oxide 0.8.9",
  "proptest",
  "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "encodercraft-ipc"
+version = "0.1.0"
+dependencies = [
+ "encodercraft-core",
+ "encodercraft-dispatch",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "encodercraft-mcp"
+version = "0.1.0"
+dependencies = [
+ "encodercraft-core",
+ "encodercraft-demux",
+ "encodercraft-engine",
+ "encodercraft-presets",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
