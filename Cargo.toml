@@ -55,30 +55,23 @@ authors = ["el-j", "ArtCraft Contributors"]
 
 [workspace.dependencies]
 # Upstream shared ArtCraft libraries (craft-libs)
-craft-media = { path = "../craft-libs/crates/media", default-features = false, features = ["isobmff", "matroska"] }
-craft-cms = { git = "https://github.com/storytold/craft-libs" }
-craft-jpeg = { git = "https://github.com/storytold/craft-libs" }
-craft-crw = { git = "https://github.com/storytold/craft-libs" }
-craft-i18n = { git = "https://github.com/storytold/craft-libs" }
-craft-keymap = { git = "https://github.com/storytold/craft-libs", features = ["egui", "ui"] }
-craft-update = { git = "https://github.com/storytold/craft-libs", features = ["egui"] }
+craft-media = { path = "../craft-libs/crates/media", default-features = false, features = ["isobmff", "matroska", "bitstream"] }
+craft-cms = { path = "../craft-libs/crates/cms" }
+craft-jpeg = { path = "../craft-libs/crates/jpeg" }
+craft-crw = { path = "../craft-libs/crates/crw" }
+craft-i18n = { path = "../craft-libs/crates/i18n" }
+craft-keymap = { path = "../craft-libs/crates/keymap", features = ["egui", "ui"] }
+craft-update = { path = "../craft-libs/crates/update", features = ["egui"] }
 
-# Sibling Craft app codecs (pinned git dependencies)
-filmcraft-h264enc = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-prores = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-dnx = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-apv = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-mxf = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-aac = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-captions = { git = "https://github.com/storytold/filmcraft" }
-effectcraft-hevcenc = { git = "https://github.com/storytold/effectcraft" }
-effectcraft-av1enc = { git = "https://github.com/storytold/effectcraft" }
-effectcraft-vp9enc = { git = "https://github.com/storytold/effectcraft" }
-effectcraft-opusenc = { git = "https://github.com/storytold/effectcraft" }
-effectcraft-lottie = { git = "https://github.com/storytold/effectcraft" }
-soundcraft-audio-io = { git = "https://github.com/storytold/soundcraft" }
-photocraft-codecs = { git = "https://github.com/storytold/photocraft" }
-texturecraft-formats = { git = "https://github.com/storytold/texturecraft" }
+# Sibling Craft app codecs (path dependencies)
+filmcraft-bitstream = { path = "../filmcraft/crates/bitstream" }
+filmcraft-h264enc = { path = "../filmcraft/crates/h264enc" }
+filmcraft-prores = { path = "../filmcraft/crates/prores" }
+filmcraft-aac = { path = "../filmcraft/crates/aac" }
+effectcraft-hevcenc = { path = "../effectcraft/crates/hevcenc" }
+effectcraft-av1enc = { path = "../effectcraft/crates/av1enc" }
+effectcraft-vp9enc = { path = "../effectcraft/crates/vp9enc" }
+soundcraft-audio-io = { path = "../soundcraft/crates/audio-io" }
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }
@@ -143,3 +136,9 @@ opt-level = 3
 lto = "thin"
 codegen-units = 16
 debug = 0
+
+[patch."https://github.com/storytold/craft-libs"]
+craft-media = { path = "../craft-libs/crates/media" }
+craft-docpath = { path = "../craft-libs/crates/docpath" }
+craft-ui = { path = "../craft-libs/crates/ui" }
+

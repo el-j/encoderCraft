@@ -4,9 +4,14 @@
 
 use encodercraft_core::{EncoderError, Rational64};
 
+use crate::av1::Av1EncoderWrapper;
 use crate::encoder::VideoEncoder;
 use crate::gif::GifEncoder;
+use crate::h264::H264EncoderWrapper;
+use crate::hevc::HevcEncoderWrapper;
 use crate::mjpeg::MjpegEncoder;
+use crate::prores::ProResEncoderWrapper;
+use crate::vp9::Vp9EncoderWrapper;
 
 /// Identifies supported video encoding engines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,21 +64,35 @@ pub fn create_video_encoder(
     width: u32,
     height: u32,
     fps: Rational64,
-    _bitrate_kbps: Option<u32>,
+    bitrate_kbps: Option<u32>,
 ) -> Result<Box<dyn VideoEncoder + Send>, EncoderError> {
     match kind {
+        VideoCodecKind::H264 => {
+            let enc = H264EncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::Hevc => {
+            let enc = HevcEncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::ProRes => {
+            let enc = ProResEncoderWrapper::new(width, height, fps)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::Av1 => {
+            let enc = Av1EncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::Vp9 => {
+            let enc = Vp9EncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            Ok(Box::new(enc))
+        }
         VideoCodecKind::Gif => {
             let fps_val = if fps.num > 0 && fps.den > 0 { (fps.num / fps.den) as u32 } else { 10 };
             let enc = GifEncoder::new(width as u16, height as u16, fps_val)?;
             Ok(Box::new(enc))
         }
-        VideoCodecKind::Mjpeg => {
-            let enc = MjpegEncoder::new(85);
-            Ok(Box::new(enc))
-        }
-        _ => {
-            // Sibling codecs (H264, ProRes, DNx, HEVC, AV1, VP9)
-            // Fall back to compliant MJPEG or stub for testing until full pipeline linkage
+        VideoCodecKind::Mjpeg | VideoCodecKind::DnxHd => {
             let enc = MjpegEncoder::new(85);
             Ok(Box::new(enc))
         }
@@ -96,7 +115,22 @@ mod tests {
 
     #[test]
     fn test_encoder_creation() {
-        let enc = create_video_encoder(VideoCodecKind::Mjpeg, 1920, 1080, Rational64::FPS_24, Some(5000));
-        assert!(enc.is_ok());
+        let enc_mjpeg = create_video_encoder(VideoCodecKind::Mjpeg, 1920, 1080, Rational64::FPS_24, Some(5000));
+        assert!(enc_mjpeg.is_ok());
+
+        let enc_h264 = create_video_encoder(VideoCodecKind::H264, 1280, 720, Rational64::FPS_30, Some(4000));
+        assert!(enc_h264.is_ok());
+
+        let enc_prores = create_video_encoder(VideoCodecKind::ProRes, 1920, 1080, Rational64::FPS_24, None);
+        assert!(enc_prores.is_ok());
+
+        let enc_hevc = create_video_encoder(VideoCodecKind::Hevc, 1280, 720, Rational64::FPS_30, Some(2000));
+        assert!(enc_hevc.is_ok());
+
+        let enc_av1 = create_video_encoder(VideoCodecKind::Av1, 1280, 720, Rational64::FPS_30, Some(1500));
+        assert!(enc_av1.is_ok());
+
+        let enc_vp9 = create_video_encoder(VideoCodecKind::Vp9, 1280, 720, Rational64::FPS_30, Some(1500));
+        assert!(enc_vp9.is_ok());
     }
 }

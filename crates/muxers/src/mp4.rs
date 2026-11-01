@@ -5,7 +5,9 @@
 
 use std::io::{Read, Seek, Write};
 
-use craft_media::isobmff::{AudioParams, Brand, CodecConfig, FourCc, Mp4Writer, SampleEntry, TrackConfig, VideoParams, WriteSample, WriterOptions};
+use craft_media::isobmff::{
+    AacConfig, AudioParams, Brand, CodecConfig, FourCc, Mp4Writer, SampleEntry, TrackConfig, VideoParams, WriteSample, WriterOptions,
+};
 use encodercraft_core::EncoderError;
 
 use crate::muxer::{AudioSample, AudioStreamConfig, VideoSample, VideoStreamConfig};
@@ -57,7 +59,10 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
         let writer = self.writer.as_mut().ok_or_else(|| EncoderError::Internal("mp4 writer already finished".into()))?;
 
         let fourcc = FourCc::new(&cfg.codec_fourcc);
-        let codec_config = CodecConfig::Unknown { fourcc, raw: cfg.codec_private.clone() };
+        let codec_config = match &cfg.codec_fourcc {
+            b"mp4a" => CodecConfig::Aac(AacConfig::from_asc(cfg.codec_private.clone())),
+            _ => CodecConfig::Unknown { fourcc, raw: cfg.codec_private.clone() },
+        };
 
         let audio_params = AudioParams {
             qt_version: 0,

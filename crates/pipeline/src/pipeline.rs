@@ -58,10 +58,52 @@ impl TranscodePipeline {
 
         match target.container {
             ContainerType::Wave => self.execute_audio_wav(target, start_time),
+            ContainerType::Flac => self.execute_audio_flac(target, start_time),
+            ContainerType::Aiff => self.execute_audio_aiff(target, start_time),
             ContainerType::IsoBmffMp4 => self.execute_video_mp4(target, false, start_time),
             ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time),
             _ => Err(EncoderError::UnsupportedCodec(format!("unsupported target container: {:?}", target.container))),
         }
+    }
+
+    fn execute_audio_flac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let sample_rate = 48000;
+        let mut sample_buf =
+            encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
+
+        sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
+
+        if let Some(target_lufs) = target.target_lufs {
+            let _ = normalize_loudness(&mut sample_buf, target_lufs as f64, -1.0)?;
+        }
+
+        let flac_bytes = encodercraft_audio_dsp::encode_audio_flac(&sample_buf)?;
+        std::fs::write(&target.output_path, flac_bytes).map_err(|e| EncoderError::Io(format!("failed to write FLAC file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
+    }
+
+    fn execute_audio_aiff(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let sample_rate = 48000;
+        let mut sample_buf =
+            encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
+
+        sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
+
+        if let Some(target_lufs) = target.target_lufs {
+            let _ = normalize_loudness(&mut sample_buf, target_lufs as f64, -1.0)?;
+        }
+
+        let aiff_bytes = encodercraft_audio_dsp::encode_audio_aiff(&sample_buf)?;
+        std::fs::write(&target.output_path, aiff_bytes).map_err(|e| EncoderError::Io(format!("failed to write AIFF file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
     }
 
     fn execute_audio_wav(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
@@ -107,7 +149,18 @@ impl TranscodePipeline {
         let dims = Dimensions::new(w, h)?;
         let fps = target.custom_frame_rate.unwrap_or(Rational64::FPS_24);
 
-        let codec_kind = VideoCodecKind::H264;
+        let lower_preset = target.preset_name.to_ascii_lowercase();
+        let codec_kind = if is_mov && lower_preset.contains("prores") {
+            VideoCodecKind::ProRes
+        } else if lower_preset.contains("hevc") || lower_preset.contains("h265") {
+            VideoCodecKind::Hevc
+        } else if lower_preset.contains("av1") {
+            VideoCodecKind::Av1
+        } else if lower_preset.contains("vp9") {
+            VideoCodecKind::Vp9
+        } else {
+            VideoCodecKind::H264
+        };
 
         let v_cfg = VideoStreamConfig {
             codec_fourcc: codec_kind.default_fourcc(),
@@ -213,6 +266,84 @@ mod tests {
                 custom_height: Some(720),
                 custom_frame_rate: Some(Rational64::FPS_24),
                 target_bitrate_kbps: Some(4000),
+                target_lufs: None,
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+        assert!(target_file.exists());
+        assert!(target_file.metadata().unwrap().len() > 100);
+    }
+
+    #[test]
+    fn test_execute_flac_and_aiff_transcode() {
+        let dir = tempdir().unwrap();
+        let flac_file = dir.path().join("output.flac");
+        let aiff_file = dir.path().join("output.aif");
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-lossless-audio-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_flac".into(),
+                    output_path: flac_file.clone(),
+                    preset_name: "FLAC Master".into(),
+                    container: ContainerType::Flac,
+                    custom_width: None,
+                    custom_height: None,
+                    custom_frame_rate: None,
+                    target_bitrate_kbps: None,
+                    target_lufs: Some(-16.0),
+                },
+                OutputTarget {
+                    target_id: "t_aiff".into(),
+                    output_path: aiff_file.clone(),
+                    preset_name: "AIFF Master".into(),
+                    container: ContainerType::Aiff,
+                    custom_width: None,
+                    custom_height: None,
+                    custom_frame_rate: None,
+                    target_bitrate_kbps: None,
+                    target_lufs: None,
+                },
+            ],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+        assert!(flac_file.exists());
+        assert!(flac_file.metadata().unwrap().len() > 50);
+        assert!(aiff_file.exists());
+        assert!(aiff_file.metadata().unwrap().len() > 50);
+    }
+
+    #[test]
+    fn test_execute_prores_mov_transcode() {
+        let dir = tempdir().unwrap();
+        let target_file = dir.path().join("output.mov");
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-prores-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: target_file.clone(),
+                preset_name: "Apple ProRes 422".into(),
+                container: ContainerType::QuickTimeMov,
+                custom_width: Some(640),
+                custom_height: Some(360),
+                custom_frame_rate: Some(Rational64::FPS_24),
+                target_bitrate_kbps: None,
                 target_lufs: None,
             }],
         };
