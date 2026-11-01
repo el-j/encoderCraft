@@ -47,6 +47,7 @@ pub fn evaluate_preset(preset: &EncodingPreset, source: &MediaInfo, output_path:
         custom_frame_rate,
         target_bitrate_kbps,
         target_lufs,
+        ..Default::default()
     })
 }
 

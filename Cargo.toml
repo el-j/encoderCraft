@@ -98,7 +98,7 @@ craft-dispatch = { path = "crates/dispatch" }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 rayon = "1"
 crossbeam-channel = "0.5"
 notify = "8"

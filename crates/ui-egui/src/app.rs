@@ -182,6 +182,7 @@ impl EncoderCraftApp {
                 custom_frame_rate: None,
                 target_bitrate_kbps: Some(16000),
                 target_lufs: Some(-14.0),
+                ..Default::default()
             }],
         };
         let _ = self.queue_mgr.submit_job(spec);

@@ -168,6 +168,7 @@ mod tests {
                 custom_frame_rate: None,
                 target_bitrate_kbps: None,
                 target_lufs: None,
+                ..Default::default()
             }],
         };
 

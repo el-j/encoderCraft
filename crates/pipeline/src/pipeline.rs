@@ -180,13 +180,31 @@ impl TranscodePipeline {
 
         let scaler = FrameScaler::new(ScaleMode::Fit);
 
+        let lut = if let Some(ref lut_path) = target.lut_path {
+            let content = std::fs::read_to_string(lut_path).map_err(|e| EncoderError::Io(format!("failed to read LUT file: {e}")))?;
+            Some(crate::lut::Lut3D::parse_cube(&content)?)
+        } else {
+            None
+        };
+
+        let tc_overlay = if target.burn_timecode { Some(crate::overlay::TimecodeOverlay::default()) } else { None };
+
         for f in 0..total_frames {
             if self.progress.is_cancelled() {
                 return Err(EncoderError::Internal("job cancelled by user".into()));
             }
 
             let frame = encodercraft_core::VideoFrame::new_allocated(dims, PixelFormat::Rgb8, ColorSpaceTag::SRGB, f as i64, 1, fps)?;
-            let scaled_frame = scaler.scale(&frame, dims)?;
+            let mut scaled_frame = scaler.scale(&frame, dims)?;
+
+            if let Some(ref l) = lut {
+                l.apply_to_frame(&mut scaled_frame)?;
+            }
+
+            if let Some(ref tc) = tc_overlay {
+                let timecode = encodercraft_core::MediaTimecode::new(0, 0, (f / 24) as u8, (f % 24) as u8, false, fps);
+                tc.draw(&mut scaled_frame, &timecode)?;
+            }
 
             let packets = encoder.encode_frame(&scaled_frame)?;
             for pkt in packets {
@@ -236,6 +254,7 @@ mod tests {
                 custom_frame_rate: None,
                 target_bitrate_kbps: None,
                 target_lufs: Some(-23.0),
+                ..Default::default()
             }],
         };
 
@@ -267,6 +286,7 @@ mod tests {
                 custom_frame_rate: Some(Rational64::FPS_24),
                 target_bitrate_kbps: Some(4000),
                 target_lufs: None,
+                ..Default::default()
             }],
         };
 
@@ -300,6 +320,7 @@ mod tests {
                     custom_frame_rate: None,
                     target_bitrate_kbps: None,
                     target_lufs: Some(-16.0),
+                    ..Default::default()
                 },
                 OutputTarget {
                     target_id: "t_aiff".into(),
@@ -311,6 +332,7 @@ mod tests {
                     custom_frame_rate: None,
                     target_bitrate_kbps: None,
                     target_lufs: None,
+                    ..Default::default()
                 },
             ],
         };
@@ -345,6 +367,7 @@ mod tests {
                 custom_frame_rate: Some(Rational64::FPS_24),
                 target_bitrate_kbps: None,
                 target_lufs: None,
+                ..Default::default()
             }],
         };
 

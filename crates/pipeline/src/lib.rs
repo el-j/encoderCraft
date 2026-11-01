@@ -7,11 +7,17 @@
 #![forbid(unsafe_code)]
 
 pub mod channel_buffer;
+pub mod lut;
+pub mod naming;
+pub mod overlay;
 pub mod pipeline;
 pub mod progress;
 pub mod scale;
 
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
+pub use lut::Lut3D;
+pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output_path};
+pub use overlay::{OverlayPosition, TimecodeOverlay, WatermarkOverlay};
 pub use pipeline::TranscodePipeline;
 pub use progress::JobProgress;
 pub use scale::FrameScaler;

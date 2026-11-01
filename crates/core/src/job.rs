@@ -109,6 +109,28 @@ pub struct OutputTarget {
     pub target_bitrate_kbps: Option<u32>,
     #[serde(default)]
     pub target_lufs: Option<f32>,
+    #[serde(default)]
+    pub lut_path: Option<PathBuf>,
+    #[serde(default)]
+    pub burn_timecode: bool,
+}
+
+impl Default for OutputTarget {
+    fn default() -> Self {
+        Self {
+            target_id: String::new(),
+            output_path: PathBuf::new(),
+            preset_name: String::new(),
+            container: ContainerType::IsoBmffMp4,
+            custom_width: None,
+            custom_height: None,
+            custom_frame_rate: None,
+            target_bitrate_kbps: None,
+            target_lufs: None,
+            lut_path: None,
+            burn_timecode: false,
+        }
+    }
 }
 
 /// Complete, self-contained transcode job specification.
@@ -185,6 +207,8 @@ mod tests {
                 custom_frame_rate: Some(Rational64::FPS_60),
                 target_bitrate_kbps: Some(45000),
                 target_lufs: Some(-14.0),
+                lut_path: None,
+                burn_timecode: false,
             }],
         };
 
