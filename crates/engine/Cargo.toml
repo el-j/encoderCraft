@@ -1,0 +1,24 @@
+[package]
+name = "encodercraft-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+encodercraft-core = { workspace = true }
+encodercraft-geom = { workspace = true }
+encodercraft-color = { workspace = true }
+encodercraft-demux = { workspace = true }
+encodercraft-pipeline = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
