@@ -24,7 +24,7 @@ pub fn render_preset_browser(
     state: &mut PresetBrowserState,
     registry: &Arc<Mutex<PresetRegistry>>,
     queue_mgr: &Arc<QueueManager>,
-    selected_job_id: Option<&str>,
+    selected_job_ids: &[String],
     tokens: &Tokens,
 ) {
     ui.vertical(|ui| {
@@ -93,7 +93,7 @@ pub fn render_preset_browser(
                     }
                     if label.double_clicked() {
                         state.selected_preset = Some(preset.clone());
-                        if let Some(job_id) = selected_job_id {
+                        for job_id in selected_job_ids {
                             apply_preset_to_job(job_id, &preset, queue_mgr);
                         }
                     }
@@ -134,26 +134,30 @@ pub fn render_preset_browser(
 
                     ui.add_space(4.0);
 
-                    // Apply to selected job buttons
-                    let has_job = selected_job_id.is_some();
-                    ui.horizontal(|ui| {
-                        let apply_btn = ui
-                            .add_enabled(has_job, egui::Button::new(format!("{} Apply to Job", icons::STATUS_OK)))
-                            .on_hover_text("Replace target preset on selected job");
+                    // Apply to selected job buttons (batch support)
+                    let has_jobs = !selected_job_ids.is_empty();
+                    let count = selected_job_ids.len();
+                    let apply_text =
+                        if count > 1 { format!("{} Apply to {count} Jobs", icons::STATUS_OK) } else { format!("{} Apply to Job", icons::STATUS_OK) };
+                    let add_target_text = if count > 1 { format!("+ Add as Output to {count} Jobs") } else { "+ Add as Output".into() };
 
-                        if apply_btn.clicked()
-                            && let Some(job_id) = selected_job_id
-                        {
-                            apply_preset_to_job(job_id, preset, queue_mgr);
+                    ui.horizontal(|ui| {
+                        let apply_btn =
+                            ui.add_enabled(has_jobs, egui::Button::new(apply_text)).on_hover_text("Replace target preset on selected job(s)");
+
+                        if apply_btn.clicked() {
+                            for job_id in selected_job_ids {
+                                apply_preset_to_job(job_id, preset, queue_mgr);
+                            }
                         }
 
                         let add_target_btn = ui
-                            .add_enabled(has_job, egui::Button::new("+ Add as Output"))
-                            .on_hover_text("Add this preset as an additional output target on selected job");
-                        if add_target_btn.clicked()
-                            && let Some(job_id) = selected_job_id
-                        {
-                            add_preset_target_to_job(job_id, preset, queue_mgr);
+                            .add_enabled(has_jobs, egui::Button::new(add_target_text))
+                            .on_hover_text("Add this preset as an additional output target on selected job(s)");
+                        if add_target_btn.clicked() {
+                            for job_id in selected_job_ids {
+                                add_preset_target_to_job(job_id, preset, queue_mgr);
+                            }
                         }
                     });
                 });

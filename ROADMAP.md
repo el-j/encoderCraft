@@ -24,7 +24,7 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
 | **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
 | **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **120 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Automated Tests** | **>80 tests** | **124 passed** | Unit, fuzz, and integration tests across L0-L7. |
 | **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
@@ -118,3 +118,12 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Enhanced egui Export Settings Inspector: added hardware acceleration toggle, multichannel audio stems selector, and full XMP Dublin Core metadata editor with sidecar options.
   - Enhanced CLI (`apps/encodercraft-cli`): added `--stems`, `--hardware`, `--xmp-title`, `--xmp-creator`, `--sidecar-xmp`, and `--caption` flags.
   - Verified 100% layer compliance and test suite (120 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).
+- [x] **M10: Batch Operations, Multi-Selection, Dedicated Watch Folders & Native Pickers (2026-11-02)**
+  - Implemented multi-job batch selection in Queue Panel (`selected_job_ids`, range select Shift+Click, toggle select Cmd/Ctrl+Click, select all Cmd+A).
+  - Implemented batch actions: batch duplicate, batch remove, batch status reset, and batch output target appending across all selected jobs.
+  - Implemented batch preset application: double-clicking or applying presets from Preset Browser updates all selected jobs simultaneously.
+  - Added global batch queue summary header with total/ready/encoding/done counters and overall batch progress bar.
+  - Created dedicated Watch Folders panel (`crates/ui-egui/src/watch_panel.rs`) with dual-tab workspace switcher (`[ ≡ Queue ]  [ 📁 Watch Folders ]`) and periodic background settle scanning.
+  - Integrated native file dialogs (`rfd = "0.17"`): multi-file batch add (`Cmd+I`), multi-clip stitching picker, and watch folder directory pickers.
+  - Resolved 100% of review comments on `storytold/craft-libs#504` (CodeRabbit `SUCCESS`); sibling PRs `filmcraft#3941`, `effectcraft#2814`, and `soundcraft#1275` verified with green CodeRabbit checkmarks.
+  - Verified 100% layer compliance and full test suite (124 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).

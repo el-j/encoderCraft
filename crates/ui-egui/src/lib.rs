@@ -14,7 +14,9 @@ pub mod preset_editor;
 pub mod preview_panel;
 pub mod queue_panel;
 pub mod theme;
+pub mod watch_panel;
 
 pub use app::EncoderCraftApp;
 pub use preset_editor::{PresetEditorState, render_preset_editor};
 pub use theme::{Brightness, Tokens, apply_theme};
+pub use watch_panel::{WatchPanelState, render_watch_panel};

@@ -108,6 +108,7 @@ proptest = "1"
 tempfile = "3"
 egui = "0.37"
 eframe = { version = "0.37", default-features = false }
+rfd = "0.17"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

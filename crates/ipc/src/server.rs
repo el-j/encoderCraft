@@ -36,6 +36,7 @@ impl IpcServer {
             while running_flag.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
                         let h = handler.clone();
                         thread::spawn(move || {
                             let _ = handle_tcp_client(stream, h);
@@ -73,6 +74,7 @@ impl IpcServer {
             while running_flag.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
                         let h = handler.clone();
                         thread::spawn(move || {
                             let _ = handle_unix_client(stream, h);

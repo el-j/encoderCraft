@@ -15,7 +15,9 @@ encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
 encodercraft-engine = { workspace = true }
 encodercraft-presets = { workspace = true }
+encodercraft-watch = { workspace = true }
 egui = { workspace = true }
+rfd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }

@@ -12,6 +12,15 @@ use crate::preset_browser::{PresetBrowserState, render_preset_browser};
 use crate::preview_panel::{PreviewState, render_preview_panel};
 use crate::queue_panel::{QueuePanelState, render_queue_panel};
 use crate::theme::{Brightness, Tokens, apply_theme};
+use crate::watch_panel::{WatchPanelState, render_watch_panel, trigger_watch_scan};
+
+/// The primary view tab in the central workspace (AME Parity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MainViewTab {
+    #[default]
+    Queue,
+    WatchFolders,
+}
 
 /// The root egui application for encoderCraft.
 pub struct EncoderCraftApp {
@@ -19,11 +28,14 @@ pub struct EncoderCraftApp {
     pub preset_registry: Arc<Mutex<PresetRegistry>>,
     pub tokens: Tokens,
     pub brightness: Brightness,
+    pub active_tab: MainViewTab,
     pub queue_state: QueuePanelState,
+    pub watch_state: WatchPanelState,
     pub preset_state: PresetBrowserState,
     pub preview_state: PreviewState,
     pub inspector_state: InspectorState,
     pub show_about_dialog: bool,
+    pub last_watch_tick: Option<std::time::Instant>,
 }
 
 impl EncoderCraftApp {
@@ -37,11 +49,14 @@ impl EncoderCraftApp {
             preset_registry,
             tokens,
             brightness,
+            active_tab: MainViewTab::Queue,
             queue_state: QueuePanelState::default(),
+            watch_state: WatchPanelState::default(),
             preset_state: PresetBrowserState::default(),
             preview_state: PreviewState::default(),
             inspector_state: InspectorState::default(),
             show_about_dialog: false,
+            last_watch_tick: None,
         }
     }
 
@@ -49,11 +64,62 @@ impl EncoderCraftApp {
     pub fn render(&mut self, ui: &mut Ui) {
         apply_theme(ui.ctx(), &self.tokens);
 
+        // Global keyboard shortcut: Cmd+I to Add Media Files
+        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::I))
+            && let Some(files) = rfd::FileDialog::new()
+                .set_title("Select Media Files")
+                .add_filter("Media Files", &["mov", "mp4", "mkv", "avi", "webm", "wav", "aiff", "flac", "mp3", "png", "exr", "tiff", "gltf"])
+                .pick_files()
+        {
+            for path in files {
+                self.add_file_job(path);
+            }
+        }
+
         // 1. Top Application Menu Bar
         egui::Panel::top("top_menu_bar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Add Media File...").clicked() {
+                    if ui.button("Add Media Files... (Cmd+I)").clicked() {
+                        if let Some(files) = rfd::FileDialog::new()
+                            .set_title("Select Media Files")
+                            .add_filter(
+                                "Media Files",
+                                &["mov", "mp4", "mkv", "avi", "webm", "wav", "aiff", "flac", "mp3", "png", "exr", "tiff", "gltf"],
+                            )
+                            .pick_files()
+                        {
+                            for path in files {
+                                self.add_file_job(path);
+                            }
+                        }
+                        ui.close();
+                    }
+
+                    if ui.button("Add Stitched Sequence...").clicked()
+                        && let Some(files) = rfd::FileDialog::new().set_title("Select Clips to Stitch Together").pick_files()
+                        && files.len() > 1
+                        && let Some(first) = files.first()
+                    {
+                        let out = first.with_file_name("stitched_sequence.mp4");
+                        let _ = self.queue_mgr.stitch_sources_into_job(files, out, "Match Source - High Bitrate".into());
+                        ui.close();
+                    }
+
+                    if ui.button("Add Watch Folder...").clicked() {
+                        if let Some(watch_dir) = rfd::FileDialog::new().set_title("Select Directory to Watch").pick_folder() {
+                            let out_dir = watch_dir.join("_encoded");
+                            let id = format!("watch-{}", self.watch_state.configs.len() + 1);
+                            let cfg = encodercraft_watch::WatchFolderConfig::new(id, watch_dir, out_dir, "Match Source - High Bitrate");
+                            self.watch_state.configs.push(cfg);
+                            self.active_tab = MainViewTab::WatchFolders;
+                        }
+                        ui.close();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("Quick Add Demo Clip").clicked() {
                         self.quick_add_demo_job();
                         ui.close();
                     }
@@ -73,12 +139,16 @@ impl EncoderCraftApp {
                 });
 
                 ui.menu_button("Queue", |ui| {
-                    if ui.button("Start Queue").clicked() {
+                    if ui.button("Start Queue (Enter)").clicked() {
                         self.queue_state.is_running = true;
                         let _ = self.queue_mgr.process_next_job();
                     }
-                    if ui.button("Pause Queue").clicked() {
+                    if ui.button("Pause Queue (Esc)").clicked() {
                         self.queue_state.is_running = false;
+                    }
+                    ui.separator();
+                    if ui.button("Clear Finished Jobs").clicked() {
+                        let _ = self.queue_mgr.clear_completed_jobs();
                     }
                 });
 
@@ -103,7 +173,13 @@ impl EncoderCraftApp {
             ui.horizontal(|ui| {
                 let jobs = self.queue_mgr.list_jobs();
                 let completed_count = jobs.iter().filter(|j| j.status == encodercraft_core::JobStatus::Completed).count();
-                ui.label(RichText::new(format!("Queue: {} jobs ({} finished)", jobs.len(), completed_count)).small().color(self.tokens.text_dim));
+                let watch_count = self.watch_state.configs.iter().filter(|c| c.enabled).count();
+
+                ui.label(
+                    RichText::new(format!("Queue: {} jobs ({} finished) · Watch Folders: {} active", jobs.len(), completed_count, watch_count))
+                        .small()
+                        .color(self.tokens.text_dim),
+                );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(RichText::new("Pure Rust · Memory Safe · Parity Ready").small().color(self.tokens.text_dim));
@@ -135,8 +211,19 @@ impl EncoderCraftApp {
             }
         }
 
+        // Periodic Watch Folder Ingest Polling
+        let now = std::time::Instant::now();
+        let should_poll_watch = self.watch_state.auto_encode_enabled
+            && !self.watch_state.configs.is_empty()
+            && self.last_watch_tick.is_none_or(|last| now.duration_since(last) > std::time::Duration::from_secs(2));
+
+        if should_poll_watch {
+            self.last_watch_tick = Some(now);
+            trigger_watch_scan(&mut self.watch_state, &self.queue_mgr, &self.preset_registry);
+        }
+
         let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
-        if self.queue_state.is_running || is_hovering {
+        if self.queue_state.is_running || is_hovering || should_poll_watch {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
             if self.queue_state.is_running {
                 let _ = self.queue_mgr.process_next_job();
@@ -153,7 +240,7 @@ impl EncoderCraftApp {
                 &mut self.preset_state,
                 &self.preset_registry,
                 &self.queue_mgr,
-                self.queue_state.selected_job_id.as_deref(),
+                &self.queue_state.selected_ids_list(),
                 &self.tokens,
             );
         });
@@ -187,7 +274,37 @@ impl EncoderCraftApp {
                 });
                 ui.add_space(8.0);
             }
-            render_queue_panel(ui, &mut self.queue_state, &self.queue_mgr, &self.tokens, &mut inspect_job);
+
+            // AME Tab Selector (Queue vs Watch Folders)
+            ui.horizontal(|ui| {
+                let queue_count = self.queue_mgr.list_jobs().len();
+                let watch_count = self.watch_state.configs.len();
+
+                let queue_label = format!("≡ Queue ({queue_count})");
+                let q_btn = ui.selectable_label(self.active_tab == MainViewTab::Queue, RichText::new(queue_label).strong());
+                if q_btn.clicked() {
+                    self.active_tab = MainViewTab::Queue;
+                }
+
+                let watch_label = format!("📁 Watch Folders ({watch_count})");
+                let w_btn = ui.selectable_label(self.active_tab == MainViewTab::WatchFolders, RichText::new(watch_label).strong());
+                if w_btn.clicked() {
+                    self.active_tab = MainViewTab::WatchFolders;
+                }
+            });
+
+            ui.add_space(2.0);
+            ui.separator();
+            ui.add_space(2.0);
+
+            match self.active_tab {
+                MainViewTab::Queue => {
+                    render_queue_panel(ui, &mut self.queue_state, &self.queue_mgr, &self.tokens, &mut inspect_job);
+                }
+                MainViewTab::WatchFolders => {
+                    render_watch_panel(ui, &mut self.watch_state, &self.queue_mgr, &self.preset_registry, &self.tokens);
+                }
+            }
         });
 
         // 4. Handle Inspector Modal
@@ -218,7 +335,7 @@ impl EncoderCraftApp {
         }
     }
 
-    /// Ingests a local file path into the queue with Match Source settings (e.g. from Drag & Drop).
+    /// Ingests a local file path into the queue with Match Source settings (e.g. from File Picker or Drag & Drop).
     pub fn add_file_job(&self, path: std::path::PathBuf) {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("media");
         let ext = "mp4";
