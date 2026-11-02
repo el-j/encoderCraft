@@ -54,6 +54,7 @@ pub fn render_preset_browser(
                 (PresetCategory::Broadcast, "Broadcast"),
                 (PresetCategory::SocialMedia, "Social"),
                 (PresetCategory::Audio, "Audio"),
+                (PresetCategory::StillImage, "Image"),
                 (PresetCategory::Spatial3D, "3D"),
                 (PresetCategory::Vector, "Vector"),
                 (PresetCategory::Document, "Document"),
@@ -241,11 +242,19 @@ fn container_to_extension(container: encodercraft_core::ContainerType) -> &'stat
         encodercraft_core::ContainerType::Svg => "svg",
         encodercraft_core::ContainerType::Gltf => "glb",
         encodercraft_core::ContainerType::Usdz => "usdz",
+        encodercraft_core::ContainerType::Obj => "obj",
+        encodercraft_core::ContainerType::Stl => "stl",
+        encodercraft_core::ContainerType::Ply => "ply",
         encodercraft_core::ContainerType::Pdf => "pdf",
         encodercraft_core::ContainerType::Docx => "docx",
         encodercraft_core::ContainerType::Idml => "idml",
         encodercraft_core::ContainerType::MxfOp1a | encodercraft_core::ContainerType::MxfOpAtom => "mxf",
-        encodercraft_core::ContainerType::StillSequence => "png",
+        encodercraft_core::ContainerType::Png | encodercraft_core::ContainerType::StillSequence => "png",
+        encodercraft_core::ContainerType::Jpeg => "jpg",
+        encodercraft_core::ContainerType::WebP => "webp",
+        encodercraft_core::ContainerType::Tiff => "tif",
+        encodercraft_core::ContainerType::OpenExr => "exr",
+        encodercraft_core::ContainerType::Bmp => "bmp",
     }
 }
 

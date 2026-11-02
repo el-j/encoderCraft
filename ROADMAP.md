@@ -24,7 +24,7 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
 | **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
 | **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **129 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Automated Tests** | **>80 tests** | **135 passed** | Unit, fuzz, and integration tests across L0-L7. |
 | **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
@@ -169,3 +169,12 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Added factory presets: `"Lossless FLAC Master (24-bit 48kHz)"`, `"Apple Lossless AIFF (24-bit 48kHz)"`, `"Web Vector SVG (Optimized)"`, and `"Print-Ready PDF/X-4"`.
   - Upgraded Preset Browser and Queue Panel with `Vector` and `Document` category filter chips and cross-field format guardrails.
   - Verified 100% CI compliance: 129 automated tests passing with zero warnings under `cargo xtask ci`.
+- [x] **M17: Universal 3D Spatial & Raster Image Transcoding Pipelines (2026-11-02)**
+  - Implemented 3D binary glTF 2.0 parser (`parse_glb`) and Apple AR Quick Look package serializer (`write_usdz`) in `crates/spatial-io`.
+  - Added 3D containers: `ContainerType::Obj`, `ContainerType::Stl`, `ContainerType::Ply` in `crates/core`.
+  - Added Windows Bitmap (BMP) encoder and decoder in `crates/image-codecs`, and added `ContainerType::Png`, `ContainerType::Tiff`, `ContainerType::OpenExr`, and `ContainerType::Bmp`.
+  - Built 3D transcode pipeline (`execute_spatial_3d`) routing models between GLB, OBJ, STL, PLY, and USDZ.
+  - Built image transcode pipeline (`execute_image_transcode`) with dimensional resizing (`FrameScaler`) and encoding to PNG, TIFF, EXR, and BMP.
+  - Added factory presets: `"Wavefront OBJ (.obj)"`, `"3D Print Binary STL (.stl)"`, `"Stanford Polygon PLY (.ply)"`, `"Apple AR Quick Look USDZ (.usdz)"`, `"Still Image PNG (Lossless)"`, `"Broadcast TIFF (16-bit RGB)"`, `"VFX OpenEXR (Half Float)"`, and `"Windows Bitmap BMP (Uncompressed)"`.
+  - Added `PresetCategory::StillImage` filter chip in the Preset Browser.
+  - Verified 100% CI compliance: 135 automated tests passing with zero warnings under `cargo xtask ci`.

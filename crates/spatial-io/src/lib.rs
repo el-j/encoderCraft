@@ -10,9 +10,11 @@ pub mod mesh;
 pub mod obj;
 pub mod ply;
 pub mod stl;
+pub mod usd;
 
-pub use gltf::write_glb;
+pub use gltf::{parse_glb, write_glb};
 pub use mesh::TriangleMesh;
 pub use obj::{parse_obj, write_obj};
 pub use ply::{parse_ply_binary, write_ply_binary};
 pub use stl::{parse_stl_binary, write_stl_binary};
+pub use usd::{write_usda, write_usdz};

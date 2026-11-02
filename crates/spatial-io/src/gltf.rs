@@ -141,19 +141,137 @@ pub fn write_glb(mesh: &TriangleMesh) -> Result<Vec<u8>, EncoderError> {
     Ok(glb)
 }
 
+/// Parses a binary glTF 2.0 (.glb) container into a `TriangleMesh`.
+pub fn parse_glb(bytes: &[u8]) -> Result<TriangleMesh, EncoderError> {
+    if bytes.len() < 20 || !bytes.starts_with(b"glTF") {
+        return Err(EncoderError::InvalidContainer("invalid glTF binary header".into()));
+    }
+
+    let version = u32::from_le_bytes([
+        bytes.get(4).copied().unwrap_or(0),
+        bytes.get(5).copied().unwrap_or(0),
+        bytes.get(6).copied().unwrap_or(0),
+        bytes.get(7).copied().unwrap_or(0),
+    ]);
+    if version != 2 {
+        return Err(EncoderError::UnsupportedCodec(format!("unsupported glTF version {version}, expected 2")));
+    }
+
+    let chunk0_len = u32::from_le_bytes([
+        bytes.get(12).copied().unwrap_or(0),
+        bytes.get(13).copied().unwrap_or(0),
+        bytes.get(14).copied().unwrap_or(0),
+        bytes.get(15).copied().unwrap_or(0),
+    ]) as usize;
+
+    if bytes.get(16..20) != Some(b"JSON") {
+        return Err(EncoderError::InvalidContainer("glTF chunk 0 is not JSON".into()));
+    }
+
+    let json_end = 20 + chunk0_len;
+    let json_bytes = bytes.get(20..json_end).ok_or_else(|| EncoderError::InvalidContainer("truncated glTF JSON chunk".into()))?;
+
+    let json_val: serde_json::Value =
+        serde_json::from_slice(json_bytes).map_err(|e| EncoderError::InvalidContainer(format!("failed to parse glTF JSON: {e}")))?;
+
+    // Chunk 1: BIN
+    let bin_header_start = (json_end + 3) & !3;
+    let chunk1_len = if bytes.len() >= bin_header_start + 8 {
+        u32::from_le_bytes([
+            bytes.get(bin_header_start).copied().unwrap_or(0),
+            bytes.get(bin_header_start + 1).copied().unwrap_or(0),
+            bytes.get(bin_header_start + 2).copied().unwrap_or(0),
+            bytes.get(bin_header_start + 3).copied().unwrap_or(0),
+        ]) as usize
+    } else {
+        0
+    };
+
+    let bin_start = bin_header_start + 8;
+    let bin_data = bytes.get(bin_start..bin_start + chunk1_len).unwrap_or(&[]);
+
+    let mesh_name = json_val["meshes"][0]["name"].as_str().unwrap_or("Model").to_string();
+    let mut mesh = TriangleMesh::new(mesh_name);
+
+    let pos_acc_idx = json_val["meshes"][0]["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap_or(0) as usize;
+    let idx_acc_idx = json_val["meshes"][0]["primitives"][0]["indices"].as_u64();
+
+    if let Some(pos_acc) = json_val["accessors"].get(pos_acc_idx) {
+        let count = pos_acc["count"].as_u64().unwrap_or(0) as usize;
+        let bv_idx = pos_acc["bufferView"].as_u64().unwrap_or(0) as usize;
+        let byte_offset = json_val["bufferViews"][bv_idx]["byteOffset"].as_u64().unwrap_or(0) as usize;
+
+        for i in 0..count {
+            let offset = byte_offset + i * 12;
+            if offset + 12 <= bin_data.len() {
+                let x = f32::from_le_bytes([bin_data[offset], bin_data[offset + 1], bin_data[offset + 2], bin_data[offset + 3]]);
+                let y = f32::from_le_bytes([bin_data[offset + 4], bin_data[offset + 5], bin_data[offset + 6], bin_data[offset + 7]]);
+                let z = f32::from_le_bytes([bin_data[offset + 8], bin_data[offset + 9], bin_data[offset + 10], bin_data[offset + 11]]);
+                mesh.vertices.push([x, y, z]);
+            }
+        }
+    }
+
+    if let Some(idx_acc_i) = idx_acc_idx
+        && let Some(idx_acc) = json_val["accessors"].get(idx_acc_i as usize)
+    {
+        let count = idx_acc["count"].as_u64().unwrap_or(0) as usize;
+        let bv_idx = idx_acc["bufferView"].as_u64().unwrap_or(0) as usize;
+        let byte_offset = json_val["bufferViews"][bv_idx]["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let comp_type = idx_acc["componentType"].as_u64().unwrap_or(5125);
+
+        let mut raw_indices = Vec::with_capacity(count);
+        if comp_type == 5123 {
+            for i in 0..count {
+                let offset = byte_offset + i * 2;
+                if offset + 2 <= bin_data.len() {
+                    let idx = u16::from_le_bytes([bin_data[offset], bin_data[offset + 1]]) as u32;
+                    raw_indices.push(idx);
+                }
+            }
+        } else {
+            for i in 0..count {
+                let offset = byte_offset + i * 4;
+                if offset + 4 <= bin_data.len() {
+                    let idx = u32::from_le_bytes([bin_data[offset], bin_data[offset + 1], bin_data[offset + 2], bin_data[offset + 3]]);
+                    raw_indices.push(idx);
+                }
+            }
+        }
+
+        for chunk in raw_indices.as_chunks::<3>().0 {
+            mesh.indices.push([chunk[0], chunk[1], chunk[2]]);
+        }
+    } else {
+        let tri_count = mesh.vertices.len() / 3;
+        for i in 0..tri_count {
+            let base = (i * 3) as u32;
+            mesh.indices.push([base, base + 1, base + 2]);
+        }
+    }
+
+    mesh.generate_flat_normals();
+    Ok(mesh)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_write_glb() {
+    fn test_write_and_parse_glb_roundtrip() {
         let mut mesh = TriangleMesh::new("SimpleTriangle");
         mesh.vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
         mesh.indices = vec![[0, 1, 2]];
 
         let glb = write_glb(&mesh).unwrap();
         assert_eq!(&glb[0..4], b"glTF");
-        let version = u32::from_le_bytes(glb[4..8].try_into().unwrap());
+        let version = u32::from_le_bytes([glb[4], glb[5], glb[6], glb[7]]);
         assert_eq!(version, 2);
+
+        let parsed = parse_glb(&glb).unwrap();
+        assert_eq!(parsed.vertices.len(), 3);
+        assert_eq!(parsed.indices.len(), 1);
+        assert_eq!(parsed.indices[0], [0, 1, 2]);
     }
 }

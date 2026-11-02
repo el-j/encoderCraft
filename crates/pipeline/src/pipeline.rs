@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use encodercraft_audio_dsp::{normalize_loudness, remix_channels};
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
-use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor};
+use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor, VideoFrame};
 use encodercraft_geom::{Dimensions, ScaleMode};
 use encodercraft_muxers::{BextMetadata, BwfWavWriter, Mp4Muxer, VideoSample, VideoStreamConfig, WavFormatTag};
 use encodercraft_video_codecs::{VideoCodecKind, create_video_encoder};
@@ -80,6 +80,16 @@ impl TranscodePipeline {
             ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time)?,
             ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
             ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml => self.execute_document_pdf(target, start_time)?,
+            ContainerType::Gltf | ContainerType::Usdz | ContainerType::Obj | ContainerType::Stl | ContainerType::Ply => {
+                self.execute_spatial_3d(target, start_time)?
+            }
+            ContainerType::Png
+            | ContainerType::Jpeg
+            | ContainerType::WebP
+            | ContainerType::Tiff
+            | ContainerType::OpenExr
+            | ContainerType::Bmp
+            | ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
             _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported target container: {:?}", target.container))),
         }
 
@@ -201,6 +211,161 @@ impl TranscodePipeline {
         };
 
         std::fs::write(&target.output_path, content.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_spatial_3d(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let mesh = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source 3D file `{}`: {e}", path.display())))?;
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                match ext.as_str() {
+                    "obj" => {
+                        let text = std::str::from_utf8(&bytes).map_err(|e| EncoderError::InvalidContainer(format!("invalid OBJ text: {e}")))?;
+                        encodercraft_spatial_io::parse_obj(text)?
+                    }
+                    "stl" => encodercraft_spatial_io::parse_stl_binary(&bytes)?,
+                    "ply" => encodercraft_spatial_io::parse_ply_binary(&bytes)?,
+                    "glb" | "gltf" => encodercraft_spatial_io::parse_glb(&bytes)?,
+                    _ => {
+                        if bytes.starts_with(b"glTF") {
+                            encodercraft_spatial_io::parse_glb(&bytes)?
+                        } else if bytes.starts_with(b"ply\n") || bytes.starts_with(b"ply\r\n") {
+                            encodercraft_spatial_io::parse_ply_binary(&bytes)?
+                        } else if let Ok(text) = std::str::from_utf8(&bytes)
+                            && (text.starts_with("v ") || text.starts_with('#') || text.starts_with("o "))
+                        {
+                            encodercraft_spatial_io::parse_obj(text)?
+                        } else {
+                            encodercraft_spatial_io::parse_stl_binary(&bytes)?
+                        }
+                    }
+                }
+            }
+            _ => {
+                let mut m = encodercraft_spatial_io::TriangleMesh::new("UnitCube");
+                m.vertices = vec![
+                    [-0.5, -0.5, -0.5],
+                    [0.5, -0.5, -0.5],
+                    [0.5, 0.5, -0.5],
+                    [-0.5, 0.5, -0.5],
+                    [-0.5, -0.5, 0.5],
+                    [0.5, -0.5, 0.5],
+                    [0.5, 0.5, 0.5],
+                    [-0.5, 0.5, 0.5],
+                ];
+                m.indices = vec![
+                    [0, 1, 2],
+                    [0, 2, 3],
+                    [4, 6, 5],
+                    [4, 7, 6],
+                    [0, 4, 5],
+                    [0, 5, 1],
+                    [2, 6, 7],
+                    [2, 7, 3],
+                    [0, 3, 7],
+                    [0, 7, 4],
+                    [1, 5, 6],
+                    [1, 6, 2],
+                ];
+                m.generate_flat_normals();
+                m
+            }
+        };
+
+        match target.container {
+            ContainerType::Gltf => {
+                let glb_bytes = encodercraft_spatial_io::write_glb(&mesh)?;
+                std::fs::write(&target.output_path, glb_bytes).map_err(|e| EncoderError::Io(format!("failed to write GLB file: {e}")))?;
+            }
+            ContainerType::Obj => {
+                let obj_text = encodercraft_spatial_io::write_obj(&mesh);
+                std::fs::write(&target.output_path, obj_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OBJ file: {e}")))?;
+            }
+            ContainerType::Stl => {
+                let stl_bytes = encodercraft_spatial_io::write_stl_binary(&mesh);
+                std::fs::write(&target.output_path, stl_bytes).map_err(|e| EncoderError::Io(format!("failed to write STL file: {e}")))?;
+            }
+            ContainerType::Ply => {
+                let ply_bytes = encodercraft_spatial_io::write_ply_binary(&mesh);
+                std::fs::write(&target.output_path, ply_bytes).map_err(|e| EncoderError::Io(format!("failed to write PLY file: {e}")))?;
+            }
+            ContainerType::Usdz => {
+                let usdz_bytes = encodercraft_spatial_io::write_usdz(&mesh)?;
+                std::fs::write(&target.output_path, usdz_bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
+            }
+            _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported 3D container: {:?}", target.container))),
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_image_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let frame = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source image `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"BM") {
+                    encodercraft_image_codecs::decode_bmp(&bytes)?
+                } else {
+                    let w = target.custom_width.unwrap_or(1920);
+                    let h = target.custom_height.unwrap_or(1080);
+                    let dims = Dimensions::new(w, h)?;
+                    let mut f = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24)?;
+                    let (plane, _) = f.plane_mut(0)?;
+                    plane.fill(128);
+                    f
+                }
+            }
+            _ => {
+                let w = target.custom_width.unwrap_or(1920);
+                let h = target.custom_height.unwrap_or(1080);
+                let dims = Dimensions::new(w, h)?;
+                let mut f = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24)?;
+                let (plane, _) = f.plane_mut(0)?;
+                plane.fill(64);
+                f
+            }
+        };
+
+        let final_frame = if let (Some(w), Some(h)) = (target.custom_width, target.custom_height) {
+            if w != frame.dimensions.width || h != frame.dimensions.height {
+                let target_dims = Dimensions::new(w, h)?;
+                let scaler = FrameScaler::new(ScaleMode::Fit);
+                scaler.scale(&frame, target_dims)?
+            } else {
+                frame
+            }
+        } else {
+            frame
+        };
+
+        match target.container {
+            ContainerType::Png | ContainerType::StillSequence => {
+                let png_bytes = encodercraft_image_codecs::encode_png(&final_frame)?;
+                std::fs::write(&target.output_path, png_bytes).map_err(|e| EncoderError::Io(format!("failed to write PNG: {e}")))?;
+            }
+            ContainerType::Tiff => {
+                let tiff_bytes = encodercraft_image_codecs::encode_tiff(&final_frame)?;
+                std::fs::write(&target.output_path, tiff_bytes).map_err(|e| EncoderError::Io(format!("failed to write TIFF: {e}")))?;
+            }
+            ContainerType::OpenExr => {
+                let exr_bytes = encodercraft_image_codecs::encode_exr_half(&final_frame)?;
+                std::fs::write(&target.output_path, exr_bytes).map_err(|e| EncoderError::Io(format!("failed to write OpenEXR: {e}")))?;
+            }
+            ContainerType::Bmp => {
+                let bmp_bytes = encodercraft_image_codecs::encode_bmp(&final_frame)?;
+                std::fs::write(&target.output_path, bmp_bytes).map_err(|e| EncoderError::Io(format!("failed to write BMP: {e}")))?;
+            }
+            _ => {
+                let png_bytes = encodercraft_image_codecs::encode_png(&final_frame)?;
+                std::fs::write(&target.output_path, png_bytes).map_err(|e| EncoderError::Io(format!("failed to write PNG: {e}")))?;
+            }
+        }
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
@@ -852,5 +1017,146 @@ mod tests {
         assert_eq!(decoded.sample_rate, 48000);
         assert_eq!(decoded.channel_count(), 2);
         assert!(decoded.samples_per_channel() >= 4800);
+    }
+
+    #[test]
+    fn test_execute_spatial_3d_obj_to_glb() {
+        let dir = tempdir().unwrap();
+        let obj_src = dir.path().join("model.obj");
+        let glb_out = dir.path().join("model.glb");
+
+        std::fs::write(&obj_src, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-3d-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: obj_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_glb".into(),
+                output_path: glb_out.clone(),
+                preset_name: "glTF 2.0 Binary (.glb)".into(),
+                container: ContainerType::Gltf,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(glb_out.exists());
+        let glb_bytes = std::fs::read(&glb_out).unwrap();
+        assert!(glb_bytes.starts_with(b"glTF"));
+    }
+
+    #[test]
+    fn test_execute_image_bmp_to_png() {
+        let dir = tempdir().unwrap();
+        let bmp_src = dir.path().join("input.bmp");
+        let png_out = dir.path().join("output.png");
+
+        let dims = Dimensions::new(8, 8).unwrap();
+        let mut frame = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        let (plane, _) = frame.plane_mut(0).unwrap();
+        plane.fill(200);
+
+        let bmp_bytes = encodercraft_image_codecs::encode_bmp(&frame).unwrap();
+        std::fs::write(&bmp_src, bmp_bytes).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-img-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: bmp_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_png".into(),
+                output_path: png_out.clone(),
+                preset_name: "Still Image PNG".into(),
+                container: ContainerType::Png,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(png_out.exists());
+        let png_bytes = std::fs::read(&png_out).unwrap();
+        assert!(png_bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
+
+    #[test]
+    fn test_execute_spatial_3d_obj_to_usdz() {
+        let dir = tempdir().unwrap();
+        let obj_src = dir.path().join("pyramid.obj");
+        let usdz_out = dir.path().join("pyramid.usdz");
+
+        std::fs::write(&obj_src, "v 0 1 0\nv -1 0 1\nv 1 0 1\nf 1 2 3\n").unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-usdz-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: obj_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_usdz".into(),
+                output_path: usdz_out.clone(),
+                preset_name: "Apple AR Quick Look USDZ (.usdz)".into(),
+                container: ContainerType::Usdz,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(usdz_out.exists());
+        let usdz_bytes = std::fs::read(&usdz_out).unwrap();
+        assert!(usdz_bytes.starts_with(b"PK\x03\x04"));
+        assert!(usdz_bytes.windows(10).any(|w| w == b"model.usda"));
+    }
+
+    #[test]
+    fn test_execute_image_bmp_to_tiff() {
+        let dir = tempdir().unwrap();
+        let bmp_src = dir.path().join("input.bmp");
+        let tiff_out = dir.path().join("output.tif");
+
+        let dims = Dimensions::new(4, 4).unwrap();
+        let mut frame = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        let (plane, _) = frame.plane_mut(0).unwrap();
+        plane.fill(100);
+
+        let bmp_bytes = encodercraft_image_codecs::encode_bmp(&frame).unwrap();
+        std::fs::write(&bmp_src, bmp_bytes).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-tiff-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: bmp_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_tiff".into(),
+                output_path: tiff_out.clone(),
+                preset_name: "Broadcast TIFF (16-bit RGB)".into(),
+                container: ContainerType::Tiff,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(tiff_out.exists());
+        let tiff_bytes = std::fs::read(&tiff_out).unwrap();
+        assert!(tiff_bytes.starts_with(b"II*\x00") || tiff_bytes.starts_with(b"MM\x00*"));
     }
 }

@@ -972,6 +972,7 @@ dependencies = [
  "encodercraft-image-codecs",
  "encodercraft-muxers",
  "encodercraft-platform",
+ "encodercraft-spatial-io",
  "encodercraft-video-codecs",
  "filmcraft-captions",
  "filmcraft-time",

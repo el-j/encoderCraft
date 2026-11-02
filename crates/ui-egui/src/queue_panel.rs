@@ -226,7 +226,7 @@ pub fn render_queue_panel(
                                     ("glb", encodercraft_core::ContainerType::Gltf, "glTF 2.0 Binary (.glb)".to_string(), None, None, None, None)
                                 }
                                 encodercraft_core::MediaStreamKind::StillImage => {
-                                    ("png", encodercraft_core::ContainerType::StillSequence, "Still Image PNG".to_string(), None, None, None, None)
+                                    ("png", encodercraft_core::ContainerType::Png, "Still Image PNG (Lossless)".to_string(), None, None, None, None)
                                 }
                                 _ => (
                                     "mp4",

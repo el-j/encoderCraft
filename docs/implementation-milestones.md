@@ -424,6 +424,31 @@ flowchart LR
 
 ---
 
+### Milestone 17: Universal 3D Spatial & Raster Image Transcoding Pipelines
+**Objective:** Complete universal transcode coverage for 3D polygon mesh models (glTF/GLB, Wavefront OBJ, binary STL, binary PLY, Pixar USDZ) and raster image formats (PNG, TIFF, OpenEXR, BMP) with dimensional scaling and format guardrails.
+
+#### Deliverables:
+1. **3D Mesh Serializers & Parsers (`crates/spatial-io`):**
+   - Implemented `parse_glb` parsing Khronos binary glTF 2.0 containers into `TriangleMesh`.
+   - Implemented `write_usda` and `write_usdz` packaging 3D meshes into Apple AR Quick Look `.usdz` archives.
+   - Added container types: `ContainerType::Obj`, `ContainerType::Stl`, `ContainerType::Ply`.
+2. **Raster Image Codecs (`crates/image-codecs`):**
+   - Implemented `encode_bmp` and `decode_bmp` for uncompressed Windows Bitmap (BMP) images.
+   - Added container types: `ContainerType::Png`, `ContainerType::Tiff`, `ContainerType::OpenExr`, `ContainerType::Bmp`.
+3. **Execution Pipelines (`crates/pipeline`):**
+   - Implemented `execute_spatial_3d` routing mesh models across GLB, OBJ, STL, PLY, and USDZ.
+   - Implemented `execute_image_transcode` decoding source raster images, applying `FrameScaler` resampling, and encoding to PNG, TIFF, OpenEXR, or BMP.
+4. **Factory Presets & UI Controls (`crates/presets`, `crates/ui-egui`):**
+   - Added 3D presets: `"Wavefront OBJ (.obj)"`, `"3D Print Binary STL (.stl)"`, `"Stanford Polygon PLY (.ply)"`, `"Apple AR Quick Look USDZ (.usdz)"`.
+   - Added image presets: `"Still Image PNG (Lossless)"`, `"Broadcast TIFF (16-bit RGB)"`, `"VFX OpenEXR (Half Float)"`, `"Windows Bitmap BMP (Uncompressed)"`.
+   - Added `PresetCategory::StillImage` category filter chip in the Preset Browser.
+
+#### Verification Gate:
+- `cargo run -p xtask -- ci` passes 100% with all 135 automated tests, zero warnings, and full layer compliance.
+- Integration tests verify OBJ -> USDZ, OBJ -> GLB, BMP -> PNG, and BMP -> TIFF conversions.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

@@ -23,6 +23,7 @@ pub enum PresetCategory {
     Broadcast,
     SocialMedia,
     Audio,
+    StillImage,
     Spatial3D,
     Vector,
     Document,

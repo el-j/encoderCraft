@@ -264,5 +264,77 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
             video: None,
             audio: None,
         },
+        // 13. Wavefront OBJ (.obj)
+        EncodingPreset {
+            name: "Wavefront OBJ (.obj)".into(),
+            description: "Standard Wavefront OBJ ASCII geometry interchange mesh".into(),
+            category: PresetCategory::Spatial3D,
+            container: ContainerType::Obj,
+            video: None,
+            audio: None,
+        },
+        // 14. 3D Print Binary STL (.stl)
+        EncodingPreset {
+            name: "3D Print Binary STL (.stl)".into(),
+            description: "High-density stereolithography triangle mesh for rapid prototyping and 3D printing".into(),
+            category: PresetCategory::Spatial3D,
+            container: ContainerType::Stl,
+            video: None,
+            audio: None,
+        },
+        // 15. Stanford Polygon PLY (.ply)
+        EncodingPreset {
+            name: "Stanford Polygon PLY (.ply)".into(),
+            description: "Stanford polygon mesh binary format for 3D scanning, photogrammetry, and Gaussian splats".into(),
+            category: PresetCategory::Spatial3D,
+            container: ContainerType::Ply,
+            video: None,
+            audio: None,
+        },
+        // 16. Apple AR Quick Look USDZ (.usdz)
+        EncodingPreset {
+            name: "Apple AR Quick Look USDZ (.usdz)".into(),
+            description: "Pixar Universal Scene Description zip package optimized for Apple iOS/macOS AR Quick Look".into(),
+            category: PresetCategory::Spatial3D,
+            container: ContainerType::Usdz,
+            video: None,
+            audio: None,
+        },
+        // 17. Still Image PNG (Lossless)
+        EncodingPreset {
+            name: "Still Image PNG (Lossless)".into(),
+            description: "W3C Portable Network Graphics 8-bit RGBA lossless raster image with alpha channel".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::Png,
+            video: None,
+            audio: None,
+        },
+        // 18. Broadcast TIFF (16-bit RGB)
+        EncodingPreset {
+            name: "Broadcast TIFF (16-bit RGB)".into(),
+            description: "Baseline TIFF 6.0 uncompressed raster image for color grading and print workflows".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::Tiff,
+            video: None,
+            audio: None,
+        },
+        // 19. VFX OpenEXR (Half Float)
+        EncodingPreset {
+            name: "VFX OpenEXR (Half Float)".into(),
+            description: "Industrial Light & Magic OpenEXR 16-bit half-float high dynamic range raster master".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::OpenExr,
+            video: None,
+            audio: None,
+        },
+        // 20. Windows Bitmap BMP (Uncompressed)
+        EncodingPreset {
+            name: "Windows Bitmap BMP (Uncompressed)".into(),
+            description: "Universal uncompressed Windows Bitmap DIB raster format".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::Bmp,
+            video: None,
+            audio: None,
+        },
     ]
 }
