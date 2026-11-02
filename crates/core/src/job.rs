@@ -85,6 +85,19 @@ impl CaptionExportFormat {
     }
 }
 
+/// Audio stem export mode for multichannel workflows (AME parity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AudioStemMode {
+    /// No stem splitting (default single master output).
+    #[default]
+    None,
+    /// Export each channel in the mix as a separate discrete mono BWF WAV file.
+    DiscreteMono,
+    /// Export channel pairs (e.g. 1-2, 3-4) as stereo BWF WAV files.
+    StereoPairs,
+}
+
 /// Mode of media source ingestion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -156,6 +169,12 @@ pub struct OutputTarget {
     pub burn_captions: bool,
     #[serde(default)]
     pub caption_offset_ms: Option<i64>,
+    #[serde(default)]
+    pub audio_stems: Option<AudioStemMode>,
+    #[serde(default)]
+    pub metadata: Option<crate::metadata::XmpMetadata>,
+    #[serde(default)]
+    pub hardware_acceleration: bool,
 }
 
 impl Default for OutputTarget {
@@ -176,6 +195,9 @@ impl Default for OutputTarget {
             caption_format: None,
             burn_captions: false,
             caption_offset_ms: None,
+            audio_stems: None,
+            metadata: None,
+            hardware_acceleration: false,
         }
     }
 }

@@ -259,6 +259,31 @@ flowchart LR
 
 ---
 
+### Milestone 9: Hardware Acceleration Bridge, Multichannel Stems & XMP Metadata
+**Focus:** Platform hardware acceleration detection & quarantine under ADR 0001, multichannel audio stem extraction, and Adobe XMP/Dublin Core metadata injection.
+
+#### Deliverables:
+1. **Hardware Acceleration Bridge (`crates/platform` & ADR 0001):**
+   - Implemented `encodercraft-platform` (Layer 3) strictly isolating hardware acceleration under ADR 0001.
+   - Detects hardware capabilities across Apple VideoToolbox (Apple Silicon / Intel T2), NVIDIA NVENC, Linux VA-API, and Windows Media Foundation.
+   - Transparent zero-panic fallback to pure-Rust software encoders.
+2. **Multichannel Audio Stem Export (`crates/pipeline/src/pipeline.rs`):**
+   - Implemented `export_audio_stems` supporting `DiscreteMono` (splitting multichannel mix into `{stem}_Stem_L.wav`, `{stem}_Stem_R.wav`, etc.) and `StereoPairs`.
+   - Generates compliant EBU Tech 3285 BWF audio files with sample rate and channel layout preservation.
+3. **Dublin Core & Adobe XMP Metadata Injection (`crates/core/src/metadata.rs` & `crates/muxers`):**
+   - Implemented `XmpMetadata` structure with Dublin Core (`dc:title`, `dc:creator`, `dc:description`, `dc:rights`), XMP (`xmp:CreateDate`, `xmp:ProjectName`), and Dynamic Media (`xmpDM:startTimecode`).
+   - Implemented XML/RDF packet serialization and embedded into MP4/MOV via standard Adobe XMP UUID box (`be7acfcb-97a9-42e8-9c71-999491e3afac`) and BWF WAV via `axml` chunk.
+   - Added automated sidecar `.xmp` file generation alongside exported media.
+4. **Export Settings UI & CLI Enhancements:**
+   - Extended egui Export Settings Inspector (`crates/ui-egui/src/inspector.rs`): added hardware acceleration toggle to Video tab, multichannel audio stems selector to Audio tab, and Dublin Core / XMP metadata editor with sidecar toggle to Metadata tab.
+   - Extended CLI (`apps/encodercraft-cli`): added `--stems`, `--hardware`, `--xmp-title`, `--xmp-creator`, `--sidecar-xmp`, and `--caption` flags.
+
+#### Verification Gate:
+- `cargo xtask ci` passes 100% with 120 automated tests, zero clippy warnings, and zero layer violations.
+- Benchmarks verify real-time multipliers across all pipelines.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

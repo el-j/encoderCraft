@@ -29,7 +29,19 @@ pub struct BwfWavWriter<W: Write + Seek> {
 
 impl<W: Write + Seek> BwfWavWriter<W> {
     /// Initializes a new WAV container and writes the RIFF header, optional `bext` chunk, and `fmt ` chunk.
-    pub fn new(mut writer: W, sample_rate: u32, channels: u16, format: WavFormatTag, bext: Option<&BextMetadata>) -> Result<Self, EncoderError> {
+    pub fn new(writer: W, sample_rate: u32, channels: u16, format: WavFormatTag, bext: Option<&BextMetadata>) -> Result<Self, EncoderError> {
+        Self::new_with_xmp(writer, sample_rate, channels, format, bext, None)
+    }
+
+    /// Initializes a new WAV container with optional `bext` broadcast chunk and `axml` XMP metadata chunk.
+    pub fn new_with_xmp(
+        mut writer: W,
+        sample_rate: u32,
+        channels: u16,
+        format: WavFormatTag,
+        bext: Option<&BextMetadata>,
+        xmp_xml: Option<&str>,
+    ) -> Result<Self, EncoderError> {
         if sample_rate == 0 || channels == 0 {
             return Err(EncoderError::InvalidJobSpec("sample rate and channels must be positive".into()));
         }
@@ -84,6 +96,18 @@ impl<W: Write + Seek> BwfWavWriter<W> {
             bext_data[348..348 + 64].copy_from_slice(&meta.umid);
 
             writer.write_all(&bext_data).map_err(|e| EncoderError::Io(format!("failed to write bext payload: {e}")))?;
+        }
+
+        // 3. Optional `axml` chunk for XMP metadata (EBU Tech 3285 Supplement 1 / Adobe XMP)
+        if let Some(xml) = xmp_xml {
+            writer.write_all(b"axml").map_err(|e| EncoderError::Io(format!("failed to write axml chunk id: {e}")))?;
+            let xml_bytes = xml.as_bytes();
+            let axml_len = xml_bytes.len() as u32;
+            writer.write_all(&axml_len.to_le_bytes()).map_err(|e| EncoderError::Io(format!("failed to write axml length: {e}")))?;
+            writer.write_all(xml_bytes).map_err(|e| EncoderError::Io(format!("failed to write axml body: {e}")))?;
+            if !axml_len.is_multiple_of(2) {
+                writer.write_all(&[0u8]).map_err(|e| EncoderError::Io(format!("failed to write axml pad: {e}")))?;
+            }
         }
 
         // 3. `fmt ` chunk

@@ -97,7 +97,16 @@ fn print_usage() {
     println!("encoderCraft CLI — Pure-Rust Universal Media Transcoding & Batch Queue Engine");
     println!("\nUsage: encodercraft <command> [options]");
     println!("\nCommands:");
-    println!("  encode <input> -p <preset> -o <output>  Transcode an input file directly");
+    println!("  encode <input> [options]                Transcode an input file directly");
+    println!("      -p, --preset <name>                 Encoding preset (default: Match Source - High Bitrate)");
+    println!("      -o, --output <file>                 Output file path");
+    println!("      --stems                             Export discrete multichannel audio stems (.wav)");
+    println!("      --hardware                          Enable hardware acceleration (VideoToolbox / NVENC)");
+    println!("      --xmp-title <title>                 Embed XMP Dublin Core title");
+    println!("      --xmp-creator <creator>             Embed XMP Dublin Core author/creator");
+    println!("      --sidecar-xmp                       Export external sidecar .xmp file");
+    println!("      --caption <file>                    Subtitle/caption file to embed or burn");
+    println!("      --burn-captions                     Burn captions directly into video frames");
     println!("  probe <input>                           Inspect containers, codecs, and stream metadata");
     println!("  presets                                 List all factory presets");
     println!("  queue [list|cancel <id>]                Interact with running daemon queue");
@@ -110,6 +119,13 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut input = None;
     let mut preset_name = "Match Source - High Bitrate".to_string();
     let mut output = None;
+    let mut export_stems = false;
+    let mut hardware_accel = false;
+    let mut xmp_title = None;
+    let mut xmp_creator = None;
+    let mut sidecar_xmp = false;
+    let mut caption_file = None;
+    let mut burn_captions = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -126,6 +142,36 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                         output = Some(PathBuf::from(val));
                         i += 1;
                     }
+                }
+                "--stems" => {
+                    export_stems = true;
+                }
+                "--hardware" => {
+                    hardware_accel = true;
+                }
+                "--xmp-title" => {
+                    if let Some(val) = args.get(i + 1) {
+                        xmp_title = Some(val.clone());
+                        i += 1;
+                    }
+                }
+                "--xmp-creator" => {
+                    if let Some(val) = args.get(i + 1) {
+                        xmp_creator = Some(val.clone());
+                        i += 1;
+                    }
+                }
+                "--sidecar-xmp" => {
+                    sidecar_xmp = true;
+                }
+                "--caption" => {
+                    if let Some(val) = args.get(i + 1) {
+                        caption_file = Some(PathBuf::from(val));
+                        i += 1;
+                    }
+                }
+                "--burn-captions" => {
+                    burn_captions = true;
                 }
                 other if !other.starts_with('-') && input.is_none() => {
                     input = Some(PathBuf::from(other));
@@ -148,7 +194,22 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let registry = PresetRegistry::default();
     let preset = registry.find_by_name(&preset_name).ok_or_else(|| EncoderError::InvalidJobSpec(format!("preset '{preset_name}' not found")))?;
 
-    let target = evaluate_preset(preset, &media_info, output_path.clone())?;
+    let mut target = evaluate_preset(preset, &media_info, output_path.clone())?;
+
+    if export_stems {
+        target.audio_stems = Some(encodercraft_core::AudioStemMode::DiscreteMono);
+    }
+    if hardware_accel {
+        target.hardware_acceleration = true;
+    }
+    if xmp_title.is_some() || xmp_creator.is_some() || sidecar_xmp {
+        let meta = encodercraft_core::XmpMetadata { title: xmp_title, creator: xmp_creator, export_sidecar_xmp: sidecar_xmp, ..Default::default() };
+        target.metadata = Some(meta);
+    }
+    if let Some(cap) = caption_file {
+        target.caption_path = Some(cap);
+        target.burn_captions = burn_captions;
+    }
 
     let spec = CraftJobSpec {
         version: "1.0".into(),

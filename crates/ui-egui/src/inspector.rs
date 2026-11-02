@@ -82,7 +82,8 @@ fn render_inspector_content(ui: &mut Ui, spec: &mut CraftJobSpec, active_tab: &m
     ui.add_space(4.0);
 
     // Target Selection / Container
-    if let Some(target) = spec.targets.first_mut() {
+    let (client_info, targets) = (&mut spec.client_info, &mut spec.targets);
+    if let Some(target) = targets.first_mut() {
         ui.horizontal(|ui| {
             ui.label("Container Format:");
             egui::ComboBox::from_id_salt("container_combo").selected_text(format!("{:?}", target.container)).show_ui(ui, |ui| {
@@ -116,7 +117,7 @@ fn render_inspector_content(ui: &mut Ui, spec: &mut CraftJobSpec, active_tab: &m
             InspectorTab::Effects => render_effects_tab(ui, target),
             InspectorTab::Captions => render_captions_tab(ui, target),
             InspectorTab::Loudness => render_loudness_tab(ui, target),
-            InspectorTab::Metadata => render_metadata_tab(ui, spec),
+            InspectorTab::Metadata => render_metadata_tab(ui, client_info, target),
         }
     }
 }
@@ -199,6 +200,9 @@ fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget) {
     ui.heading("Video Encoding Parameters");
     ui.add_space(4.0);
 
+    ui.checkbox(&mut target.hardware_acceleration, "Hardware Acceleration (VideoToolbox / NVENC / VA-API)");
+    ui.add_space(4.0);
+
     let mut w = target.custom_width.unwrap_or(3840);
     ui.horizontal(|ui| {
         ui.label("Width (px):");
@@ -224,19 +228,43 @@ fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget) {
     });
 }
 
-fn render_audio_tab(ui: &mut Ui, _target: &mut OutputTarget) {
-    ui.heading("Audio Encoding Parameters");
+fn render_audio_tab(ui: &mut Ui, target: &mut OutputTarget) {
+    ui.heading("Audio Encoding & Multichannel Stems");
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
         ui.label("Audio Codec:");
-        ui.label("AAC-LC (Stereo, 320 kbps)");
+        ui.label("AAC-LC (Stereo, 320 kbps) / Uncompressed PCM");
     });
 
     ui.horizontal(|ui| {
         ui.label("Sample Rate:");
         ui.label("48,000 Hz");
     });
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    let mut current_stems = target.audio_stems.unwrap_or(encodercraft_core::AudioStemMode::None);
+    ui.horizontal(|ui| {
+        ui.label("Multichannel Audio Stems:");
+        egui::ComboBox::from_id_salt("audio_stems_combo")
+            .selected_text(match current_stems {
+                encodercraft_core::AudioStemMode::None => "None (Master Mix Only)",
+                encodercraft_core::AudioStemMode::DiscreteMono => "Discrete Mono Channels (_Stem_L, _Stem_R.wav)",
+                encodercraft_core::AudioStemMode::StereoPairs => "Stereo Channel Pairs (_Stems_Ch1-2.wav)",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut current_stems, encodercraft_core::AudioStemMode::None, "None (Master Mix Only)");
+                ui.selectable_value(
+                    &mut current_stems,
+                    encodercraft_core::AudioStemMode::DiscreteMono,
+                    "Discrete Mono Channels (_Stem_L, _Stem_R.wav)",
+                );
+                ui.selectable_value(&mut current_stems, encodercraft_core::AudioStemMode::StereoPairs, "Stereo Channel Pairs (_Stems_Ch1-2.wav)");
+            });
+    });
+    target.audio_stems = if current_stems == encodercraft_core::AudioStemMode::None { None } else { Some(current_stems) };
 }
 
 fn render_loudness_tab(ui: &mut Ui, target: &mut OutputTarget) {
@@ -257,20 +285,72 @@ fn render_loudness_tab(ui: &mut Ui, target: &mut OutputTarget) {
     });
 }
 
-fn render_metadata_tab(ui: &mut Ui, spec: &mut CraftJobSpec) {
-    ui.heading("Job & Client Metadata");
+fn render_metadata_tab(ui: &mut Ui, client_info: &mut encodercraft_core::ClientInfo, target: &mut OutputTarget) {
+    ui.heading("Job & Dublin Core / Adobe XMP Metadata");
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
         ui.label("Submitting Application:");
-        ui.label(&spec.client_info.app_name);
+        ui.label(&client_info.app_name);
     });
 
-    let mut notes = spec.client_info.user_notes.clone().unwrap_or_default();
+    let mut notes = client_info.user_notes.clone().unwrap_or_default();
     ui.horizontal(|ui| {
         ui.label("User Notes:");
         if ui.text_edit_singleline(&mut notes).changed() {
-            spec.client_info.user_notes = Some(notes);
+            client_info.user_notes = Some(notes);
         }
     });
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.label(RichText::new("Embedded XMP Metadata (Dublin Core / Dynamic Media)").strong());
+
+    let mut meta = target.metadata.clone().unwrap_or_default();
+    let mut changed = false;
+
+    let mut title = meta.title.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Title (dc:title):");
+        if ui.text_edit_singleline(&mut title).changed() {
+            meta.title = if title.trim().is_empty() { None } else { Some(title) };
+            changed = true;
+        }
+    });
+
+    let mut creator = meta.creator.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Creator / Author (dc:creator):");
+        if ui.text_edit_singleline(&mut creator).changed() {
+            meta.creator = if creator.trim().is_empty() { None } else { Some(creator) };
+            changed = true;
+        }
+    });
+
+    let mut desc = meta.description.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Description (dc:description):");
+        if ui.text_edit_singleline(&mut desc).changed() {
+            meta.description = if desc.trim().is_empty() { None } else { Some(desc) };
+            changed = true;
+        }
+    });
+
+    let mut copyright = meta.copyright.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Copyright Notice (dc:rights):");
+        if ui.text_edit_singleline(&mut copyright).changed() {
+            meta.copyright = if copyright.trim().is_empty() { None } else { Some(copyright) };
+            changed = true;
+        }
+    });
+
+    ui.add_space(4.0);
+    if ui.checkbox(&mut meta.export_sidecar_xmp, "Export External Sidecar .xmp File").changed() {
+        changed = true;
+    }
+
+    if changed {
+        target.metadata = Some(meta);
+    }
 }

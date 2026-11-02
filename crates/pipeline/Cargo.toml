@@ -16,6 +16,7 @@ encodercraft-color = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-audio-dsp = { workspace = true }
 encodercraft-muxers = { workspace = true }
+encodercraft-platform = { workspace = true }
 encodercraft-video-codecs = { workspace = true }
 encodercraft-image-codecs = { workspace = true }
 filmcraft-captions = { workspace = true }
@@ -25,6 +26,7 @@ rayon = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+log = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

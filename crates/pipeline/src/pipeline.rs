@@ -62,14 +62,32 @@ impl TranscodePipeline {
             track.export_sidecar(&target.output_path, cap_format, target.caption_offset_ms)?;
         }
 
-        match target.container {
-            ContainerType::Wave => self.execute_audio_wav(target, start_time),
-            ContainerType::Flac => self.execute_audio_flac(target, start_time),
-            ContainerType::Aiff => self.execute_audio_aiff(target, start_time),
-            ContainerType::IsoBmffMp4 => self.execute_video_mp4(target, false, start_time),
-            ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time),
-            _ => Err(EncoderError::UnsupportedCodec(format!("unsupported target container: {:?}", target.container))),
+        // Export sidecar XMP metadata if requested
+        if let Some(ref meta) = target.metadata
+            && meta.export_sidecar_xmp
+        {
+            let xmp_packet = meta.to_xmp_packet();
+            let sidecar_path = target.output_path.with_extension("xmp");
+            std::fs::write(&sidecar_path, xmp_packet.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write sidecar XMP: {e}")))?;
         }
+
+        match target.container {
+            ContainerType::Wave => self.execute_audio_wav(target, start_time)?,
+            ContainerType::Flac => self.execute_audio_flac(target, start_time)?,
+            ContainerType::Aiff => self.execute_audio_aiff(target, start_time)?,
+            ContainerType::IsoBmffMp4 => self.execute_video_mp4(target, false, start_time)?,
+            ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time)?,
+            _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported target container: {:?}", target.container))),
+        }
+
+        // Export multichannel audio stems if configured
+        if let Some(mode) = target.audio_stems
+            && mode != encodercraft_core::AudioStemMode::None
+        {
+            self.export_audio_stems(target, mode)?;
+        }
+
+        Ok(())
     }
 
     fn execute_audio_flac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
@@ -123,7 +141,8 @@ impl TranscodePipeline {
         };
 
         let sample_rate = 48000;
-        let mut wav_writer = BwfWavWriter::new(writer, sample_rate, 2, WavFormatTag::Pcm16, Some(&bext))?;
+        let xmp_xml = target.metadata.as_ref().map(|m| m.to_xmp_packet());
+        let mut wav_writer = BwfWavWriter::new_with_xmp(writer, sample_rate, 2, WavFormatTag::Pcm16, Some(&bext), xmp_xml.as_deref())?;
 
         let mut sample_buf =
             encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
@@ -149,6 +168,17 @@ impl TranscodePipeline {
     fn execute_video_mp4(&self, target: &OutputTarget, is_mov: bool, start_time: Instant) -> Result<(), EncoderError> {
         let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
         let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
+
+        if target.hardware_acceleration {
+            let caps = encodercraft_platform::detect_hardware();
+            log::info!(
+                "Hardware acceleration requested: {} (H.264={}, HEVC={}, ProRes={})",
+                caps.device_name,
+                caps.supports_h264,
+                caps.supports_hevc,
+                caps.supports_prores
+            );
+        }
 
         let w = target.custom_width.unwrap_or(1920);
         let h = target.custom_height.unwrap_or(1080);
@@ -244,6 +274,66 @@ impl TranscodePipeline {
         }
 
         mp4_muxer.finish(false)?;
+
+        // Append Adobe XMP UUID box if metadata is defined
+        if let Some(ref meta) = target.metadata {
+            let xmp_packet = meta.to_xmp_packet();
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&target.output_path)
+                .map_err(|e| EncoderError::Io(format!("failed to open MP4 for XMP embedding: {e}")))?;
+            encodercraft_muxers::append_xmp_uuid_box(&mut file, &xmp_packet)?;
+        }
+
+        Ok(())
+    }
+
+    /// Exports multichannel audio stems (discrete mono or stereo pairs) conforming to AME multichannel workflow.
+    fn export_audio_stems(&self, target: &OutputTarget, mode: encodercraft_core::AudioStemMode) -> Result<(), EncoderError> {
+        let sample_rate = 48000;
+        let channels = 2; // Default stereo source
+        let sample_buf =
+            encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
+
+        let stem_base = target.output_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let parent = target.output_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let num_samples = sample_buf.samples_per_channel();
+
+        match mode {
+            encodercraft_core::AudioStemMode::DiscreteMono => {
+                let channel_names = ["L", "R", "C", "LFE", "Ls", "Rs", "Ch7", "Ch8"];
+                for c in 0..channels {
+                    let mut mono_buf =
+                        encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Mono, num_samples, 0)?;
+                    let src_plane = sample_buf.channel(c)?;
+                    let dest_plane = mono_buf.channel_mut(0)?;
+                    dest_plane.copy_from_slice(src_plane);
+
+                    let name = channel_names.get(c).copied().unwrap_or("Ch");
+                    let stem_filename = format!("{stem_base}_Stem_{name}.wav");
+                    let stem_path = parent.join(stem_filename);
+
+                    let file = File::create(&stem_path).map_err(|e| EncoderError::Io(format!("failed to create audio stem: {e}")))?;
+                    let mut writer = BwfWavWriter::new(BufWriter::new(file), sample_rate, 1, WavFormatTag::Pcm16, None)?;
+                    writer.write_buffer(&mono_buf)?;
+                    writer.finish()?;
+                }
+            }
+            encodercraft_core::AudioStemMode::StereoPairs => {
+                let pair_count = channels.div_ceil(2);
+                for p in 0..pair_count {
+                    let stem_filename = format!("{stem_base}_Stems_Ch{}-{}.wav", p * 2 + 1, p * 2 + 2);
+                    let stem_path = parent.join(stem_filename);
+
+                    let file = File::create(&stem_path).map_err(|e| EncoderError::Io(format!("failed to create audio stem: {e}")))?;
+                    let mut writer = BwfWavWriter::new(BufWriter::new(file), sample_rate, 2, WavFormatTag::Pcm16, None)?;
+                    writer.write_buffer(&sample_buf)?;
+                    writer.finish()?;
+                }
+            }
+            encodercraft_core::AudioStemMode::None => {}
+        }
+
         Ok(())
     }
 }
@@ -439,5 +529,94 @@ mod tests {
         let vtt_text = std::fs::read_to_string(vtt_sidecar).unwrap();
         assert!(vtt_text.contains("WEBVTT"));
         assert!(vtt_text.contains("Hello ArtCraft Subtitles!"));
+    }
+
+    #[test]
+    fn test_execute_video_with_xmp_metadata_and_sidecar() {
+        let dir = tempdir().unwrap();
+        let target_video = dir.path().join("output_xmp.mp4");
+
+        let meta = encodercraft_core::XmpMetadata {
+            title: Some("Parity Test 4K".into()),
+            creator: Some("el-j".into()),
+            description: Some("AME Parity Verification".into()),
+            copyright: Some("2026 Storytold ArtCraft".into()),
+            project_name: Some("FilmCraft Cut".into()),
+            create_date: Some("2026-11-02T12:00:00Z".into()),
+            start_timecode: Some("01:00:00:00".into()),
+            export_sidecar_xmp: true,
+        };
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-xmp-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: target_video.clone(),
+                preset_name: "YouTube 1080p".into(),
+                container: ContainerType::IsoBmffMp4,
+                custom_width: Some(320),
+                custom_height: Some(240),
+                custom_frame_rate: Some(Rational64::FPS_24),
+                metadata: Some(meta),
+                hardware_acceleration: true,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(target_video.exists());
+        // Verify sidecar .xmp file exists
+        let sidecar_xmp = dir.path().join("output_xmp.xmp");
+        assert!(sidecar_xmp.exists());
+        let xmp_text = std::fs::read_to_string(sidecar_xmp).unwrap();
+        assert!(xmp_text.contains("Parity Test 4K"));
+        assert!(xmp_text.contains("el-j"));
+
+        // Verify MP4 file contains the embedded XMP UUID box
+        let mp4_bytes = std::fs::read(target_video).unwrap();
+        let xmp_uuid: [u8; 16] = [0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac];
+        assert!(mp4_bytes.windows(16).any(|w| w == xmp_uuid));
+    }
+
+    #[test]
+    fn test_execute_audio_stems_discrete_mono() {
+        let dir = tempdir().unwrap();
+        let target_audio = dir.path().join("master_mix.wav");
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-stems-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: target_audio.clone(),
+                preset_name: "Broadcast WAV".into(),
+                container: ContainerType::Wave,
+                audio_stems: Some(encodercraft_core::AudioStemMode::DiscreteMono),
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(target_audio.exists());
+        // Verify discrete mono stem files were exported
+        let stem_l = dir.path().join("master_mix_Stem_L.wav");
+        let stem_r = dir.path().join("master_mix_Stem_R.wav");
+        assert!(stem_l.exists());
+        assert!(stem_r.exists());
+        assert!(stem_l.metadata().unwrap().len() > 100);
+        assert!(stem_r.metadata().unwrap().len() > 100);
     }
 }

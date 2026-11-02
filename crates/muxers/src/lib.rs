@@ -12,6 +12,6 @@ pub mod muxer;
 pub mod wav;
 
 pub use mkv::{MkvMuxer, MkvMuxerBuilder};
-pub use mp4::Mp4Muxer;
+pub use mp4::{Mp4Muxer, append_xmp_uuid_box};
 pub use muxer::{AudioSample, AudioStreamConfig, BextMetadata, VideoSample, VideoStreamConfig};
 pub use wav::{BwfWavWriter, WavFormatTag};

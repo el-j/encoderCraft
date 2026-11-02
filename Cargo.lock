@@ -907,13 +907,27 @@ dependencies = [
  "encodercraft-geom",
  "encodercraft-image-codecs",
  "encodercraft-muxers",
+ "encodercraft-platform",
  "encodercraft-video-codecs",
  "filmcraft-captions",
  "filmcraft-time",
+ "log",
  "proptest",
  "rayon",
  "serde",
  "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "encodercraft-platform"
+version = "0.1.0"
+dependencies = [
+ "encodercraft-color",
+ "encodercraft-core",
+ "encodercraft-geom",
+ "log",
+ "serde",
  "thiserror 2.0.21",
 ]
 

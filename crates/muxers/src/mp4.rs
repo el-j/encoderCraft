@@ -120,6 +120,21 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
     }
 }
 
+/// Appends an Adobe-compatible XMP metadata UUID box to an MP4/MOV stream.
+///
+/// Standard Adobe XMP UUID for ISO-BMFF: `be7acfcb-97a9-42e8-9c71-999491e3afac`.
+pub fn append_xmp_uuid_box<W: Write>(w: &mut W, xmp_xml: &str) -> Result<(), EncoderError> {
+    let xml_bytes = xmp_xml.as_bytes();
+    const XMP_UUID: [u8; 16] = [0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac];
+    let box_len = 4 + 4 + 16 + xml_bytes.len();
+    let box_len_u32 = u32::try_from(box_len).map_err(|_| EncoderError::Internal("XMP packet too large for MP4 box".into()))?;
+    w.write_all(&box_len_u32.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write XMP uuid box length: {e}")))?;
+    w.write_all(b"uuid").map_err(|e| EncoderError::Io(format!("failed to write XMP uuid box type: {e}")))?;
+    w.write_all(&XMP_UUID).map_err(|e| EncoderError::Io(format!("failed to write XMP uuid: {e}")))?;
+    w.write_all(xml_bytes).map_err(|e| EncoderError::Io(format!("failed to write XMP payload: {e}")))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

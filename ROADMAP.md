@@ -24,8 +24,8 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
 | **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
 | **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **117 passed** | Unit, fuzz, and integration tests across L0-L7. |
-| **Workspace Crates** | **17 crates** | 17 verified | Strictly layered L0 to L7 workspace architecture. |
+| **Automated Tests** | **>80 tests** | **120 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
 ---
@@ -111,3 +111,10 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Created interactive Custom Preset Editor dialog (`crates/ui-egui/src/preset_editor.rs`) and integrated Captions tab into Export Settings Inspector.
   - Built automated benchmarking & stress test harness (`xtask/src/bench.rs` via `cargo xtask bench`) profiling FPS and realtime multipliers across encoders, DSP, LUTs, and captions.
   - Verified 100% layer compliance and test suite (117 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).
+- [x] **M9: Hardware Acceleration Bridge, Multichannel Stems & XMP Metadata (2026-11-02)**
+  - Implemented `crates/platform` under ADR 0001 (`docs/adr-0001-hardware-acceleration.md`) isolating hardware acceleration (VideoToolbox, NVENC, VA-API, AMF, Windows Media Foundation) with fail-safe pure-Rust software fallbacks.
+  - Implemented Multichannel Audio Stem Export (`crates/pipeline/src/pipeline.rs`): supports discrete mono channel splitting (`_Stem_L.wav`, `_Stem_R.wav`) and stereo pair splitting (`_Stems_Ch1-2.wav`) with EBU Tech 3285 BWF headers.
+  - Implemented Standardized Dublin Core / Adobe XMP Metadata generation (`crates/core/src/metadata.rs`): XML/RDF packet generation, MP4/MOV UUID box embedding (`be7acfcb-97a9-42e8-9c71-999491e3afac`), BWF `axml` chunk embedding, and sidecar `.xmp` file export.
+  - Enhanced egui Export Settings Inspector: added hardware acceleration toggle, multichannel audio stems selector, and full XMP Dublin Core metadata editor with sidecar options.
+  - Enhanced CLI (`apps/encodercraft-cli`): added `--stems`, `--hardware`, `--xmp-title`, `--xmp-creator`, `--sidecar-xmp`, and `--caption` flags.
+  - Verified 100% layer compliance and test suite (120 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).

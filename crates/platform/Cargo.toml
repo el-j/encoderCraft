@@ -1,0 +1,18 @@
+[package]
+name = "encodercraft-platform"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+encodercraft-core = { path = "../core" }
+encodercraft-color = { path = "../color" }
+encodercraft-geom = { path = "../geom" }
+thiserror = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true
