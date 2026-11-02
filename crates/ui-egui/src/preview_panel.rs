@@ -136,18 +136,20 @@ pub fn render_preview_panel(ui: &mut Ui, state: &mut PreviewState, job: Option<&
         // --- 4. Transport & In/Out Controls ---
         ui.horizontal(|ui| {
             // Step Back
-            if ui.button(icons::STEP_BACK).on_hover_text("Previous Frame (Left Arrow)").clicked() {
+            if icons::button(ui, icons::Icon::StepBack, 22.0, false, tokens, "Previous Frame (Left Arrow)").clicked() {
                 state.current_frame = state.current_frame.saturating_sub(1);
             }
 
             // Play / Pause
-            let play_label = if state.is_playing { icons::PAUSE_QUEUE } else { icons::START_QUEUE };
-            if ui.button(play_label).on_hover_text("Play / Pause (Space)").clicked() {
+            let play_icon = if state.is_playing { icons::Icon::Pause } else { icons::Icon::Play };
+            if icons::button(ui, play_icon, 22.0, state.is_playing, tokens, "Play / Pause (Space)").clicked() {
                 state.is_playing = !state.is_playing;
             }
 
             // Step Forward
-            if ui.button(icons::STEP_FWD).on_hover_text("Next Frame (Right Arrow)").clicked() && state.current_frame < state.total_frames {
+            if icons::button(ui, icons::Icon::StepFwd, 22.0, false, tokens, "Next Frame (Right Arrow)").clicked()
+                && state.current_frame < state.total_frames
+            {
                 state.current_frame += 1;
             }
 

@@ -7,6 +7,7 @@ use encodercraft_engine::QueueManager;
 use encodercraft_presets::PresetRegistry;
 use encodercraft_watch::{PostProcessAction, WatchFolderConfig, WatchFolderService};
 
+use crate::icons;
 use crate::theme::Tokens;
 
 /// State for the watch folders panel.
@@ -43,7 +44,8 @@ pub fn render_watch_panel(
     ui.vertical(|ui| {
         // --- 1. Watch Folder Toolbar ---
         ui.horizontal(|ui| {
-            if ui.button("+ Add Watch Folder...").on_hover_text("Select an incoming directory to monitor").clicked()
+            if icons::button_with_label(ui, icons::Icon::Plus, "Add Watch Folder...", false, tokens, "Select an incoming directory to monitor")
+                .clicked()
                 && let Some(watch_dir) = rfd::FileDialog::new().set_title("Select Watch Folder to Monitor").pick_folder()
             {
                 let out_dir = watch_dir.join("_encoded");
@@ -55,20 +57,22 @@ pub fn render_watch_panel(
             }
 
             let can_remove = state.selected_config_idx.is_some_and(|idx| idx < state.configs.len());
-            if ui.add_enabled(can_remove, egui::Button::new("− Remove")).on_hover_text("Remove selected watch folder").clicked()
-                && let Some(idx) = state.selected_config_idx
-                && idx < state.configs.len()
-            {
-                state.configs.remove(idx);
-                state.selected_config_idx = None;
-                state.status_message = Some("Watch folder removed.".into());
-            }
+            ui.add_enabled_ui(can_remove, |ui| {
+                if icons::button_with_label(ui, icons::Icon::Minus, "Remove", false, tokens, "Remove selected watch folder").clicked()
+                    && let Some(idx) = state.selected_config_idx
+                    && idx < state.configs.len()
+                {
+                    state.configs.remove(idx);
+                    state.selected_config_idx = None;
+                    state.status_message = Some("Watch folder removed.".into());
+                }
+            });
 
             ui.separator();
 
-            let auto_label = if state.auto_encode_enabled { "✔ Auto-Encode: Active" } else { "✖ Auto-Encode: Paused" };
-            let auto_btn = ui.selectable_label(state.auto_encode_enabled, auto_label);
-            if auto_btn.clicked() {
+            let auto_icon = if state.auto_encode_enabled { icons::Icon::Check } else { icons::Icon::Close };
+            let auto_label = if state.auto_encode_enabled { "Auto-Encode: Active" } else { "Auto-Encode: Paused" };
+            if icons::button_with_label(ui, auto_icon, auto_label, state.auto_encode_enabled, tokens, "Toggle background auto-encode").clicked() {
                 state.auto_encode_enabled = !state.auto_encode_enabled;
             }
 
@@ -89,8 +93,10 @@ pub fn render_watch_panel(
         // --- 2. Watch Folders Table ---
         if state.configs.is_empty() {
             ui.vertical_centered(|ui| {
-                ui.add_space(36.0);
-                ui.heading(RichText::new("📁 No Watch Folders Configured").color(tokens.text_dim));
+                ui.add_space(24.0);
+                icons::icon_label(ui, icons::Icon::Folder, 32.0, tokens.text_dim);
+                ui.add_space(8.0);
+                ui.heading(RichText::new("No Watch Folders Configured").color(tokens.text_dim));
                 ui.label(
                     RichText::new("Watch folders automatically detect, settle, and encode files dropped into monitored directories.")
                         .color(tokens.text_dim),
@@ -163,10 +169,11 @@ pub fn render_watch_panel(
                         ui.label(RichText::new(post_label).small().color(tokens.text_dim));
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("🗑").on_hover_text("Delete watch folder").clicked() {
+                            if icons::button(ui, icons::Icon::Trash, 16.0, false, tokens, "Delete watch folder").clicked() {
                                 remove_idx = Some(idx);
                             }
-                            if ui.small_button("📁 Change Output...").clicked()
+                            if icons::button_with_label(ui, icons::Icon::Folder, "Change Output...", false, tokens, "Select Output Directory")
+                                .clicked()
                                 && let Some(new_out) = rfd::FileDialog::new().set_title("Select Output Directory").pick_folder()
                             {
                                 cfg.output_dir = new_out;

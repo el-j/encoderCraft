@@ -33,9 +33,9 @@ pub fn render_preset_browser(
 
         // Search input & New Preset action
         ui.horizontal(|ui| {
-            ui.label(icons::SEARCH);
+            icons::icon_label(ui, icons::Icon::Search, 14.0, tokens.text_dim);
             ui.add(egui::TextEdit::singleline(&mut state.search_query).hint_text("Search presets..."));
-            if ui.button(RichText::new("+ New").strong().color(tokens.accent_primary)).clicked() {
+            if icons::button_with_label(ui, icons::Icon::Plus, "New", false, tokens, "Create custom encoding preset").clicked() {
                 state.editor.open_new();
             }
         });
@@ -86,7 +86,7 @@ pub fn render_preset_browser(
             for preset in matching_presets {
                 let is_sel = state.selected_preset.as_ref().map(|p| &p.name) == Some(&preset.name);
                 ui.horizontal(|ui| {
-                    ui.label(icons::PRESET);
+                    icons::icon_label(ui, icons::Icon::Preset, 13.0, tokens.accent_primary);
                     let label = ui.selectable_label(is_sel, &preset.name);
                     if label.clicked() {
                         state.selected_preset = Some(preset.clone());
@@ -137,28 +137,39 @@ pub fn render_preset_browser(
                     // Apply to selected job buttons (batch support)
                     let has_jobs = !selected_job_ids.is_empty();
                     let count = selected_job_ids.len();
-                    let apply_text =
-                        if count > 1 { format!("{} Apply to {count} Jobs", icons::STATUS_OK) } else { format!("{} Apply to Job", icons::STATUS_OK) };
-                    let add_target_text = if count > 1 { format!("+ Add as Output to {count} Jobs") } else { "+ Add as Output".into() };
+                    let apply_text = if count > 1 { format!("Apply to {count} Jobs") } else { "Apply to Job".into() };
+                    let add_target_text = if count > 1 { format!("Add as Output to {count} Jobs") } else { "Add as Output".into() };
 
                     ui.horizontal(|ui| {
-                        let apply_btn =
-                            ui.add_enabled(has_jobs, egui::Button::new(apply_text)).on_hover_text("Replace target preset on selected job(s)");
-
-                        if apply_btn.clicked() {
-                            for job_id in selected_job_ids {
-                                apply_preset_to_job(job_id, preset, queue_mgr);
+                        ui.add_enabled_ui(has_jobs, |ui| {
+                            let apply_btn = icons::button_with_label(
+                                ui,
+                                icons::Icon::Check,
+                                &apply_text,
+                                false,
+                                tokens,
+                                "Replace target preset on selected job(s)",
+                            );
+                            if apply_btn.clicked() {
+                                for job_id in selected_job_ids {
+                                    apply_preset_to_job(job_id, preset, queue_mgr);
+                                }
                             }
-                        }
 
-                        let add_target_btn = ui
-                            .add_enabled(has_jobs, egui::Button::new(add_target_text))
-                            .on_hover_text("Add this preset as an additional output target on selected job(s)");
-                        if add_target_btn.clicked() {
-                            for job_id in selected_job_ids {
-                                add_preset_target_to_job(job_id, preset, queue_mgr);
+                            let add_target_btn = icons::button_with_label(
+                                ui,
+                                icons::Icon::Plus,
+                                &add_target_text,
+                                false,
+                                tokens,
+                                "Add this preset as an additional output target on selected job(s)",
+                            );
+                            if add_target_btn.clicked() {
+                                for job_id in selected_job_ids {
+                                    add_preset_target_to_job(job_id, preset, queue_mgr);
+                                }
                             }
-                        }
+                        });
                     });
                 });
         }

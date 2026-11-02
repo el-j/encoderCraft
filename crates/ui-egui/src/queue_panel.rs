@@ -168,13 +168,14 @@ pub fn render_queue_panel(
         let has_selection = selected_count > 0;
 
         ui.horizontal(|ui| {
-            let start_btn = ui.button(format!("{} Start Queue", icons::START_QUEUE)).on_hover_text("Start processing the batch queue (Enter)");
+            let start_btn =
+                icons::button_with_label(ui, icons::Icon::Play, "Start Queue", state.is_running, tokens, "Start processing the batch queue (Enter)");
             if start_btn.clicked() {
                 state.is_running = true;
                 let _ = queue_mgr.process_next_job();
             }
 
-            let pause_btn = ui.button(format!("{} Pause", icons::PAUSE_QUEUE)).on_hover_text("Pause active encode");
+            let pause_btn = icons::button_with_label(ui, icons::Icon::Pause, "Pause", false, tokens, "Pause active encode");
             if pause_btn.clicked() {
                 state.is_running = false;
                 for id in state.selected_ids_list() {
@@ -182,7 +183,7 @@ pub fn render_queue_panel(
                 }
             }
 
-            let stop_btn = ui.button(format!("{} Stop", icons::STOP_QUEUE)).on_hover_text("Stop batch queue (Esc)");
+            let stop_btn = icons::button_with_label(ui, icons::Icon::Stop, "Stop", false, tokens, "Stop batch queue (Esc)");
             if stop_btn.clicked() {
                 state.is_running = false;
                 for id in state.selected_ids_list() {
@@ -192,102 +193,102 @@ pub fn render_queue_panel(
 
             ui.separator();
 
-            let add_output_btn =
-                ui.add_enabled(has_selection, egui::Button::new("+ Add Output")).on_hover_text("Add another output target to selected job(s)");
-            if add_output_btn.clicked() {
-                for id in state.selected_ids_list() {
-                    if let Some(j) = jobs.iter().find(|j| j.spec.job_id == id) {
-                        let count = j.spec.targets.len() + 1;
-                        let new_target = encodercraft_core::OutputTarget {
-                            target_id: format!("target-{count}"),
-                            output_path: std::path::PathBuf::from(format!("output_{count}.mp4")),
-                            preset_name: "Match Source - High Bitrate".into(),
-                            container: encodercraft_core::ContainerType::IsoBmffMp4,
-                            custom_width: Some(1920),
-                            custom_height: Some(1080),
-                            custom_frame_rate: None,
-                            target_bitrate_kbps: Some(12000),
-                            target_lufs: Some(-14.0),
-                            ..Default::default()
-                        };
-                        let _ = queue_mgr.add_output_target(&id, new_target);
-                        state.expanded_jobs.insert(id);
+            ui.add_enabled_ui(has_selection, |ui| {
+                let add_output_btn =
+                    icons::button_with_label(ui, icons::Icon::Plus, "Add Output", false, tokens, "Add another output target to selected job(s)");
+                if add_output_btn.clicked() {
+                    for id in state.selected_ids_list() {
+                        if let Some(j) = jobs.iter().find(|j| j.spec.job_id == id) {
+                            let count = j.spec.targets.len() + 1;
+                            let new_target = encodercraft_core::OutputTarget {
+                                target_id: format!("target-{count}"),
+                                output_path: std::path::PathBuf::from(format!("output_{count}.mp4")),
+                                preset_name: "Match Source - High Bitrate".into(),
+                                container: encodercraft_core::ContainerType::IsoBmffMp4,
+                                custom_width: Some(1920),
+                                custom_height: Some(1080),
+                                custom_frame_rate: None,
+                                target_bitrate_kbps: Some(12000),
+                                target_lufs: Some(-14.0),
+                                ..Default::default()
+                            };
+                            let _ = queue_mgr.add_output_target(&id, new_target);
+                            state.expanded_jobs.insert(id);
+                        }
                     }
                 }
-            }
 
-            let dup_label = if selected_count > 1 {
-                format!("{} Duplicate ({selected_count})", icons::DUPLICATE_JOB)
-            } else {
-                format!("{} Duplicate", icons::DUPLICATE_JOB)
-            };
-            let dup_btn = ui.add_enabled(has_selection, egui::Button::new(dup_label)).on_hover_text("Duplicate selected job(s) (Cmd+D)");
-            if dup_btn.clicked() {
-                let ids = state.selected_ids_list();
-                for id in ids {
-                    let _ = queue_mgr.duplicate_job(&id);
+                let dup_label = if selected_count > 1 { format!("Duplicate ({selected_count})") } else { "Duplicate".into() };
+                let dup_btn = icons::button_with_label(ui, icons::Icon::Duplicate, &dup_label, false, tokens, "Duplicate selected job(s) (Cmd+D)");
+                if dup_btn.clicked() {
+                    let ids = state.selected_ids_list();
+                    for id in ids {
+                        let _ = queue_mgr.duplicate_job(&id);
+                    }
                 }
-            }
 
-            let can_move_up = has_selection;
-            let move_up_btn = ui.add_enabled(can_move_up, egui::Button::new("▲")).on_hover_text("Move selected up in queue (Alt+Up)");
-            if move_up_btn.clicked() {
-                for id in state.selected_ids_list() {
-                    let _ = queue_mgr.move_job_up(&id);
+                let move_up_btn = icons::button(ui, icons::Icon::ArrowUp, 20.0, false, tokens, "Move selected up in queue (Alt+Up)");
+                if move_up_btn.clicked() {
+                    for id in state.selected_ids_list() {
+                        let _ = queue_mgr.move_job_up(&id);
+                    }
                 }
-            }
 
-            let can_move_down = has_selection;
-            let move_down_btn = ui.add_enabled(can_move_down, egui::Button::new("▼")).on_hover_text("Move selected down in queue (Alt+Down)");
-            if move_down_btn.clicked() {
-                let mut ids = state.selected_ids_list();
-                ids.reverse();
-                for id in ids {
-                    let _ = queue_mgr.move_job_down(&id);
+                let move_down_btn = icons::button(ui, icons::Icon::ArrowDown, 20.0, false, tokens, "Move selected down in queue (Alt+Down)");
+                if move_down_btn.clicked() {
+                    let mut ids = state.selected_ids_list();
+                    ids.reverse();
+                    for id in ids {
+                        let _ = queue_mgr.move_job_down(&id);
+                    }
                 }
-            }
 
-            let reset_label = if selected_count > 1 { format!("⟳ Reset ({selected_count})") } else { "⟳ Reset".into() };
-            let reset_btn = ui.add_enabled(has_selection, egui::Button::new(reset_label)).on_hover_text("Reset selected job(s) back to Ready");
-            if reset_btn.clicked() {
-                for id in state.selected_ids_list() {
-                    let _ = queue_mgr.reset_job_status(&id);
+                let reset_label = if selected_count > 1 { format!("Reset ({selected_count})") } else { "Reset".into() };
+                let reset_btn = icons::button_with_label(ui, icons::Icon::Reset, &reset_label, false, tokens, "Reset selected job(s) back to Ready");
+                if reset_btn.clicked() {
+                    for id in state.selected_ids_list() {
+                        let _ = queue_mgr.reset_job_status(&id);
+                    }
                 }
-            }
 
-            let remove_label =
-                if selected_count > 1 { format!("{} Remove ({selected_count})", icons::REMOVE_JOB) } else { format!("{} Remove", icons::REMOVE_JOB) };
-            let remove_btn = ui.add_enabled(has_selection, egui::Button::new(remove_label)).on_hover_text("Remove selected job(s) (Delete)");
-            if remove_btn.clicked() {
-                let ids = state.selected_ids_list();
-                for id in ids {
-                    let _ = queue_mgr.remove_job(&id);
+                let remove_label = if selected_count > 1 { format!("Remove ({selected_count})") } else { "Remove".into() };
+                let remove_btn = icons::button_with_label(ui, icons::Icon::Trash, &remove_label, false, tokens, "Remove selected job(s) (Delete)");
+                if remove_btn.clicked() {
+                    let ids = state.selected_ids_list();
+                    for id in ids {
+                        let _ = queue_mgr.remove_job(&id);
+                    }
+                    state.clear_selection();
                 }
-                state.clear_selection();
-            }
 
-            let inspect_btn = ui
-                .add_enabled(has_selection, egui::Button::new(format!("{} Settings...", icons::SETTINGS)))
-                .on_hover_text("Open Export Settings dialog");
-            if inspect_btn.clicked()
-                && let Some(ref id) = state.selected_job_id
-                && let Some(j) = jobs.iter().find(|j| &j.spec.job_id == id)
-            {
-                *on_inspect_job = Some(j.spec.clone());
-            }
+                let inspect_btn = icons::button_with_label(ui, icons::Icon::Gear, "Settings...", false, tokens, "Open Export Settings dialog");
+                if inspect_btn.clicked()
+                    && let Some(ref id) = state.selected_job_id
+                    && let Some(j) = jobs.iter().find(|j| &j.spec.job_id == id)
+                {
+                    *on_inspect_job = Some(j.spec.clone());
+                }
+            });
 
             ui.separator();
 
             let has_completed = jobs.iter().any(|j| j.status == JobStatus::Completed);
-            let clear_btn = ui.add_enabled(has_completed, egui::Button::new("Clear Finished")).on_hover_text("Remove finished jobs from queue");
-            if clear_btn.clicked() {
-                let _ = queue_mgr.clear_completed_jobs();
-            }
+            ui.add_enabled_ui(has_completed, |ui| {
+                if ui.button("Clear Finished").on_hover_text("Remove finished jobs from queue").clicked() {
+                    let _ = queue_mgr.clear_completed_jobs();
+                }
+            });
 
             if selected_count > 1 {
-                let stitch_btn = ui
-                    .button(format!("🔗 Stitch Selected ({selected_count})"))
-                    .on_hover_text("Combine selected jobs into one continuous stitched sequence");
+                let stitch_label = format!("Stitch Selected ({selected_count})");
+                let stitch_btn = icons::button_with_label(
+                    ui,
+                    icons::Icon::Link,
+                    &stitch_label,
+                    false,
+                    tokens,
+                    "Combine selected jobs into one continuous stitched sequence",
+                );
                 if stitch_btn.clicked() {
                     let ids = state.selected_ids_list();
                     if let Some(first_job) = jobs.iter().find(|j| ids.contains(&j.spec.job_id))
@@ -299,17 +300,24 @@ pub fn render_queue_panel(
                 }
             }
 
-            let set_dir_btn = ui
-                .add_enabled(has_selection, egui::Button::new("📁 Destination..."))
-                .on_hover_text("Batch set output destination directory for selected job(s)");
-            if set_dir_btn.clicked()
-                && let Some(folder) = rfd::FileDialog::new().set_title("Select Destination Folder").pick_folder()
-            {
-                let ids = state.selected_ids_list();
-                let _ = queue_mgr.set_jobs_output_dir(&ids, folder);
-            }
+            ui.add_enabled_ui(has_selection, |ui| {
+                let set_dir_btn = icons::button_with_label(
+                    ui,
+                    icons::Icon::Folder,
+                    "Destination...",
+                    false,
+                    tokens,
+                    "Batch set output destination directory for selected job(s)",
+                );
+                if set_dir_btn.clicked()
+                    && let Some(folder) = rfd::FileDialog::new().set_title("Select Destination Folder").pick_folder()
+                {
+                    let ids = state.selected_ids_list();
+                    let _ = queue_mgr.set_jobs_output_dir(&ids, folder);
+                }
+            });
 
-            let log_btn = ui.button("📜 Show Log...").on_hover_text("Open Encoding Activity Log (Cmd+L)");
+            let log_btn = icons::button_with_label(ui, icons::Icon::Clock, "Show Log...", false, tokens, "Open Encoding Activity Log (Cmd+L)");
             if log_btn.clicked() {
                 *on_open_log = true;
             }
@@ -413,8 +421,8 @@ fn render_job_row(
     egui::Frame::new().fill(row_bg).corner_radius(4).inner_margin(6.0).show(ui, |ui| {
         ui.horizontal(|ui| {
             // Expand / Collapse arrow for multi-targets
-            let arrow = if is_expanded { "▼" } else { "▶" };
-            if ui.small_button(arrow).clicked() {
+            let arrow_icon = if is_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+            if icons::button(ui, arrow_icon, 16.0, false, tokens, "Toggle output targets").clicked() {
                 if is_expanded {
                     state.expanded_jobs.remove(&job_id);
                 } else {
@@ -624,10 +632,12 @@ fn render_job_row(
 
                         // Actions per target
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if job.spec.targets.len() > 1 && ui.small_button("🗑").on_hover_text("Remove output target").clicked() {
+                            if job.spec.targets.len() > 1
+                                && icons::button(ui, icons::Icon::Trash, 16.0, false, tokens, "Remove output target").clicked()
+                            {
                                 let _ = queue_mgr.remove_output_target(&job_id, idx);
                             }
-                            if ui.small_button("⎘").on_hover_text("Duplicate output target").clicked() {
+                            if icons::button(ui, icons::Icon::Duplicate, 16.0, false, tokens, "Duplicate output target").clicked() {
                                 let _ = queue_mgr.duplicate_output_target(&job_id, idx);
                             }
                         });

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use egui::RichText;
 use encodercraft_engine::QueueManager;
 
+use crate::icons;
 use crate::theme::Tokens;
 
 /// State for the encoding activity log modal dialog.
@@ -23,7 +24,7 @@ pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_
     let mut is_open = state.is_open;
     let mut close_requested = false;
 
-    egui::Window::new("📜 Encoding Activity Log").open(&mut is_open).resizable(true).default_size(egui::vec2(720.0, 440.0)).collapsible(false).show(
+    egui::Window::new("Encoding Activity Log").open(&mut is_open).resizable(true).default_size(egui::vec2(720.0, 440.0)).collapsible(false).show(
         ctx,
         |ui| {
             let entries = queue_mgr.list_log_entries();
@@ -32,7 +33,7 @@ pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_
                 ui.label(RichText::new("Filter:").strong());
                 ui.add(egui::TextEdit::singleline(&mut state.filter).hint_text("Search by clip, preset, or status..."));
 
-                if !state.filter.is_empty() && ui.small_button("✖").clicked() {
+                if !state.filter.is_empty() && icons::button(ui, icons::Icon::Close, 16.0, false, tokens, "Clear filter").clicked() {
                     state.filter.clear();
                 }
 

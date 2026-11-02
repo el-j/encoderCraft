@@ -7,6 +7,7 @@ use encodercraft_core::CraftJobSpec;
 use encodercraft_engine::QueueManager;
 use encodercraft_presets::PresetRegistry;
 
+use crate::icons;
 use crate::inspector::{InspectorState, render_inspector_modal};
 use crate::log_dialog::{LogDialogState, render_log_dialog};
 use crate::prefs_dialog::{PrefsDialogState, render_prefs_dialog};
@@ -321,10 +322,9 @@ impl EncoderCraftApp {
                 if t.elapsed().as_secs() < 5 {
                     egui::Frame::new().fill(self.tokens.status_completed.gamma_multiply(0.2)).corner_radius(4).inner_margin(6.0).show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            icons::icon_label(ui, icons::Icon::Check, 15.0, self.tokens.status_completed);
                             ui.label(
-                                RichText::new("✔ All batch transcode queue jobs completed successfully!")
-                                    .color(self.tokens.status_completed)
-                                    .strong(),
+                                RichText::new("All batch transcode queue jobs completed successfully!").color(self.tokens.status_completed).strong(),
                             );
                         });
                     });
@@ -343,7 +343,9 @@ impl EncoderCraftApp {
                         .inner_margin(12.0)
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
-                                ui.heading(RichText::new("📥 Drop as Separate Sources").color(self.tokens.accent_primary));
+                                icons::icon_label(ui, icons::Icon::ListView, 20.0, self.tokens.accent_primary);
+                                ui.add_space(2.0);
+                                ui.heading(RichText::new("Drop as Separate Sources").color(self.tokens.accent_primary));
                                 ui.label("Each file queued as an independent job.");
                             });
                         });
@@ -355,7 +357,9 @@ impl EncoderCraftApp {
                         .inner_margin(12.0)
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
-                                ui.heading(RichText::new("🔗 Drop to Stitch Clips Together").color(egui::Color32::from_rgb(168, 85, 247)));
+                                icons::icon_label(ui, icons::Icon::Link, 20.0, egui::Color32::from_rgb(168, 85, 247));
+                                ui.add_space(2.0);
+                                ui.heading(RichText::new("Drop to Stitch Clips Together").color(egui::Color32::from_rgb(168, 85, 247)));
                                 ui.label("Combines files into one continuous sequence.");
                             });
                         });
@@ -368,14 +372,30 @@ impl EncoderCraftApp {
                 let queue_count = self.queue_mgr.list_jobs().len();
                 let watch_count = self.watch_state.configs.len();
 
-                let queue_label = format!("≡ Queue ({queue_count})");
-                let q_btn = ui.selectable_label(self.active_tab == MainViewTab::Queue, RichText::new(queue_label).strong());
+                let queue_label = format!("Queue ({queue_count})");
+                let is_queue = self.active_tab == MainViewTab::Queue;
+                let q_btn = icons::button_with_label(
+                    ui,
+                    icons::Icon::ListView,
+                    &queue_label,
+                    is_queue,
+                    &self.tokens,
+                    "View and manage batch transcode queue",
+                );
                 if q_btn.clicked() {
                     self.active_tab = MainViewTab::Queue;
                 }
 
-                let watch_label = format!("📁 Watch Folders ({watch_count})");
-                let w_btn = ui.selectable_label(self.active_tab == MainViewTab::WatchFolders, RichText::new(watch_label).strong());
+                let watch_label = format!("Watch Folders ({watch_count})");
+                let is_watch = self.active_tab == MainViewTab::WatchFolders;
+                let w_btn = icons::button_with_label(
+                    ui,
+                    icons::Icon::Folder,
+                    &watch_label,
+                    is_watch,
+                    &self.tokens,
+                    "View and configure automated watch folders",
+                );
                 if w_btn.clicked() {
                     self.active_tab = MainViewTab::WatchFolders;
                 }

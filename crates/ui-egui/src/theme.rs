@@ -36,6 +36,11 @@ pub struct Tokens {
     pub status_failed: Color32,
     pub status_paused: Color32,
     pub status_cancelled: Color32,
+    pub icon: Color32,
+    pub icon_active: Color32,
+    pub hover: Color32,
+    pub pressed: Color32,
+    pub radius_sm: f32,
 }
 
 impl Tokens {
@@ -62,6 +67,11 @@ impl Tokens {
             status_failed: Color32::from_rgb(255, 69, 58),
             status_paused: Color32::from_rgb(175, 82, 222),
             status_cancelled: Color32::from_rgb(100, 100, 110),
+            icon: Color32::from_rgb(180, 180, 190),
+            icon_active: Color32::from_rgb(14, 134, 255),
+            hover: Color32::from_rgb(52, 52, 58),
+            pressed: Color32::from_rgb(60, 60, 68),
+            radius_sm: 4.0,
         }
     }
 
@@ -88,6 +98,11 @@ impl Tokens {
             status_failed: Color32::RED,
             status_paused: Color32::from_rgb(255, 180, 255),
             status_cancelled: Color32::GRAY,
+            icon: Color32::WHITE,
+            icon_active: Color32::YELLOW,
+            hover: Color32::from_rgb(40, 40, 40),
+            pressed: Color32::from_rgb(60, 60, 60),
+            radius_sm: 2.0,
         }
     }
 
