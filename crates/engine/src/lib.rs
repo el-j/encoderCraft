@@ -14,4 +14,4 @@ pub mod state;
 pub use cmd::{CommandRegistry, CommandSpec};
 pub use ipc::EngineIpcHandler;
 pub use queue::QueueManager;
-pub use state::{QueueJournal, QueuedJob, load_journal, save_journal_atomic};
+pub use state::{AppPreferences, LogEntry, QueueJournal, QueuedJob, load_journal, load_preferences, save_journal_atomic, save_preferences_atomic};

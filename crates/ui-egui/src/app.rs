@@ -8,6 +8,8 @@ use encodercraft_engine::QueueManager;
 use encodercraft_presets::PresetRegistry;
 
 use crate::inspector::{InspectorState, render_inspector_modal};
+use crate::log_dialog::{LogDialogState, render_log_dialog};
+use crate::prefs_dialog::{PrefsDialogState, render_prefs_dialog};
 use crate::preset_browser::{PresetBrowserState, render_preset_browser};
 use crate::preview_panel::{PreviewState, render_preview_panel};
 use crate::queue_panel::{QueuePanelState, render_queue_panel};
@@ -34,8 +36,12 @@ pub struct EncoderCraftApp {
     pub preset_state: PresetBrowserState,
     pub preview_state: PreviewState,
     pub inspector_state: InspectorState,
+    pub log_state: LogDialogState,
+    pub prefs_state: PrefsDialogState,
     pub show_about_dialog: bool,
     pub last_watch_tick: Option<std::time::Instant>,
+    pub was_worker_running: bool,
+    pub completion_banner_timer: Option<std::time::Instant>,
 }
 
 impl EncoderCraftApp {
@@ -55,8 +61,12 @@ impl EncoderCraftApp {
             preset_state: PresetBrowserState::default(),
             preview_state: PreviewState::default(),
             inspector_state: InspectorState::default(),
+            log_state: LogDialogState::default(),
+            prefs_state: PrefsDialogState::default(),
             show_about_dialog: false,
             last_watch_tick: None,
+            was_worker_running: false,
+            completion_banner_timer: None,
         }
     }
 
@@ -74,6 +84,16 @@ impl EncoderCraftApp {
             for path in files {
                 self.add_file_job(path);
             }
+        }
+
+        // Global keyboard shortcut: Cmd+L for Encoding Log
+        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::L)) {
+            self.log_state.is_open = !self.log_state.is_open;
+        }
+
+        // Global keyboard shortcut: Cmd+, for Preferences
+        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) {
+            self.prefs_state.is_open = !self.prefs_state.is_open;
         }
 
         // 1. Top Application Menu Bar
@@ -119,6 +139,13 @@ impl EncoderCraftApp {
 
                     ui.separator();
 
+                    if ui.button("Show Encoding Log... (Cmd+L)").clicked() {
+                        self.log_state.is_open = true;
+                        ui.close();
+                    }
+
+                    ui.separator();
+
                     if ui.button("Quick Add Demo Clip").clicked() {
                         self.quick_add_demo_job();
                         ui.close();
@@ -126,6 +153,11 @@ impl EncoderCraftApp {
                 });
 
                 ui.menu_button("Edit", |ui| {
+                    if ui.button("Preferences... (Cmd+,)").clicked() {
+                        self.prefs_state.is_open = true;
+                        ui.close();
+                    }
+                    ui.separator();
                     ui.menu_button("Theme", |ui| {
                         if ui.button("Dark").clicked() {
                             self.brightness = Brightness::Dark;
@@ -141,14 +173,38 @@ impl EncoderCraftApp {
                 ui.menu_button("Queue", |ui| {
                     if ui.button("Start Queue (Enter)").clicked() {
                         self.queue_state.is_running = true;
-                        let _ = self.queue_mgr.process_next_job();
+                        self.queue_mgr.start_background_worker();
+                        ui.close();
                     }
                     if ui.button("Pause Queue (Esc)").clicked() {
                         self.queue_state.is_running = false;
+                        self.queue_mgr.pause_worker();
+                        ui.close();
+                    }
+                    if ui.button("Stop Queue").clicked() {
+                        self.queue_state.is_running = false;
+                        self.queue_mgr.stop_worker();
+                        ui.close();
+                    }
+                    ui.separator();
+                    let sel_count = self.queue_state.selected_job_ids.len();
+                    if ui.add_enabled(sel_count > 1, egui::Button::new("Stitch Selected Clips...")).clicked() {
+                        let ids = self.queue_state.selected_ids_list();
+                        let out = std::env::temp_dir().join("stitched_batch.mp4");
+                        let _ = self.queue_mgr.stitch_selected_jobs(&ids, out, "Match Source - High Bitrate".into());
+                        ui.close();
+                    }
+                    if ui.add_enabled(sel_count > 0, egui::Button::new("Set Destination Directory...")).clicked() {
+                        if let Some(folder) = rfd::FileDialog::new().set_title("Select Output Directory").pick_folder() {
+                            let ids = self.queue_state.selected_ids_list();
+                            let _ = self.queue_mgr.set_jobs_output_dir(&ids, folder);
+                        }
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button("Clear Finished Jobs").clicked() {
                         let _ = self.queue_mgr.clear_completed_jobs();
+                        ui.close();
                     }
                 });
 
@@ -222,16 +278,31 @@ impl EncoderCraftApp {
             trigger_watch_scan(&mut self.watch_state, &self.queue_mgr, &self.preset_registry);
         }
 
-        let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
-        if self.queue_state.is_running || is_hovering || should_poll_watch {
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
-            if self.queue_state.is_running {
-                let _ = self.queue_mgr.process_next_job();
+        let is_worker_active = self.queue_mgr.is_worker_running();
+        if self.was_worker_running && !is_worker_active {
+            // Queue finished!
+            if self.prefs_state.prefs.play_completion_sound {
+                self.completion_banner_timer = Some(std::time::Instant::now());
             }
         }
+        self.was_worker_running = is_worker_active;
+        if is_worker_active {
+            self.queue_state.is_running = true;
+        }
+
+        let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+        if self.queue_state.is_running || is_worker_active || is_hovering || should_poll_watch {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
+
+        let selected_job_spec = self
+            .queue_state
+            .selected_job_id
+            .as_ref()
+            .and_then(|id| self.queue_mgr.list_jobs().into_iter().find(|j| &j.spec.job_id == id).map(|j| j.spec));
 
         egui::Panel::right("right_side_dock").resizable(true).default_size(360.0).show(ui, |ui| {
-            render_preview_panel(ui, &mut self.preview_state, None, &self.tokens);
+            render_preview_panel(ui, &mut self.preview_state, selected_job_spec.as_ref(), &self.tokens);
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(4.0);
@@ -246,6 +317,23 @@ impl EncoderCraftApp {
         });
 
         egui::CentralPanel::default().show(ui, |ui| {
+            if let Some(t) = self.completion_banner_timer {
+                if t.elapsed().as_secs() < 5 {
+                    egui::Frame::new().fill(self.tokens.status_completed.gamma_multiply(0.2)).corner_radius(4).inner_margin(6.0).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("✔ All batch transcode queue jobs completed successfully!")
+                                    .color(self.tokens.status_completed)
+                                    .strong(),
+                            );
+                        });
+                    });
+                    ui.add_space(2.0);
+                } else {
+                    self.completion_banner_timer = None;
+                }
+            }
+
             if is_hovering {
                 ui.horizontal(|ui| {
                     egui::Frame::new()
@@ -299,7 +387,7 @@ impl EncoderCraftApp {
 
             match self.active_tab {
                 MainViewTab::Queue => {
-                    render_queue_panel(ui, &mut self.queue_state, &self.queue_mgr, &self.tokens, &mut inspect_job);
+                    render_queue_panel(ui, &mut self.queue_state, &self.queue_mgr, &self.tokens, &mut inspect_job, &mut self.log_state.is_open);
                 }
                 MainViewTab::WatchFolders => {
                     render_watch_panel(ui, &mut self.watch_state, &self.queue_mgr, &self.preset_registry, &self.tokens);
@@ -323,7 +411,22 @@ impl EncoderCraftApp {
             let _ = self.queue_mgr.submit_job(new_spec);
         }
 
-        // 5. About Dialog
+        // 5. Log Dialog
+        render_log_dialog(&ctx, &mut self.log_state, &self.queue_mgr, &self.tokens);
+
+        // 6. Preferences Dialog
+        let mut theme_change = None;
+        render_prefs_dialog(&ctx, &mut self.prefs_state, &self.tokens, &mut theme_change);
+        if let Some(theme) = theme_change {
+            if theme == "High Contrast" {
+                self.brightness = Brightness::HighContrast;
+            } else {
+                self.brightness = Brightness::Dark;
+            }
+            self.tokens = Tokens::for_brightness(self.brightness);
+        }
+
+        // 7. About Dialog
         if self.show_about_dialog {
             egui::Window::new("About encoderCraft").collapsible(false).resizable(false).open(&mut self.show_about_dialog).show(&ctx, |ui| {
                 ui.heading("encoderCraft 0.1.0");

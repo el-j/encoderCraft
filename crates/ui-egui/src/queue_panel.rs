@@ -85,6 +85,24 @@ impl QueuePanelState {
     }
 }
 
+/// Reveals a file or directory in the platform's default file manager (AME Parity).
+#[allow(clippy::zombie_processes)]
+pub fn reveal_in_file_manager(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer").arg(format!("/select,\"{}\"", path.display())).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let parent = path.parent().unwrap_or(path);
+        let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+    }
+}
+
 /// Renders the queue panel with batch toolbar, global progress, and hierarchical job table.
 pub fn render_queue_panel(
     ui: &mut Ui,
@@ -92,6 +110,7 @@ pub fn render_queue_panel(
     queue_mgr: &Arc<QueueManager>,
     tokens: &Tokens,
     on_inspect_job: &mut Option<CraftJobSpec>,
+    on_open_log: &mut bool,
 ) {
     let jobs = queue_mgr.list_jobs();
 
@@ -264,6 +283,36 @@ pub fn render_queue_panel(
             if clear_btn.clicked() {
                 let _ = queue_mgr.clear_completed_jobs();
             }
+
+            if selected_count > 1 {
+                let stitch_btn = ui
+                    .button(format!("🔗 Stitch Selected ({selected_count})"))
+                    .on_hover_text("Combine selected jobs into one continuous stitched sequence");
+                if stitch_btn.clicked() {
+                    let ids = state.selected_ids_list();
+                    if let Some(first_job) = jobs.iter().find(|j| ids.contains(&j.spec.job_id))
+                        && let Some(target) = first_job.spec.targets.first()
+                    {
+                        let out_path = target.output_path.with_file_name("stitched_batch.mp4");
+                        let _ = queue_mgr.stitch_selected_jobs(&ids, out_path, "Match Source - High Bitrate".into());
+                    }
+                }
+            }
+
+            let set_dir_btn = ui
+                .add_enabled(has_selection, egui::Button::new("📁 Destination..."))
+                .on_hover_text("Batch set output destination directory for selected job(s)");
+            if set_dir_btn.clicked()
+                && let Some(folder) = rfd::FileDialog::new().set_title("Select Destination Folder").pick_folder()
+            {
+                let ids = state.selected_ids_list();
+                let _ = queue_mgr.set_jobs_output_dir(&ids, folder);
+            }
+
+            let log_btn = ui.button("📜 Show Log...").on_hover_text("Open Encoding Activity Log (Cmd+L)");
+            if log_btn.clicked() {
+                *on_open_log = true;
+            }
         });
 
         ui.add_space(4.0);
@@ -421,6 +470,70 @@ fn render_job_row(
                 *on_inspect_job = Some(job.spec.clone());
             }
 
+            job_select_btn.context_menu(|ui| {
+                let out_path = job.spec.targets.first().map(|t| t.output_path.clone());
+                let src_path = match &job.spec.source {
+                    encodercraft_core::SourceDescriptor::File { path, .. } => Some(path.clone()),
+                    _ => None,
+                };
+
+                if let Some(ref p) = out_path {
+                    if ui.button("Reveal Output in Finder / Explorer").clicked() {
+                        reveal_in_file_manager(p);
+                        ui.close();
+                    }
+                    if ui.button("Copy Output Path").clicked() {
+                        ui.ctx().copy_text(p.display().to_string());
+                        ui.close();
+                    }
+                }
+
+                if let Some(ref p) = src_path {
+                    if ui.button("Reveal Source in Finder / Explorer").clicked() {
+                        reveal_in_file_manager(p);
+                        ui.close();
+                    }
+                    if ui.button("Copy Source Path").clicked() {
+                        ui.ctx().copy_text(p.display().to_string());
+                        ui.close();
+                    }
+                }
+
+                ui.separator();
+
+                if ui.button("Export Settings...").clicked() {
+                    *on_inspect_job = Some(job.spec.clone());
+                    ui.close();
+                }
+
+                if ui.button("Duplicate").clicked() {
+                    let _ = queue_mgr.duplicate_job(&job_id);
+                    ui.close();
+                }
+
+                if ui.button("Reset Status").clicked() {
+                    let _ = queue_mgr.reset_job_status(&job_id);
+                    ui.close();
+                }
+
+                if ui.button("Remove").clicked() {
+                    let _ = queue_mgr.remove_job(&job_id);
+                    ui.close();
+                }
+
+                if state.selected_job_ids.len() > 1 {
+                    ui.separator();
+                    if ui.button(format!("Stitch {} Selected Clips...", state.selected_job_ids.len())).clicked() {
+                        if let Some(ref first_path) = out_path {
+                            let out = first_path.with_file_name("stitched_batch.mp4");
+                            let ids = state.selected_ids_list();
+                            let _ = queue_mgr.stitch_selected_jobs(&ids, out, "Match Source - High Bitrate".into());
+                        }
+                        ui.close();
+                    }
+                }
+            });
+
             // Preset Name
             if let Some(target) = job.spec.targets.first() {
                 ui.label(RichText::new(format!("➔ {}", target.preset_name)).color(tokens.text_secondary));
@@ -472,13 +585,35 @@ fn render_job_row(
                         ui.label(RichText::new(format!("Target #{}:", idx + 1)).small().color(tokens.text_dim));
 
                         // Preset name clickable link
-                        if ui
+                        let target_link = ui
                             .link(RichText::new(&target.preset_name).color(tokens.accent_primary))
-                            .on_hover_text("Inspect settings for this target")
-                            .clicked()
-                        {
+                            .on_hover_text("Inspect settings for this target");
+                        if target_link.clicked() {
                             *on_inspect_job = Some(job.spec.clone());
                         }
+
+                        target_link.context_menu(|ui| {
+                            if ui.button("Reveal Output in Finder / Explorer").clicked() {
+                                reveal_in_file_manager(&target.output_path);
+                                ui.close();
+                            }
+                            if ui.button("Copy Output Path").clicked() {
+                                ui.ctx().copy_text(target.output_path.display().to_string());
+                                ui.close();
+                            }
+                            if ui.button("Inspect Settings...").clicked() {
+                                *on_inspect_job = Some(job.spec.clone());
+                                ui.close();
+                            }
+                            if ui.button("Duplicate Target").clicked() {
+                                let _ = queue_mgr.duplicate_output_target(&job_id, idx);
+                                ui.close();
+                            }
+                            if job.spec.targets.len() > 1 && ui.button("Remove Target").clicked() {
+                                let _ = queue_mgr.remove_output_target(&job_id, idx);
+                                ui.close();
+                            }
+                        });
 
                         // Container format tag
                         ui.label(RichText::new(format!("{:?}", target.container)).small().color(tokens.text_dim));

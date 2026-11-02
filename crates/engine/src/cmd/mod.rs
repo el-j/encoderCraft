@@ -182,6 +182,70 @@ impl CommandRegistry {
             let job_id = q.stitch_sources_into_job(paths, output_path, preset_name)?;
             Ok(serde_json::json!({ "jobId": job_id }))
         }));
+
+        // queue.stitch_selected
+        self.register(CommandSpec::new(
+            "queue.stitch_selected",
+            "Stitch Selected Jobs",
+            "Combines selected queue jobs into one stitched job",
+            |q, params| {
+                let job_ids: Vec<String> = serde_json::from_value(params.get("jobIds").cloned().unwrap_or(Value::Array(Vec::new())))
+                    .map_err(|e| EncoderError::InvalidJobSpec(format!("invalid jobIds: {e}")))?;
+                let output_path = params
+                    .get("outputPath")
+                    .and_then(Value::as_str)
+                    .map(std::path::PathBuf::from)
+                    .ok_or_else(|| EncoderError::InvalidJobSpec("missing 'outputPath'".into()))?;
+                let preset_name = params.get("presetName").and_then(Value::as_str).unwrap_or("Match Source - High Bitrate").to_string();
+
+                let job_id = q.stitch_selected_jobs(&job_ids, output_path, preset_name)?;
+                Ok(serde_json::json!({ "jobId": job_id }))
+            },
+        ));
+
+        // queue.set_output_dir
+        self.register(CommandSpec::new(
+            "queue.set_output_dir",
+            "Set Jobs Output Directory",
+            "Sets destination output folder across selected jobs",
+            |q, params| {
+                let job_ids: Vec<String> = serde_json::from_value(params.get("jobIds").cloned().unwrap_or(Value::Array(Vec::new())))
+                    .map_err(|e| EncoderError::InvalidJobSpec(format!("invalid jobIds: {e}")))?;
+                let output_dir = params
+                    .get("outputDir")
+                    .and_then(Value::as_str)
+                    .map(std::path::PathBuf::from)
+                    .ok_or_else(|| EncoderError::InvalidJobSpec("missing 'outputDir'".into()))?;
+
+                let count = q.set_jobs_output_dir(&job_ids, output_dir)?;
+                Ok(serde_json::json!({ "modifiedCount": count }))
+            },
+        ));
+
+        // queue.log
+        self.register(CommandSpec::new("queue.log", "Get Transcode Log", "Returns all historical transcode log entries", |q, _| {
+            let entries = q.list_log_entries();
+            let json_val = serde_json::to_value(&entries).map_err(|e| EncoderError::Internal(format!("failed to serialize log: {e}")))?;
+            Ok(json_val)
+        }));
+
+        // queue.clear_log
+        self.register(CommandSpec::new("queue.clear_log", "Clear Transcode Log", "Clears transcode activity log", |q, _| {
+            q.clear_log_entries()?;
+            Ok(serde_json::json!({ "success": true }))
+        }));
+
+        // queue.is_running
+        self.register(CommandSpec::new("queue.is_running", "Is Queue Running", "Checks if background worker is active", |q, _| {
+            let running = q.is_worker_running();
+            Ok(serde_json::json!({ "isRunning": running }))
+        }));
+
+        // queue.stop_worker
+        self.register(CommandSpec::new("queue.stop_worker", "Stop Worker", "Stops background queue worker", |q, _| {
+            q.stop_worker();
+            Ok(serde_json::json!({ "success": true }))
+        }));
     }
 }
 

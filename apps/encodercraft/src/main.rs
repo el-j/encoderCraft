@@ -30,9 +30,11 @@ fn main() -> Result<(), eframe::Error> {
     let app_dir = get_app_data_dir();
     let _ = std::fs::create_dir_all(&app_dir);
     let journal_file = app_dir.join("queue-state.json");
+    let prefs_file = app_dir.join("preferences.json");
 
     let queue_mgr = Arc::new(QueueManager::new_persisted(journal_file).unwrap_or_else(|_| QueueManager::new_in_memory()));
     let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
+    let prefs = encodercraft_engine::load_preferences(&prefs_file).unwrap_or_default();
 
     let handler = Arc::new(EngineIpcHandler::new(queue_mgr.clone(), preset_registry.clone()));
 
@@ -61,8 +63,15 @@ fn main() -> Result<(), eframe::Error> {
         "encoderCraft",
         options,
         Box::new(|_cc| {
+            let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
+            if prefs.theme == "High Contrast" {
+                app.brightness = encodercraft_ui_egui::Brightness::HighContrast;
+                app.tokens = encodercraft_ui_egui::Tokens::for_brightness(app.brightness);
+            }
+            app.prefs_state.prefs = prefs;
+
             Ok(Box::new(DesktopApp {
-                inner: EncoderCraftApp::new(queue_mgr, preset_registry),
+                inner: app,
                 _ipc_tcp: ipc_tcp,
                 #[cfg(unix)]
                 _ipc_unix: ipc_unix,

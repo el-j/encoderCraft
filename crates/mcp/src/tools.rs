@@ -93,6 +93,26 @@ pub fn list_tools() -> Value {
                 },
                 "required": ["action"]
             }
+        },
+        {
+            "name": "encodercraft_get_log",
+            "description": "Retrieves the transcode history log with timestamps, durations, preset names, and statuses.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "encodercraft_set_output_dir",
+            "description": "Batch re-routes destination output directory across specified jobs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "job_ids": { "type": "array", "items": { "type": "string" }, "description": "List of job IDs to update." },
+                    "output_dir": { "type": "string", "description": "New target directory path." }
+                },
+                "required": ["job_ids", "output_dir"]
+            }
         }
     ])
 }
@@ -291,6 +311,25 @@ pub fn call_tool(
                 }
                 other => Err(EncoderError::InvalidJobSpec(format!("unknown queue action '{other}'"))),
             }
+        }
+        "encodercraft_get_log" => {
+            let entries = queue_mgr.list_log_entries();
+            Ok(json!({ "logEntries": entries }))
+        }
+        "encodercraft_set_output_dir" => {
+            let job_ids: Vec<String> = args
+                .get("job_ids")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+                .unwrap_or_default();
+            let output_dir = args
+                .get("output_dir")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+                .ok_or_else(|| EncoderError::InvalidJobSpec("missing 'output_dir'".into()))?;
+
+            let count = queue_mgr.set_jobs_output_dir(&job_ids, output_dir)?;
+            Ok(json!({ "modifiedCount": count }))
         }
         _ => Err(EncoderError::InvalidJobSpec(format!("unknown MCP tool '{name}'"))),
     }

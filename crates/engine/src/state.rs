@@ -37,17 +37,74 @@ impl QueuedJob {
     }
 }
 
+/// Historical log entry recording an executed transcode job (AME Parity).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub timestamp_unix_ms: u64,
+    pub job_id: String,
+    pub source_name: String,
+    pub preset_name: String,
+    pub output_path: String,
+    pub duration_ms: u64,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+/// User application preferences and defaults (AME Parity).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppPreferences {
+    #[serde(default = "default_true")]
+    pub auto_start_queue: bool,
+    #[serde(default = "default_true")]
+    pub play_completion_sound: bool,
+    #[serde(default)]
+    pub remove_finished_on_exit: bool,
+    #[serde(default)]
+    pub default_output_dir: Option<std::path::PathBuf>,
+    #[serde(default = "default_parallelism")]
+    pub max_parallel_jobs: usize,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_parallelism() -> usize {
+    2
+}
+
+fn default_theme() -> String {
+    "Dark".into()
+}
+
+impl Default for AppPreferences {
+    fn default() -> Self {
+        Self {
+            auto_start_queue: true,
+            play_completion_sound: true,
+            remove_finished_on_exit: false,
+            default_output_dir: None,
+            max_parallel_jobs: 2,
+            theme: "Dark".into(),
+        }
+    }
+}
+
 /// Persistent snapshot of the queue state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueueJournal {
     pub version: u32,
     pub active_parallelism: usize,
     pub jobs: Vec<QueuedJob>,
+    #[serde(default)]
+    pub log_entries: Vec<LogEntry>,
 }
 
 impl Default for QueueJournal {
     fn default() -> Self {
-        Self { version: 1, active_parallelism: 2, jobs: Vec::new() }
+        Self { version: 1, active_parallelism: 2, jobs: Vec::new(), log_entries: Vec::new() }
     }
 }
 
@@ -88,6 +145,35 @@ pub fn load_journal(journal_path: &Path) -> Result<QueueJournal, EncoderError> {
     }
 
     Ok(journal)
+}
+
+/// Loads application preferences from disk, returning defaults if not found.
+pub fn load_preferences(prefs_path: &Path) -> Result<AppPreferences, EncoderError> {
+    if !prefs_path.exists() {
+        return Ok(AppPreferences::default());
+    }
+
+    let file = File::open(prefs_path).map_err(|e| EncoderError::Io(format!("failed to open preferences: {e}")))?;
+    let prefs: AppPreferences =
+        serde_json::from_reader(file).map_err(|e| EncoderError::Internal(format!("failed to deserialize preferences: {e}")))?;
+    Ok(prefs)
+}
+
+/// Atomically saves application preferences to disk.
+pub fn save_preferences_atomic(prefs_path: &Path, prefs: &AppPreferences) -> Result<(), EncoderError> {
+    if let Some(parent) = prefs_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| EncoderError::Io(format!("failed to create preferences directory: {e}")))?;
+    }
+
+    let tmp_path = prefs_path.with_extension("tmp");
+    let json_bytes = serde_json::to_vec_pretty(prefs).map_err(|e| EncoderError::Internal(format!("failed to serialize preferences: {e}")))?;
+
+    let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp preferences: {e}")))?;
+    tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp preferences: {e}")))?;
+    tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp preferences: {e}")))?;
+
+    std::fs::rename(&tmp_path, prefs_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit preferences: {e}")))?;
+    Ok(())
 }
 
 #[cfg(test)]

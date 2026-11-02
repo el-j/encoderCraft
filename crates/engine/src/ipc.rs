@@ -118,6 +118,51 @@ impl IpcHandler for EngineIpcHandler {
                     Err(e) => IpcResponse::error(req.id, e.to_string()),
                 }
             }
+            "queue.stitch_selected" => {
+                let job_ids: Vec<String> =
+                    match serde_json::from_value(req.params.get("jobIds").cloned().unwrap_or(serde_json::Value::Array(Vec::new()))) {
+                        Ok(ids) => ids,
+                        Err(e) => return IpcResponse::error(req.id, format!("invalid jobIds: {e}")),
+                    };
+                let output_path = match req.params.get("outputPath").and_then(|v| v.as_str()) {
+                    Some(p) => std::path::PathBuf::from(p),
+                    None => return IpcResponse::error(req.id, "missing outputPath parameter"),
+                };
+                let preset_name = req.params.get("presetName").and_then(|v| v.as_str()).unwrap_or("Match Source - High Bitrate").to_string();
+
+                match self.queue_mgr.stitch_selected_jobs(&job_ids, output_path, preset_name) {
+                    Ok(job_id) => IpcResponse::success(req.id, json!(job_id)),
+                    Err(e) => IpcResponse::error(req.id, e.to_string()),
+                }
+            }
+            "queue.set_output_dir" => {
+                let job_ids: Vec<String> =
+                    match serde_json::from_value(req.params.get("jobIds").cloned().unwrap_or(serde_json::Value::Array(Vec::new()))) {
+                        Ok(ids) => ids,
+                        Err(e) => return IpcResponse::error(req.id, format!("invalid jobIds: {e}")),
+                    };
+                let output_dir = match req.params.get("outputDir").and_then(|v| v.as_str()) {
+                    Some(p) => std::path::PathBuf::from(p),
+                    None => return IpcResponse::error(req.id, "missing outputDir parameter"),
+                };
+
+                match self.queue_mgr.set_jobs_output_dir(&job_ids, output_dir) {
+                    Ok(count) => IpcResponse::success(req.id, json!({ "modifiedCount": count })),
+                    Err(e) => IpcResponse::error(req.id, e.to_string()),
+                }
+            }
+            "queue.log" => {
+                let entries = self.queue_mgr.list_log_entries();
+                IpcResponse::success(req.id, json!(entries))
+            }
+            "queue.clear_log" => match self.queue_mgr.clear_log_entries() {
+                Ok(()) => IpcResponse::success(req.id, json!(true)),
+                Err(e) => IpcResponse::error(req.id, e.to_string()),
+            },
+            "queue.is_running" => {
+                let running = self.queue_mgr.is_worker_running();
+                IpcResponse::success(req.id, json!({ "isRunning": running }))
+            }
             "presets.list" => {
                 let reg = self.preset_registry.lock().unwrap_or_else(PoisonError::into_inner);
                 let presets = reg.list();

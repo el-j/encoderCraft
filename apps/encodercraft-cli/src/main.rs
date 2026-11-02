@@ -60,7 +60,7 @@ fn print_usage() {
     println!("      --burn-captions                     Burn captions directly into video frames");
     println!("  probe <input>                           Inspect containers, codecs, and stream metadata");
     println!("  presets                                 List all factory presets");
-    println!("  queue [list|cancel <id>]                Interact with running daemon queue");
+    println!("  queue [list|start|pause|clear|cancel <id>|log] Interact with running daemon queue");
     println!("  watch <dir> -p <preset> -o <out_dir>    Start automated directory monitor");
     println!("  daemon [--port <port>]                  Run background IPC daemon");
     println!("  mcp                                     Run Model Context Protocol server over stdio");
@@ -230,10 +230,39 @@ fn cmd_presets() -> Result<(), EncoderError> {
 fn cmd_queue(args: &[String]) -> Result<(), EncoderError> {
     let client = DispatchClient::connect_default();
     match args.first().map(String::as_str) {
+        Some("start") => {
+            client.start_queue()?;
+            println!("Queue processing triggered.");
+        }
+        Some("pause") => {
+            let job_id = args.get(1).map(String::as_str);
+            client.pause_queue(job_id)?;
+            println!("Queue/job paused.");
+        }
+        Some("clear") => {
+            let removed = client.clear_finished()?;
+            println!("Cleared {removed} completed jobs from queue.");
+        }
         Some("cancel") => {
             let job_id = args.get(1).ok_or_else(|| EncoderError::InvalidJobSpec("missing job ID to cancel".into()))?;
             client.cancel_job(job_id)?;
             println!("Job '{job_id}' cancelled.");
+        }
+        Some("log") => {
+            let res = client.get_log()?;
+            if let Some(entries) = res.as_array() {
+                println!("encoderCraft Transcode Log ({} events):\n", entries.len());
+                for (idx, e) in entries.iter().enumerate() {
+                    let status = e.get("status").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                    let src = e.get("source_name").and_then(|v| v.as_str()).unwrap_or("media");
+                    let preset = e.get("preset_name").and_then(|v| v.as_str()).unwrap_or("preset");
+                    let ms = e.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let sec = ms as f64 / 1000.0;
+                    println!(" [{:>2}] [{:<9}] {:<24} ➔ {:<18} ({:.2}s)", idx + 1, status, src, preset, sec);
+                }
+            } else {
+                println!("No transcode log records available.");
+            }
         }
         _ => {
             let res = client.list_jobs()?;

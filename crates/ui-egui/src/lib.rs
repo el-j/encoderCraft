@@ -9,6 +9,8 @@
 pub mod app;
 pub mod icons;
 pub mod inspector;
+pub mod log_dialog;
+pub mod prefs_dialog;
 pub mod preset_browser;
 pub mod preset_editor;
 pub mod preview_panel;

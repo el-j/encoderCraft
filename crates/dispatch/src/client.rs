@@ -112,6 +112,52 @@ impl DispatchClient {
         Ok(response.error.is_none())
     }
 
+    /// Triggers start of queue processing on the running encoderCraft daemon.
+    pub fn start_queue(&self) -> Result<(), EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "queue.start", json!({}));
+        let response = self.send_request(&request)?;
+        if let Some(err) = response.error {
+            return Err(EncoderError::InvalidJobSpec(err));
+        }
+        Ok(())
+    }
+
+    /// Pauses an active job or the entire queue.
+    pub fn pause_queue(&self, job_id: Option<&str>) -> Result<(), EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let params = if let Some(id) = job_id { json!({ "jobId": id }) } else { json!({}) };
+        let request = IpcRequest::new(req_id, "queue.pause", params);
+        let response = self.send_request(&request)?;
+        if let Some(err) = response.error {
+            return Err(EncoderError::InvalidJobSpec(err));
+        }
+        Ok(())
+    }
+
+    /// Clears completed jobs from the queue on the running daemon.
+    pub fn clear_finished(&self) -> Result<usize, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "queue.clear_finished", json!({}));
+        let response = self.send_request(&request)?;
+        if let Some(err) = response.error {
+            return Err(EncoderError::InvalidJobSpec(err));
+        }
+        let result = response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty clear response".into()))?;
+        Ok(result.get("removedCount").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
+    }
+
+    /// Retrieves transcode history log from the running daemon.
+    pub fn get_log(&self) -> Result<serde_json::Value, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "queue.log", json!({}));
+        let response = self.send_request(&request)?;
+        if let Some(err) = response.error {
+            return Err(EncoderError::InvalidJobSpec(err));
+        }
+        response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty log response".into()))
+    }
+
     fn send_request(&self, req: &IpcRequest) -> Result<IpcResponse, EncoderError> {
         let mut line = serde_json::to_string(req).map_err(|e| EncoderError::Io(format!("failed to serialize request: {e}")))?;
         line.push('\n');
@@ -120,16 +166,29 @@ impl DispatchClient {
             #[cfg(unix)]
             Endpoint::UnixSocket(path) => {
                 use std::os::unix::net::UnixStream;
-                let mut stream =
-                    UnixStream::connect(path).map_err(|e| EncoderError::Io(format!("failed to connect to socket {}: {e}", path.display())))?;
-                stream.write_all(line.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write to socket: {e}")))?;
-                stream.flush().map_err(|e| EncoderError::Io(format!("flush failed: {e}")))?;
+                if let Ok(mut stream) = UnixStream::connect(path) {
+                    stream.write_all(line.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write to socket: {e}")))?;
+                    stream.flush().map_err(|e| EncoderError::Io(format!("flush failed: {e}")))?;
 
-                let mut reader = BufReader::new(stream);
-                let mut resp_line = String::new();
-                reader.read_line(&mut resp_line).map_err(|e| EncoderError::Io(format!("failed to read response: {e}")))?;
+                    let mut reader = BufReader::new(stream);
+                    let mut resp_line = String::new();
+                    reader.read_line(&mut resp_line).map_err(|e| EncoderError::Io(format!("failed to read response: {e}")))?;
 
-                serde_json::from_str(&resp_line).map_err(|e| EncoderError::Io(format!("failed to parse response JSON: {e}")))
+                    serde_json::from_str(&resp_line).map_err(|e| EncoderError::Io(format!("failed to parse response JSON: {e}")))
+                } else {
+                    // Fall back to loopback TCP (AME/ArtCraft cross-connection resilience)
+                    let mut tcp = TcpStream::connect("127.0.0.1:8998")
+                        .or_else(|_| TcpStream::connect("127.0.0.1:8999"))
+                        .map_err(|e| EncoderError::Io(format!("failed to connect to encoderCraft via Unix socket {} or TCP: {e}", path.display())))?;
+                    tcp.write_all(line.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write to tcp: {e}")))?;
+                    tcp.flush().map_err(|e| EncoderError::Io(format!("flush failed: {e}")))?;
+
+                    let mut reader = BufReader::new(tcp);
+                    let mut resp_line = String::new();
+                    reader.read_line(&mut resp_line).map_err(|e| EncoderError::Io(format!("failed to read response: {e}")))?;
+
+                    serde_json::from_str(&resp_line).map_err(|e| EncoderError::Io(format!("failed to parse response JSON: {e}")))
+                }
             }
             Endpoint::Tcp(addr) => {
                 let mut stream = TcpStream::connect(addr).map_err(|e| EncoderError::Io(format!("failed to connect to {addr}: {e}")))?;
@@ -150,8 +209,17 @@ impl DispatchClient {
 pub fn default_socket_path() -> PathBuf {
     #[cfg(unix)]
     {
+        let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+        let sock = PathBuf::from(tmp).join("encodercraft.sock");
+        if sock.exists() {
+            return sock;
+        }
         let uid = get_uid();
-        PathBuf::from(format!("/tmp/encodercraft-{uid}.sock"))
+        let fallback = PathBuf::from(format!("/tmp/encodercraft-{uid}.sock"));
+        if fallback.exists() {
+            return fallback;
+        }
+        PathBuf::from("/tmp/encodercraft.sock")
     }
     #[cfg(not(unix))]
     {
