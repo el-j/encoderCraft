@@ -112,6 +112,10 @@ pub enum MediaStreamKind {
     StillImage,
     /// Sequence of still images.
     ImageSequence,
+    /// 2D vector graphic (SVG, AI, EPS).
+    Vector2D,
+    /// Digital document or page layout (PDF, DOCX, IDML, INDD, EPUB, PPTX, XLSX).
+    Document,
     /// 3D spatial asset (glTF, GLB, OBJ, STL, PLY).
     Spatial3D,
     /// Unknown or unprobed format.
@@ -128,6 +132,16 @@ impl MediaStreamKind {
     /// Returns true if this media kind is strictly audio.
     pub fn is_audio_only(&self) -> bool {
         matches!(self, Self::AudioOnly)
+    }
+
+    /// Returns true if this media kind is a 2D vector asset.
+    pub fn is_vector(&self) -> bool {
+        matches!(self, Self::Vector2D)
+    }
+
+    /// Returns true if this media kind is a digital document or page layout.
+    pub fn is_document(&self) -> bool {
+        matches!(self, Self::Document)
     }
 
     /// Returns true if this media kind is a 3D asset.
@@ -170,11 +184,16 @@ pub enum ContainerType {
     Wave,
     Aiff,
     Flac,
+    OggAudio,
+    Mp3,
     StillSequence,
     AnimatedGif,
+    Svg,
     Gltf,
     Usdz,
     Pdf,
+    Docx,
+    Idml,
 }
 
 /// Output target specifications.

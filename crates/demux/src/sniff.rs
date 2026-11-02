@@ -41,6 +41,16 @@ pub enum ContainerKind {
     // Documents & vector graphics
     Pdf,
     Svg,
+    Docx,
+    Pptx,
+    Xlsx,
+    Idml,
+    Indd,
+    IllustratorAi,
+    Epub,
+    Psd,
+    Bmp,
+    Eps,
 }
 
 impl ContainerKind {
@@ -76,6 +86,16 @@ impl ContainerKind {
             Self::Ply => "Stanford Polygon File (PLY)",
             Self::Pdf => "Portable Document Format (PDF)",
             Self::Svg => "Scalable Vector Graphics (SVG)",
+            Self::Docx => "Microsoft Word Document (DOCX)",
+            Self::Pptx => "Microsoft PowerPoint (PPTX)",
+            Self::Xlsx => "Microsoft Excel Workbook (XLSX)",
+            Self::Idml => "Adobe InDesign Markup (IDML)",
+            Self::Indd => "Adobe InDesign Document (INDD)",
+            Self::IllustratorAi => "Adobe Illustrator Artwork (AI)",
+            Self::Epub => "Electronic Publication (EPUB)",
+            Self::Psd => "Adobe Photoshop Document (PSD)",
+            Self::Bmp => "Windows Bitmap (BMP)",
+            Self::Eps => "Encapsulated PostScript (EPS)",
         }
     }
 
@@ -87,6 +107,16 @@ impl ContainerKind {
     /// Whether this container is purely an audio recording.
     pub fn is_audio(&self) -> bool {
         matches!(self, Self::Wav | Self::Rf64Wav | Self::Aiff | Self::Flac | Self::Mp3 | Self::Ogg)
+    }
+
+    /// Whether this container is a 2D vector asset.
+    pub fn is_vector(&self) -> bool {
+        matches!(self, Self::Svg | Self::IllustratorAi | Self::Eps)
+    }
+
+    /// Whether this container is a digital document or page layout.
+    pub fn is_document(&self) -> bool {
+        matches!(self, Self::Pdf | Self::Docx | Self::Pptx | Self::Xlsx | Self::Idml | Self::Indd | Self::Epub)
     }
 
     /// Whether this format represents a 3D geometry mesh or scene.
@@ -139,9 +169,58 @@ pub fn sniff_container(bytes: &[u8]) -> Option<ContainerKind> {
         return Some(ContainerKind::Ogg);
     }
 
-    // 8. PDF: '%PDF-'
+    // 8. PDF & Illustrator AI: '%PDF-'
     if bytes.starts_with(b"%PDF-") {
+        let inspect_len = bytes.len().min(4096);
+        if let Some(sub) = bytes.get(0..inspect_len)
+            && sub.windows(14).any(|w| w == b"/AIPrivateData" || w == b"AdobeIllustrat")
+        {
+            return Some(ContainerKind::IllustratorAi);
+        }
         return Some(ContainerKind::Pdf);
+    }
+
+    // 8b. Encapsulated PostScript / Legacy Illustrator: '%!PS-Adobe'
+    if bytes.starts_with(b"%!PS-Adobe") {
+        return Some(ContainerKind::Eps);
+    }
+
+    // 8c. Adobe Photoshop Document: '8BPS'
+    if bytes.starts_with(b"8BPS") {
+        return Some(ContainerKind::Psd);
+    }
+
+    // 8d. Windows Bitmap: 'BM'
+    if bytes.starts_with(b"BM") && bytes.len() >= 14 {
+        return Some(ContainerKind::Bmp);
+    }
+
+    // 8e. Adobe InDesign Document binary header: 06 06 ED F5 D8 1D 46 E5 BD 31 EF E7 FE 74 B7 1D
+    if bytes.starts_with(b"\x06\x06\xED\xF5\xD8\x1D\x46\xE5\xBD\x31\xEF\xE7\xFE\x74\xB7\x1D") {
+        return Some(ContainerKind::Indd);
+    }
+
+    // 8f. Zip-based Office & Layout Packages: PK 03 04
+    if bytes.starts_with(b"PK\x03\x04") {
+        let inspect_len = bytes.len().min(1024);
+        if let Some(sub) = bytes.get(0..inspect_len) {
+            if sub.windows(13).any(|w| w == b"designmap.xml") || sub.windows(12).any(|w| w == b"idml-package") {
+                return Some(ContainerKind::Idml);
+            }
+            if sub.windows(16).any(|w| w == b"application/epub") {
+                return Some(ContainerKind::Epub);
+            }
+            if sub.windows(5).any(|w| w == b"word/") {
+                return Some(ContainerKind::Docx);
+            }
+            if sub.windows(4).any(|w| w == b"ppt/") {
+                return Some(ContainerKind::Pptx);
+            }
+            if sub.windows(3).any(|w| w == b"xl/") {
+                return Some(ContainerKind::Xlsx);
+            }
+        }
+        return Some(ContainerKind::Docx);
     }
 
     // 9. DDS: 'DDS '
@@ -297,5 +376,26 @@ mod tests {
         assert_eq!(sniff_container(b""), None);
         assert_eq!(sniff_container(b"xyz"), None);
         assert_eq!(sniff_container(b"some random junk data that has no header"), None);
+    }
+
+    #[test]
+    fn test_sniff_audio_formats() {
+        assert_eq!(sniff_container(b"fLaC\x00\x00\x00\x22"), Some(ContainerKind::Flac));
+        assert_eq!(sniff_container(b"OggS\x00\x02\x00\x00"), Some(ContainerKind::Ogg));
+        assert_eq!(sniff_container(b"ID3\x04\x00\x00\x00\x00"), Some(ContainerKind::Mp3));
+        assert_eq!(sniff_container(b"\xFF\xFB\x90\x64\x00\x00"), Some(ContainerKind::Mp3));
+    }
+
+    #[test]
+    fn test_sniff_documents_and_vector() {
+        assert_eq!(sniff_container(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n"), Some(ContainerKind::Pdf));
+        assert_eq!(sniff_container(b"%PDF-1.5\n/AIPrivateData 123 0 obj\n"), Some(ContainerKind::IllustratorAi));
+        assert_eq!(sniff_container(b"%!PS-Adobe-3.0 EPSF-3.0\n"), Some(ContainerKind::Eps));
+        assert_eq!(sniff_container(b"8BPS\x00\x01\x00\x00"), Some(ContainerKind::Psd));
+        assert_eq!(sniff_container(b"BM\x36\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00"), Some(ContainerKind::Bmp));
+        assert_eq!(sniff_container(b"\x06\x06\xED\xF5\xD8\x1D\x46\xE5\xBD\x31\xEF\xE7\xFE\x74\xB7\x1D\x00\x00"), Some(ContainerKind::Indd));
+        assert_eq!(sniff_container(b"PK\x03\x04\x14\x00\x00\x00\x08\x00word/document.xml"), Some(ContainerKind::Docx));
+        assert_eq!(sniff_container(b"PK\x03\x04\x14\x00\x00\x00\x08\x00designmap.xml"), Some(ContainerKind::Idml));
+        assert_eq!(sniff_container(b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), Some(ContainerKind::Svg));
     }
 }

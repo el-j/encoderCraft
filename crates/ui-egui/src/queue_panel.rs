@@ -216,8 +216,17 @@ pub fn render_queue_panel(
                                     None,
                                     Some(-23.0),
                                 ),
+                                encodercraft_core::MediaStreamKind::Vector2D => {
+                                    ("svg", encodercraft_core::ContainerType::Svg, "Web Vector SVG (Optimized)".to_string(), None, None, None, None)
+                                }
+                                encodercraft_core::MediaStreamKind::Document => {
+                                    ("pdf", encodercraft_core::ContainerType::Pdf, "Print-Ready PDF/X-4".to_string(), None, None, None, None)
+                                }
                                 encodercraft_core::MediaStreamKind::Spatial3D => {
                                     ("glb", encodercraft_core::ContainerType::Gltf, "glTF 2.0 Binary (.glb)".to_string(), None, None, None, None)
+                                }
+                                encodercraft_core::MediaStreamKind::StillImage => {
+                                    ("png", encodercraft_core::ContainerType::StillSequence, "Still Image PNG".to_string(), None, None, None, None)
                                 }
                                 _ => (
                                     "mp4",

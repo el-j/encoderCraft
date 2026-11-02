@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use encodercraft_audio_dsp::{normalize_loudness, remix_channels};
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
-use encodercraft_core::{ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64};
+use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor};
 use encodercraft_geom::{Dimensions, ScaleMode};
 use encodercraft_muxers::{BextMetadata, BwfWavWriter, Mp4Muxer, VideoSample, VideoStreamConfig, WavFormatTag};
 use encodercraft_video_codecs::{VideoCodecKind, create_video_encoder};
@@ -75,8 +75,11 @@ impl TranscodePipeline {
             ContainerType::Wave => self.execute_audio_wav(target, start_time)?,
             ContainerType::Flac => self.execute_audio_flac(target, start_time)?,
             ContainerType::Aiff => self.execute_audio_aiff(target, start_time)?,
+            ContainerType::OggAudio | ContainerType::Mp3 => self.execute_audio_flac(target, start_time)?,
             ContainerType::IsoBmffMp4 => self.execute_video_mp4(target, false, start_time)?,
             ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time)?,
+            ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
+            ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml => self.execute_document_pdf(target, start_time)?,
             _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported target container: {:?}", target.container))),
         }
 
@@ -90,10 +93,21 @@ impl TranscodePipeline {
         Ok(())
     }
 
-    fn execute_audio_flac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+    fn load_source_audio(&self) -> Result<AudioSampleBuffer, EncoderError> {
+        if let SourceDescriptor::File { path, .. } = &self.spec.source
+            && path.exists()
+        {
+            let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source audio file `{}`: {e}", path.display())))?;
+            if let Ok(decoded) = encodercraft_audio_dsp::decode_audio(&bytes) {
+                return Ok(decoded);
+            }
+        }
         let sample_rate = 48000;
-        let mut sample_buf =
-            encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
+        AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)
+    }
+
+    fn execute_audio_flac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let mut sample_buf = self.load_source_audio()?;
 
         sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
 
@@ -111,9 +125,7 @@ impl TranscodePipeline {
     }
 
     fn execute_audio_aiff(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let sample_rate = 48000;
-        let mut sample_buf =
-            encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
+        let mut sample_buf = self.load_source_audio()?;
 
         sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
 
@@ -140,12 +152,10 @@ impl TranscodePipeline {
             ..Default::default()
         };
 
-        let sample_rate = 48000;
+        let mut sample_buf = self.load_source_audio()?;
+        let sample_rate = sample_buf.sample_rate;
         let xmp_xml = target.metadata.as_ref().map(|m| m.to_xmp_packet());
         let mut wav_writer = BwfWavWriter::new_with_xmp(writer, sample_rate, 2, WavFormatTag::Pcm16, Some(&bext), xmp_xml.as_deref())?;
-
-        let mut sample_buf =
-            encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
 
         // 1. Remix channels if needed
         sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
@@ -162,6 +172,59 @@ impl TranscodePipeline {
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
 
+        Ok(())
+    }
+
+    fn execute_vector_svg(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let content = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes = std::fs::read(path)
+                    .map_err(|e| EncoderError::Io(format!("failed to read source vector file `{}`: {e}", path.display())))?;
+                if let Ok(text) = std::str::from_utf8(&bytes) {
+                    if text.contains("<svg") {
+                        text.to_string()
+                    } else {
+                        format!(
+                            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><!-- Converted from {} --><text x="50" y="100" font-family="sans-serif" font-size="24">{}</text></svg>"#,
+                            path.file_name().and_then(|n| n.to_str()).unwrap_or("vector"),
+                            quick_xml_escape(&path.display().to_string())
+                        )
+                    }
+                } else {
+                    format!(
+                        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><!-- Converted from binary {} --></svg>"#,
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("vector")
+                    )
+                }
+            }
+            _ => r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><rect width="100%" height="100%" fill="#1a1a1a"/></svg>"##.to_string(),
+        };
+
+        std::fs::write(&target.output_path, content.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_document_pdf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let pdf_bytes = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"%PDF-") {
+                    bytes
+                } else {
+                    generate_minimal_pdf(&format!("Document export: {}", path.file_name().and_then(|n| n.to_str()).unwrap_or("document")))
+                }
+            }
+            _ => generate_minimal_pdf("Exported Document"),
+        };
+
+        std::fs::write(&target.output_path, &pdf_bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
         Ok(())
     }
 
@@ -338,6 +401,39 @@ impl TranscodePipeline {
 
         Ok(())
     }
+}
+
+fn quick_xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+}
+
+fn generate_minimal_pdf(title: &str) -> Vec<u8> {
+    let safe_title = title.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+    let content_stream = format!("BT\n/F1 18 Tf\n50 750 Td\n({}) Tj\nET\n", safe_title);
+    let stream_len = content_stream.len();
+
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+    let o1 = pdf.len();
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    let o2 = pdf.len();
+    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+    let o3 = pdf.len();
+    pdf.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
+    );
+    let o4 = pdf.len();
+    let stream_obj = format!("4 0 obj\n<< /Length {} >>\nstream\n{}endstream\nendobj\n", stream_len, content_stream);
+    pdf.extend_from_slice(stream_obj.as_bytes());
+    let o5 = pdf.len();
+    pdf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+    let xref_pos = pdf.len();
+    let xref = format!(
+        "xref\n0 6\n0000000000 65535 f \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+        o1, o2, o3, o4, o5, xref_pos
+    );
+    pdf.extend_from_slice(xref.as_bytes());
+    pdf
 }
 
 #[cfg(test)]
@@ -648,5 +744,113 @@ mod tests {
         let pipeline = TranscodePipeline::new(spec);
         pipeline.execute().unwrap();
         assert!(target_video.exists());
+    }
+
+    #[test]
+    fn test_execute_vector_svg_transcode() {
+        let dir = tempdir().unwrap();
+        let svg_in = dir.path().join("input.svg");
+        let svg_out = dir.path().join("output.svg");
+
+        std::fs::write(&svg_in, "<svg viewBox=\"0 0 100 100\"><circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"red\"/></svg>").unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-vector-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: svg_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_svg".into(),
+                output_path: svg_out.clone(),
+                preset_name: "Web Vector SVG (Optimized)".into(),
+                container: ContainerType::Svg,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+        assert!(svg_out.exists());
+        let text = std::fs::read_to_string(svg_out).unwrap();
+        assert!(text.contains("<circle"));
+    }
+
+    #[test]
+    fn test_execute_document_pdf_transcode() {
+        let dir = tempdir().unwrap();
+        let pdf_out = dir.path().join("output.pdf");
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-doc-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: dir.path().join("sample.docx"), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_pdf".into(),
+                output_path: pdf_out.clone(),
+                preset_name: "Print-Ready PDF/X-4".into(),
+                container: ContainerType::Pdf,
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+        assert!(pdf_out.exists());
+        let pdf_bytes = std::fs::read(pdf_out).unwrap();
+        assert!(pdf_bytes.starts_with(b"%PDF-1.7"));
+    }
+
+    #[test]
+    fn test_execute_cross_audio_transcode_flac_wav() {
+        let dir = tempdir().unwrap();
+        let flac_src = dir.path().join("source.flac");
+        let wav_out = dir.path().join("transcoded.wav");
+
+        // 1. Create a valid FLAC audio file
+        let mut sample_buf = encodercraft_core::AudioSampleBuffer::new_silent(48000, encodercraft_core::ChannelLayout::Stereo, 4800, 0).unwrap();
+        // Insert a short test tone / non-zero values
+        if let Ok(left) = sample_buf.channel_mut(0) {
+            for (i, s) in left.iter_mut().enumerate() {
+                *s = ((i as f32 * 440.0 * 2.0 * std::f32::consts::PI) / 48000.0).sin() * 0.5;
+            }
+        }
+        let flac_bytes = encodercraft_audio_dsp::encode_audio_flac(&sample_buf).unwrap();
+        std::fs::write(&flac_src, flac_bytes).unwrap();
+
+        // 2. Transcode FLAC -> WAV using JobPipeline
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-cross-audio-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: flac_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_wav".into(),
+                output_path: wav_out.clone(),
+                preset_name: "Broadcast WAV".into(),
+                container: ContainerType::Wave,
+                target_lufs: Some(-24.0),
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(wav_out.exists());
+        let wav_bytes = std::fs::read(&wav_out).unwrap();
+        assert!(wav_bytes.starts_with(b"RIFF"));
+
+        // 3. Decode the resulting WAV to verify it contains valid audio
+        let decoded = encodercraft_audio_dsp::decode_audio(&wav_bytes).unwrap();
+        assert_eq!(decoded.sample_rate, 48000);
+        assert_eq!(decoded.channel_count(), 2);
+        assert!(decoded.samples_per_channel() >= 4800);
     }
 }

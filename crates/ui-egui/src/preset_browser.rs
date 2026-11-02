@@ -55,6 +55,8 @@ pub fn render_preset_browser(
                 (PresetCategory::SocialMedia, "Social"),
                 (PresetCategory::Audio, "Audio"),
                 (PresetCategory::Spatial3D, "3D"),
+                (PresetCategory::Vector, "Vector"),
+                (PresetCategory::Document, "Document"),
             ];
 
             for (cat, label) in categories {
@@ -134,21 +136,33 @@ pub fn render_preset_browser(
 
                     ui.add_space(4.0);
 
-                    // AME Format Guardrail: Audio-only sources cannot be converted to video formats
-                    let has_audio_only_selection = selected_job_ids.iter().any(|id| is_job_audio_only(id, queue_mgr));
-                    let is_video_preset = preset.video.is_some();
-                    let is_incompatible = has_audio_only_selection && is_video_preset;
+                    // AME Format Guardrail: Incompatible source-to-preset format guards
+                    let has_jobs = !selected_job_ids.is_empty();
+                    let incompatible_warning: Option<&'static str> = if has_jobs {
+                        let any_audio = selected_job_ids.iter().any(|id| is_job_audio_only(id, queue_mgr));
+                        let any_doc =
+                            selected_job_ids.iter().any(|id| get_job_stream_kind(id, queue_mgr).is_some_and(|k| k.is_document() || k.is_vector()));
+                        if any_audio && preset.video.is_some() {
+                            Some("Cannot apply video presets to audio-only files (MP3/WAV/FLAC)")
+                        } else if any_doc && preset.video.is_some() {
+                            Some("Cannot apply video presets to Document / Vector files without rasterization")
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    let is_incompatible = incompatible_warning.is_some();
 
-                    if is_incompatible {
+                    if let Some(warn_text) = incompatible_warning {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("⚠️ Format Guard:").small().color(tokens.status_failed).strong());
-                            ui.label(RichText::new("Cannot apply video presets to audio-only files (MP3/WAV)").small().color(tokens.text_dim));
+                            icons::icon_label(ui, icons::Icon::Info, 13.0, tokens.status_failed);
+                            ui.label(RichText::new(format!("Format Guard: {warn_text}")).small().color(tokens.status_failed));
                         });
                         ui.add_space(2.0);
                     }
 
                     // Apply to selected job buttons (batch support)
-                    let has_jobs = !selected_job_ids.is_empty();
                     let count = selected_job_ids.len();
                     let apply_text = if count > 1 { format!("Apply to {count} Jobs") } else { "Apply to Job".into() };
                     let add_target_text = if count > 1 { format!("Add as Output to {count} Jobs") } else { "Add as Output".into() };
@@ -162,7 +176,7 @@ pub fn render_preset_browser(
                                 false,
                                 tokens,
                                 if is_incompatible {
-                                    "Disabled: Audio-only sources cannot encode video tracks"
+                                    "Disabled: Preset is incompatible with source media stream type"
                                 } else {
                                     "Replace target preset on selected job(s)"
                                 },
@@ -180,7 +194,7 @@ pub fn render_preset_browser(
                                 false,
                                 tokens,
                                 if is_incompatible {
-                                    "Disabled: Audio-only sources cannot encode video tracks"
+                                    "Disabled: Preset is incompatible with source media stream type"
                                 } else {
                                     "Add this preset as an additional output target on selected job(s)"
                                 },
@@ -200,12 +214,39 @@ pub fn render_preset_browser(
     crate::preset_editor::render_preset_editor(ui.ctx(), &mut state.editor, registry, tokens);
 }
 
-fn is_job_audio_only(job_id: &str, queue_mgr: &Arc<QueueManager>) -> bool {
+fn get_job_stream_kind(job_id: &str, queue_mgr: &Arc<QueueManager>) -> Option<encodercraft_core::MediaStreamKind> {
     let jobs = queue_mgr.list_jobs();
-    jobs.iter().find(|j| j.spec.job_id == job_id).is_some_and(|j| match &j.spec.source {
-        encodercraft_core::SourceDescriptor::File { path, .. } => encodercraft_demux::classify_stream_kind(path).is_audio_only(),
-        _ => false,
+    jobs.iter().find(|j| j.spec.job_id == job_id).map(|j| match &j.spec.source {
+        encodercraft_core::SourceDescriptor::File { path, .. } => encodercraft_demux::classify_stream_kind(path),
+        _ => encodercraft_core::MediaStreamKind::VideoWithAudio,
     })
+}
+
+fn is_job_audio_only(job_id: &str, queue_mgr: &Arc<QueueManager>) -> bool {
+    get_job_stream_kind(job_id, queue_mgr).is_some_and(|k| k.is_audio_only())
+}
+
+fn container_to_extension(container: encodercraft_core::ContainerType) -> &'static str {
+    match container {
+        encodercraft_core::ContainerType::IsoBmffMp4 => "mp4",
+        encodercraft_core::ContainerType::QuickTimeMov => "mov",
+        encodercraft_core::ContainerType::MatroskaMkv => "mkv",
+        encodercraft_core::ContainerType::WebM => "webm",
+        encodercraft_core::ContainerType::Wave => "wav",
+        encodercraft_core::ContainerType::Aiff => "aiff",
+        encodercraft_core::ContainerType::Flac => "flac",
+        encodercraft_core::ContainerType::OggAudio => "ogg",
+        encodercraft_core::ContainerType::Mp3 => "mp3",
+        encodercraft_core::ContainerType::AnimatedGif => "gif",
+        encodercraft_core::ContainerType::Svg => "svg",
+        encodercraft_core::ContainerType::Gltf => "glb",
+        encodercraft_core::ContainerType::Usdz => "usdz",
+        encodercraft_core::ContainerType::Pdf => "pdf",
+        encodercraft_core::ContainerType::Docx => "docx",
+        encodercraft_core::ContainerType::Idml => "idml",
+        encodercraft_core::ContainerType::MxfOp1a | encodercraft_core::ContainerType::MxfOpAtom => "mxf",
+        encodercraft_core::ContainerType::StillSequence => "png",
+    }
 }
 
 fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {
@@ -220,6 +261,9 @@ fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<Qu
         if let Some(target) = new_spec.targets.first_mut() {
             target.preset_name = preset.name.clone();
             target.container = preset.container;
+            let ext = container_to_extension(preset.container);
+            target.output_path.set_extension(ext);
+
             if let Some(ref v) = preset.video {
                 target.custom_width = match v.width {
                     encodercraft_presets::MatchSourceOr::Exact(w) => Some(w),
@@ -230,9 +274,15 @@ fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<Qu
                     encodercraft_presets::MatchSourceOr::MatchSource => None,
                 };
                 target.target_bitrate_kbps = Some(v.target_bitrate_kbps);
+            } else {
+                target.custom_width = None;
+                target.custom_height = None;
+                target.target_bitrate_kbps = None;
             }
             if let Some(ref a) = preset.audio {
                 target.target_lufs = a.target_lufs.map(|x| x as f32);
+            } else {
+                target.target_lufs = None;
             }
         }
         // Update job
@@ -250,21 +300,7 @@ fn add_preset_target_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &A
     let jobs = queue_mgr.list_jobs();
     if let Some(job) = jobs.iter().find(|j| j.spec.job_id == job_id) {
         let count = job.spec.targets.len() + 1;
-        let ext = match preset.container {
-            encodercraft_core::ContainerType::IsoBmffMp4 => "mp4",
-            encodercraft_core::ContainerType::QuickTimeMov => "mov",
-            encodercraft_core::ContainerType::MatroskaMkv => "mkv",
-            encodercraft_core::ContainerType::WebM => "webm",
-            encodercraft_core::ContainerType::Wave => "wav",
-            encodercraft_core::ContainerType::Aiff => "aiff",
-            encodercraft_core::ContainerType::Flac => "flac",
-            encodercraft_core::ContainerType::AnimatedGif => "gif",
-            encodercraft_core::ContainerType::Gltf => "glb",
-            encodercraft_core::ContainerType::Usdz => "usdz",
-            encodercraft_core::ContainerType::Pdf => "pdf",
-            encodercraft_core::ContainerType::MxfOp1a | encodercraft_core::ContainerType::MxfOpAtom => "mxf",
-            encodercraft_core::ContainerType::StillSequence => "png",
-        };
+        let ext = container_to_extension(preset.container);
         let (cw, ch, br) = if let Some(ref v) = preset.video {
             let w = match v.width {
                 encodercraft_presets::MatchSourceOr::Exact(w) => Some(w),

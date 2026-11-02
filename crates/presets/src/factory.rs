@@ -216,5 +216,53 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
             video: None,
             audio: None,
         },
+        // 9. Lossless FLAC Master (24-bit 48kHz)
+        EncodingPreset {
+            name: "Lossless FLAC Master (24-bit 48kHz)".into(),
+            description: "Lossless Free Lossless Audio Codec (FLAC) 24-bit master at 48 kHz with target loudness normalization".into(),
+            category: PresetCategory::Audio,
+            container: ContainerType::Flac,
+            video: None,
+            audio: Some(PresetAudioSettings {
+                codec: "flac".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::MatchSource,
+                bitrate_kbps: None,
+                target_lufs: Some(-16.0),
+            }),
+        },
+        // 10. Apple Lossless AIFF (24-bit 48kHz)
+        EncodingPreset {
+            name: "Apple Lossless AIFF (24-bit 48kHz)".into(),
+            description: "Uncompressed Apple AIFF 24-bit linear PCM audio master at 48 kHz".into(),
+            category: PresetCategory::Audio,
+            container: ContainerType::Aiff,
+            video: None,
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24be".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::MatchSource,
+                bitrate_kbps: None,
+                target_lufs: None,
+            }),
+        },
+        // 11. Web Vector SVG (Optimized)
+        EncodingPreset {
+            name: "Web Vector SVG (Optimized)".into(),
+            description: "W3C Scalable Vector Graphics (SVG) container optimized for web and responsive UI layouts".into(),
+            category: PresetCategory::Vector,
+            container: ContainerType::Svg,
+            video: None,
+            audio: None,
+        },
+        // 12. Print-Ready PDF/X-4
+        EncodingPreset {
+            name: "Print-Ready PDF/X-4".into(),
+            description: "ISO 15930-7 (PDF/X-4) document interchange standard for high-fidelity graphic arts and prepress".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Pdf,
+            video: None,
+            audio: None,
+        },
     ]
 }

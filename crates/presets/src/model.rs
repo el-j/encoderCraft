@@ -24,6 +24,8 @@ pub enum PresetCategory {
     SocialMedia,
     Audio,
     Spatial3D,
+    Vector,
+    Document,
     Custom,
 }
 

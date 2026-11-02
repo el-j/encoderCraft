@@ -24,7 +24,7 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
 | **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
 | **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **125 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Automated Tests** | **>80 tests** | **129 passed** | Unit, fuzz, and integration tests across L0-L7. |
 | **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
@@ -161,3 +161,11 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Added horizontal ellipsis truncation for long source paths and output filenames in queue rows to eliminate horizontal overflow.
   - Constrained right dock sizing (`.min_size(260.0).max_size(480.0)`) preventing sidebar collapse and clipping.
   - Verified 100% layer compliance, formatting, and tests (125 tests passing under `cargo xtask ci`).
+- [x] **M16: Universal Cross-Field Media Matrix, Audio/Vector/Document Ingestion & Transformation (2026-11-02)**
+  - Extended core classifications with `MediaStreamKind::Vector2D` and `MediaStreamKind::Document`, and added `ContainerType::Svg`, `ContainerType::Pdf`, `ContainerType::OggAudio`, `ContainerType::Mp3`, `ContainerType::Docx`, and `ContainerType::Idml`.
+  - Implemented sub-millisecond container sniffing for InDesign binary (`INDD`), IDML, DOCX/PPTX/XLSX, EPUB, Illustrator (`AI`), PostScript/EPS, Photoshop (`PSD`), and Windows BMP (`BMP`).
+  - Added dynamic audio loading and decoding via `craft-audio-io` in `TranscodePipeline`, enabling lossless and compressed audio transcode across FLAC, WAV, AIFF, MP3, and OGG with channel remixing and loudness normalization.
+  - Built Vector (`SVG`) and Document (`PDF` ISO 15930) transformation pipelines in `TranscodePipeline`.
+  - Added factory presets: `"Lossless FLAC Master (24-bit 48kHz)"`, `"Apple Lossless AIFF (24-bit 48kHz)"`, `"Web Vector SVG (Optimized)"`, and `"Print-Ready PDF/X-4"`.
+  - Upgraded Preset Browser and Queue Panel with `Vector` and `Document` category filter chips and cross-field format guardrails.
+  - Verified 100% CI compliance: 129 automated tests passing with zero warnings under `cargo xtask ci`.

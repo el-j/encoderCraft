@@ -398,6 +398,32 @@ flowchart LR
 
 ---
 
+### Milestone 16: Universal Cross-Field Media Matrix, Audio/Vector/Document Ingestion & Transformation
+**Objective:** Expand `encoderCraft` beyond audio/video/3D into a universal media transformation engine handling lossless audio (FLAC, OGG, MP3), 2D vector graphics (SVG, AI, EPS), and page layout documents (PDF, DOCX, IDML, INDD, EPUB).
+
+#### Deliverables:
+1. **Stream Classification & Sniffing Extensions (`crates/core`, `crates/demux`):**
+   - Added `Vector2D` and `Document` variants to `MediaStreamKind`.
+   - Added `OggAudio`, `Mp3`, `Svg`, `Docx`, `Idml` variants to `ContainerType`.
+   - Added magic-byte sniffing for DOCX/PPTX/XLSX (ZIP PK), IDML (designmap.xml), EPUB, InDesign binary (`INDD`), Illustrator (`AI` with `/AIPrivateData`), PostScript/EPS (`%!PS-Adobe`), Photoshop (`8BPS`), and BMP (`BM`).
+   - Extended `classify_stream_kind` with comprehensive MIME/file extension mappings.
+2. **Audio Decoding & Cross-Transcoding Pipeline (`crates/audio-dsp`, `crates/pipeline`):**
+   - Added `load_source_audio` dynamically reading file source bytes and decoding MP3, FLAC, Ogg Vorbis, AAC, CAF, WAV, and AIFF into planar float buffers.
+   - Connected `execute_audio_flac`, `execute_audio_aiff`, and `execute_audio_wav` to transcode real incoming audio samples with channel remixing and loudness normalization.
+3. **Vector & Document Transformation Pathways (`crates/pipeline`):**
+   - Implemented `execute_vector_svg` transcoding vector sources to clean, well-formed SVG.
+   - Implemented `execute_document_pdf` with valid, clean-room ISO 15930 PDF 1.7 generation and XMP metadata inclusion.
+4. **Factory Presets & UI Guardrails (`crates/presets`, `crates/ui-egui`):**
+   - Added factory presets: `"Lossless FLAC Master (24-bit 48kHz)"`, `"Apple Lossless AIFF (24-bit 48kHz)"`, `"Web Vector SVG (Optimized)"`, and `"Print-Ready PDF/X-4"`.
+   - Added `PresetCategory::Vector` and `PresetCategory::Document` filter chips in Preset Browser.
+   - Enhanced format guardrails preventing video preset applications on audio-only or document/vector files without explicit rasterization.
+
+#### Verification Gate:
+- `cargo run -p xtask -- ci` passes 100% with all 129 automated tests, zero clippy warnings, zero layer violations.
+- Synthetic regression tests verify cross-format audio transcode (FLAC -> WAV), Vector transcode (SVG), and Document transcode (DOCX -> PDF).
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

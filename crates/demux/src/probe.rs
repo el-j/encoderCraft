@@ -57,7 +57,7 @@ impl MediaInfo {
     /// Classifies the overall stream kind based on discovered elementary streams and container kind.
     pub fn stream_kind(&self) -> MediaStreamKind {
         match self.container {
-            ContainerKind::Wav | ContainerKind::Rf64Wav | ContainerKind::Aiff | ContainerKind::Flac | ContainerKind::Mp3 => {
+            ContainerKind::Wav | ContainerKind::Rf64Wav | ContainerKind::Aiff | ContainerKind::Flac | ContainerKind::Mp3 | ContainerKind::Ogg => {
                 MediaStreamKind::AudioOnly
             }
             ContainerKind::GltfBinary
@@ -74,7 +74,17 @@ impl MediaInfo {
             | ContainerKind::Tiff
             | ContainerKind::OpenExr
             | ContainerKind::RadianceHdr
-            | ContainerKind::Dds => MediaStreamKind::StillImage,
+            | ContainerKind::Dds
+            | ContainerKind::Psd
+            | ContainerKind::Bmp => MediaStreamKind::StillImage,
+            ContainerKind::Svg | ContainerKind::IllustratorAi | ContainerKind::Eps => MediaStreamKind::Vector2D,
+            ContainerKind::Pdf
+            | ContainerKind::Docx
+            | ContainerKind::Pptx
+            | ContainerKind::Xlsx
+            | ContainerKind::Idml
+            | ContainerKind::Indd
+            | ContainerKind::Epub => MediaStreamKind::Document,
             _ => {
                 let has_video = !self.video_streams.is_empty();
                 let has_audio = !self.audio_streams.is_empty();
@@ -108,7 +118,9 @@ pub fn classify_stream_kind(path: &Path) -> MediaStreamKind {
         match ext.as_str() {
             "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" | "alac" | "wma" => MediaStreamKind::AudioOnly,
             "glb" | "gltf" | "obj" | "stl" | "ply" | "usda" | "usdc" | "usdz" => MediaStreamKind::Spatial3D,
-            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "hdr" | "dds" | "bmp" => MediaStreamKind::StillImage,
+            "svg" | "ai" | "eps" => MediaStreamKind::Vector2D,
+            "pdf" | "docx" | "idml" | "indd" | "epub" | "pptx" | "xlsx" | "rtf" => MediaStreamKind::Document,
+            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "hdr" | "dds" | "bmp" | "psd" => MediaStreamKind::StillImage,
             "mp4" | "mov" | "mkv" | "webm" | "mxf" | "avi" | "m4v" | "mpg" | "mpeg" | "ts" => MediaStreamKind::VideoWithAudio,
             _ => MediaStreamKind::Unknown,
         }
@@ -482,9 +494,18 @@ mod tests {
         assert_eq!(classify_stream_kind(Path::new("song.mp3")), MediaStreamKind::AudioOnly);
         assert_eq!(classify_stream_kind(Path::new("voice.wav")), MediaStreamKind::AudioOnly);
         assert_eq!(classify_stream_kind(Path::new("track.flac")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("track.ogg")), MediaStreamKind::AudioOnly);
         assert_eq!(classify_stream_kind(Path::new("model.glb")), MediaStreamKind::Spatial3D);
         assert_eq!(classify_stream_kind(Path::new("scene.gltf")), MediaStreamKind::Spatial3D);
         assert_eq!(classify_stream_kind(Path::new("picture.png")), MediaStreamKind::StillImage);
+        assert_eq!(classify_stream_kind(Path::new("photo.psd")), MediaStreamKind::StillImage);
+        assert_eq!(classify_stream_kind(Path::new("icon.svg")), MediaStreamKind::Vector2D);
+        assert_eq!(classify_stream_kind(Path::new("logo.ai")), MediaStreamKind::Vector2D);
+        assert_eq!(classify_stream_kind(Path::new("drawing.eps")), MediaStreamKind::Vector2D);
+        assert_eq!(classify_stream_kind(Path::new("document.pdf")), MediaStreamKind::Document);
+        assert_eq!(classify_stream_kind(Path::new("proposal.docx")), MediaStreamKind::Document);
+        assert_eq!(classify_stream_kind(Path::new("catalog.idml")), MediaStreamKind::Document);
+        assert_eq!(classify_stream_kind(Path::new("book.epub")), MediaStreamKind::Document);
         assert_eq!(classify_stream_kind(Path::new("clip.mp4")), MediaStreamKind::VideoWithAudio);
         assert_eq!(classify_stream_kind(Path::new("movie.mov")), MediaStreamKind::VideoWithAudio);
     }
