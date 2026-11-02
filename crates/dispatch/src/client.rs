@@ -91,6 +91,27 @@ impl DispatchClient {
         Ok(())
     }
 
+    /// Queries the full list of queued and active jobs from encoderCraft.
+    pub fn list_jobs(&self) -> Result<serde_json::Value, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "queue.list", json!({}));
+        let response = self.send_request(&request)?;
+
+        if let Some(err) = response.error {
+            return Err(EncoderError::InvalidJobSpec(err));
+        }
+
+        response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty list response".into()))
+    }
+
+    /// Pings the running encoderCraft daemon.
+    pub fn ping(&self) -> Result<bool, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "app.ping", json!({}));
+        let response = self.send_request(&request)?;
+        Ok(response.error.is_none())
+    }
+
     fn send_request(&self, req: &IpcRequest) -> Result<IpcResponse, EncoderError> {
         let mut line = serde_json::to_string(req).map_err(|e| EncoderError::Io(format!("failed to serialize request: {e}")))?;
         line.push('\n');

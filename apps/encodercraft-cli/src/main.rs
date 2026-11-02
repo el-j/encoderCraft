@@ -67,7 +67,7 @@ fn print_usage() {
 }
 
 fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
-    let mut input = None;
+    let mut inputs: Vec<PathBuf> = Vec::new();
     let mut preset_name = "Match Source - High Bitrate".to_string();
     let mut output = None;
     let mut export_stems = false;
@@ -124,8 +124,8 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 "--burn-captions" => {
                     burn_captions = true;
                 }
-                other if !other.starts_with('-') && input.is_none() => {
-                    input = Some(PathBuf::from(other));
+                other if !other.starts_with('-') => {
+                    inputs.push(PathBuf::from(other));
                 }
                 _ => {}
             }
@@ -133,49 +133,78 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         i += 1;
     }
 
-    let input_path = input.ok_or_else(|| EncoderError::InvalidJobSpec("missing input file".into()))?;
-    let output_path = output.unwrap_or_else(|| {
-        let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-        PathBuf::from(format!("{stem}_encoded.mp4"))
-    });
-
-    println!("Probing source: {}", input_path.display());
-    let media_info = probe_file(&input_path)?;
+    if inputs.is_empty() {
+        return Err(EncoderError::InvalidJobSpec("missing input file(s)".into()));
+    }
 
     let registry = PresetRegistry::default();
     let preset = registry.find_by_name(&preset_name).ok_or_else(|| EncoderError::InvalidJobSpec(format!("preset '{preset_name}' not found")))?;
 
-    let mut target = evaluate_preset(preset, &media_info, output_path.clone())?;
-
-    if export_stems {
-        target.audio_stems = Some(encodercraft_core::AudioStemMode::DiscreteMono);
-    }
-    if hardware_accel {
-        target.hardware_acceleration = true;
-    }
-    if xmp_title.is_some() || xmp_creator.is_some() || sidecar_xmp {
-        let meta = encodercraft_core::XmpMetadata { title: xmp_title, creator: xmp_creator, export_sidecar_xmp: sidecar_xmp, ..Default::default() };
-        target.metadata = Some(meta);
-    }
-    if let Some(cap) = caption_file {
-        target.caption_path = Some(cap);
-        target.burn_captions = burn_captions;
+    let total = inputs.len();
+    if total > 1 {
+        println!("Starting batch transcode: {total} files using preset '{preset_name}'");
     }
 
-    let spec = CraftJobSpec {
-        version: "1.0".into(),
-        job_id: format!("cli-encode-{}", std::process::id()),
-        client_info: ClientInfo { app_name: "encoderCraft CLI".into(), app_version: "0.1.0".into(), pid: std::process::id(), user_notes: None },
-        priority: JobPriority::Normal,
-        start_policy: StartPolicy::AutoStart,
-        source: SourceDescriptor::File { path: input_path, start_tick: None, duration_ticks: None, timebase: None },
-        targets: vec![target],
-    };
+    for (idx, input_path) in inputs.iter().enumerate() {
+        let output_path = if total == 1
+            && let Some(ref out) = output
+        {
+            out.clone()
+        } else if let Some(ref out_dir) = output
+            && out_dir.is_dir()
+        {
+            let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            out_dir.join(format!("{stem}_encoded.mp4"))
+        } else {
+            let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            PathBuf::from(format!("{stem}_encoded.mp4"))
+        };
 
-    println!("Starting transcode: preset='{}' ➔ {}", preset_name, output_path.display());
-    let pipeline = TranscodePipeline::new(spec);
-    pipeline.execute()?;
-    println!("Encoding complete: {}", output_path.display());
+        if total > 1 {
+            println!("\n[{}/{}] Probing: {}", idx + 1, total, input_path.display());
+        } else {
+            println!("Probing source: {}", input_path.display());
+        }
+
+        let media_info = probe_file(input_path)?;
+        let mut target = evaluate_preset(preset, &media_info, output_path.clone())?;
+
+        if export_stems {
+            target.audio_stems = Some(encodercraft_core::AudioStemMode::DiscreteMono);
+        }
+        if hardware_accel {
+            target.hardware_acceleration = true;
+        }
+        if xmp_title.is_some() || xmp_creator.is_some() || sidecar_xmp {
+            let meta = encodercraft_core::XmpMetadata {
+                title: xmp_title.clone(),
+                creator: xmp_creator.clone(),
+                export_sidecar_xmp: sidecar_xmp,
+                ..Default::default()
+            };
+            target.metadata = Some(meta);
+        }
+        if let Some(ref cap) = caption_file {
+            target.caption_path = Some(cap.clone());
+            target.burn_captions = burn_captions;
+        }
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: format!("cli-encode-{}-{}", std::process::id(), idx + 1),
+            client_info: ClientInfo { app_name: "encoderCraft CLI".into(), app_version: "0.1.0".into(), pid: std::process::id(), user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: input_path.clone(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![target],
+        };
+
+        println!("Transcoding: preset='{}' ➔ {}", preset_name, output_path.display());
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute()?;
+        println!("Complete: {}", output_path.display());
+    }
+
     Ok(())
 }
 
@@ -207,8 +236,20 @@ fn cmd_queue(args: &[String]) -> Result<(), EncoderError> {
             println!("Job '{job_id}' cancelled.");
         }
         _ => {
-            println!("Querying active queue daemon...");
-            // Default queue status check
+            let res = client.list_jobs()?;
+            if let Some(jobs) = res.as_array() {
+                println!("encoderCraft Queue: {} jobs total\n", jobs.len());
+                for (idx, j) in jobs.iter().enumerate() {
+                    let job_id = j.get("spec").and_then(|s| s.get("jobId")).and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let app =
+                        j.get("spec").and_then(|s| s.get("clientInfo")).and_then(|c| c.get("appName")).and_then(|v| v.as_str()).unwrap_or("client");
+                    let status = j.get("status").and_then(|v| v.as_str()).unwrap_or("Queued");
+                    let progress = j.get("progressPercent").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    println!(" [{:>2}] ID: {:<24} App: {:<14} Status: {:<10} Progress: {:>3.0}%", idx + 1, job_id, app, status, progress);
+                }
+            } else {
+                println!("Queue is empty or daemon unreachable.");
+            }
         }
     }
     Ok(())

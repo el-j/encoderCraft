@@ -80,4 +80,51 @@ fn test_mcp_handshake_and_tools() {
     });
     let status_resp: Value = serde_json::from_str(&server.process_message(&status_req.to_string()).unwrap()).unwrap();
     assert!(status_resp.get("result").unwrap().get("content").is_some());
+
+    // 6. Call encodercraft_batch_transcode
+    let batch_req = json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {
+            "name": "encodercraft_batch_transcode",
+            "arguments": {
+                "source_paths": ["clip_a.mov", "clip_b.mov"],
+                "preset_name": "YouTube 1080p Full HD"
+            }
+        }
+    });
+    let batch_resp: Value = serde_json::from_str(&server.process_message(&batch_req.to_string()).unwrap()).unwrap();
+    assert!(batch_resp.get("result").unwrap().get("content").is_some());
+
+    // 7. Call encodercraft_stitch_clips
+    let stitch_req = json!({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "encodercraft_stitch_clips",
+            "arguments": {
+                "clip_paths": ["clip_1.mov", "clip_2.mov"],
+                "output_path": "stitched_mcp.mp4"
+            }
+        }
+    });
+    let stitch_resp: Value = serde_json::from_str(&server.process_message(&stitch_req.to_string()).unwrap()).unwrap();
+    assert!(stitch_resp.get("result").unwrap().get("content").is_some());
+
+    // 8. Call encodercraft_manage_queue
+    let manage_req = json!({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {
+            "name": "encodercraft_manage_queue",
+            "arguments": {
+                "action": "clear_finished"
+            }
+        }
+    });
+    let manage_resp: Value = serde_json::from_str(&server.process_message(&manage_req.to_string()).unwrap()).unwrap();
+    assert!(manage_resp.get("result").unwrap().get("content").is_some());
 }

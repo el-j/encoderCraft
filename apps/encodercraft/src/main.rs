@@ -27,7 +27,11 @@ impl eframe::App for DesktopApp {
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
-    let queue_mgr = Arc::new(QueueManager::new_in_memory());
+    let app_dir = get_app_data_dir();
+    let _ = std::fs::create_dir_all(&app_dir);
+    let journal_file = app_dir.join("queue-state.json");
+
+    let queue_mgr = Arc::new(QueueManager::new_persisted(journal_file).unwrap_or_else(|_| QueueManager::new_in_memory()));
     let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
 
     let handler = Arc::new(EngineIpcHandler::new(queue_mgr.clone(), preset_registry.clone()));
@@ -65,4 +69,21 @@ fn main() -> Result<(), eframe::Error> {
             }))
         }),
     )
+}
+
+fn get_app_data_dir() -> PathBuf {
+    if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(config_home).join("encodercraft")
+    } else if let Ok(home) = std::env::var("HOME") {
+        #[cfg(target_os = "macos")]
+        {
+            PathBuf::from(home).join("Library").join("Application Support").join("encoderCraft")
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            PathBuf::from(home).join(".config").join("encodercraft")
+        }
+    } else {
+        std::env::temp_dir().join("encodercraft")
+    }
 }

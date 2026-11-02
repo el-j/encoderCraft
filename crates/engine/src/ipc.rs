@@ -69,6 +69,55 @@ impl IpcHandler for EngineIpcHandler {
                 }
                 IpcResponse::success(req.id, json!(true))
             }
+            "queue.duplicate" => {
+                let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
+                match self.queue_mgr.duplicate_job(job_id) {
+                    Ok(new_id) => IpcResponse::success(req.id, json!(new_id)),
+                    Err(e) => IpcResponse::error(req.id, e.to_string()),
+                }
+            }
+            "queue.move_up" => {
+                let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
+                match self.queue_mgr.move_job_up(job_id) {
+                    Ok(()) => IpcResponse::success(req.id, json!(true)),
+                    Err(e) => IpcResponse::error(req.id, e.to_string()),
+                }
+            }
+            "queue.move_down" => {
+                let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
+                match self.queue_mgr.move_job_down(job_id) {
+                    Ok(()) => IpcResponse::success(req.id, json!(true)),
+                    Err(e) => IpcResponse::error(req.id, e.to_string()),
+                }
+            }
+            "queue.reset" => {
+                let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
+                match self.queue_mgr.reset_job_status(job_id) {
+                    Ok(()) => IpcResponse::success(req.id, json!(true)),
+                    Err(e) => IpcResponse::error(req.id, e.to_string()),
+                }
+            }
+            "queue.clear_finished" => match self.queue_mgr.clear_completed_jobs() {
+                Ok(count) => IpcResponse::success(req.id, json!({ "removedCount": count })),
+                Err(e) => IpcResponse::error(req.id, e.to_string()),
+            },
+            "queue.stitch" => {
+                let paths: Vec<std::path::PathBuf> =
+                    match serde_json::from_value(req.params.get("paths").cloned().unwrap_or(serde_json::Value::Array(Vec::new()))) {
+                        Ok(p) => p,
+                        Err(e) => return IpcResponse::error(req.id, format!("invalid paths: {e}")),
+                    };
+                let output_path = match req.params.get("outputPath").and_then(|v| v.as_str()) {
+                    Some(p) => std::path::PathBuf::from(p),
+                    None => return IpcResponse::error(req.id, "missing outputPath parameter"),
+                };
+                let preset_name = req.params.get("presetName").and_then(|v| v.as_str()).unwrap_or("Match Source - High Bitrate").to_string();
+
+                match self.queue_mgr.stitch_sources_into_job(paths, output_path, preset_name) {
+                    Ok(job_id) => IpcResponse::success(req.id, json!(job_id)),
+                    Err(e) => IpcResponse::error(req.id, e.to_string()),
+                }
+            }
             "presets.list" => {
                 let reg = self.preset_registry.lock().unwrap_or_else(PoisonError::into_inner);
                 let presets = reg.list();

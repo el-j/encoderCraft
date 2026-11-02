@@ -137,6 +137,51 @@ impl CommandRegistry {
             let json_val = serde_json::to_value(&jobs).map_err(|e| EncoderError::Internal(format!("failed to serialize jobs: {e}")))?;
             Ok(json_val)
         }));
+
+        // queue.move_up
+        self.register(CommandSpec::new("queue.move_up", "Move Job Up", "Moves a job up in queue priority", |q, params| {
+            let job_id =
+                params.get("jobId").and_then(Value::as_str).ok_or_else(|| EncoderError::InvalidJobSpec("missing 'jobId' parameter".into()))?;
+            q.move_job_up(job_id)?;
+            Ok(serde_json::json!({ "success": true, "jobId": job_id }))
+        }));
+
+        // queue.move_down
+        self.register(CommandSpec::new("queue.move_down", "Move Job Down", "Moves a job down in queue priority", |q, params| {
+            let job_id =
+                params.get("jobId").and_then(Value::as_str).ok_or_else(|| EncoderError::InvalidJobSpec("missing 'jobId' parameter".into()))?;
+            q.move_job_down(job_id)?;
+            Ok(serde_json::json!({ "success": true, "jobId": job_id }))
+        }));
+
+        // queue.reset
+        self.register(CommandSpec::new("queue.reset", "Reset Job Status", "Resets finished or failed job back to ready", |q, params| {
+            let job_id =
+                params.get("jobId").and_then(Value::as_str).ok_or_else(|| EncoderError::InvalidJobSpec("missing 'jobId' parameter".into()))?;
+            q.reset_job_status(job_id)?;
+            Ok(serde_json::json!({ "success": true, "jobId": job_id }))
+        }));
+
+        // queue.clear_finished
+        self.register(CommandSpec::new("queue.clear_finished", "Clear Finished", "Removes completed jobs from the queue", |q, _| {
+            let removed = q.clear_completed_jobs()?;
+            Ok(serde_json::json!({ "removedCount": removed }))
+        }));
+
+        // queue.stitch
+        self.register(CommandSpec::new("queue.stitch", "Stitch Clips", "Combines multiple clips into one transcode job", |q, params| {
+            let paths: Vec<std::path::PathBuf> = serde_json::from_value(params.get("paths").cloned().unwrap_or(Value::Array(Vec::new())))
+                .map_err(|e| EncoderError::InvalidJobSpec(format!("invalid paths: {e}")))?;
+            let output_path = params
+                .get("outputPath")
+                .and_then(Value::as_str)
+                .map(std::path::PathBuf::from)
+                .ok_or_else(|| EncoderError::InvalidJobSpec("missing 'outputPath'".into()))?;
+            let preset_name = params.get("presetName").and_then(Value::as_str).unwrap_or("Match Source - High Bitrate").to_string();
+
+            let job_id = q.stitch_sources_into_job(paths, output_path, preset_name)?;
+            Ok(serde_json::json!({ "jobId": job_id }))
+        }));
     }
 }
 
@@ -185,8 +230,26 @@ mod tests {
         let pause_res = registry.dispatch(&queue, "queue.pause", serde_json::json!({ "jobId": "cmd-test-1" })).unwrap();
         assert_eq!(pause_res.get("status").unwrap().as_str().unwrap(), "paused");
 
+        // queue.duplicate
+        let dup_res = registry.dispatch(&queue, "queue.duplicate", serde_json::json!({ "jobId": "cmd-test-1" })).unwrap();
+        assert_eq!(dup_res.get("jobId").unwrap().as_str().unwrap(), "cmd-test-1-copy");
+
+        // queue.move_up & move_down
+        let up_res = registry.dispatch(&queue, "queue.move_up", serde_json::json!({ "jobId": "cmd-test-1-copy" })).unwrap();
+        assert!(up_res.get("success").unwrap().as_bool().unwrap());
+        let down_res = registry.dispatch(&queue, "queue.move_down", serde_json::json!({ "jobId": "cmd-test-1-copy" })).unwrap();
+        assert!(down_res.get("success").unwrap().as_bool().unwrap());
+
+        // queue.reset
+        let reset_res = registry.dispatch(&queue, "queue.reset", serde_json::json!({ "jobId": "cmd-test-1" })).unwrap();
+        assert!(reset_res.get("success").unwrap().as_bool().unwrap());
+
         // queue.remove
         let remove_res = registry.dispatch(&queue, "queue.remove", serde_json::json!({ "jobId": "cmd-test-1" })).unwrap();
         assert!(remove_res.get("success").unwrap().as_bool().unwrap());
+
+        // queue.clear_finished
+        let clear_res = registry.dispatch(&queue, "queue.clear_finished", serde_json::json!({})).unwrap();
+        assert!(clear_res.get("removedCount").is_some());
     }
 }
