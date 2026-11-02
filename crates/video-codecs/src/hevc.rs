@@ -1,6 +1,6 @@
-//! HEVC (H.265) video encoder wrapper backed by `effectcraft-hevcenc`.
+//! HEVC (H.265) video encoder wrapper backed by `craft-hevcenc`.
 
-use effectcraft_hevcenc::{Encoder, EncoderConfig, Frame, RateControl};
+use craft_hevcenc::{Encoder, EncoderConfig, Frame, RateControl};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};

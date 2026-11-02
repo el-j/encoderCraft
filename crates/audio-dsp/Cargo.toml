@@ -11,8 +11,8 @@ workspace = true
 
 [dependencies]
 encodercraft-core = { workspace = true }
-filmcraft-aac = { workspace = true }
-soundcraft-audio-io = { workspace = true }
+craft-aac = { workspace = true }
+craft-audio-io = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

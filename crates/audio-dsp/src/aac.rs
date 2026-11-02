@@ -1,7 +1,7 @@
-//! AAC-LC audio encoder wrapper backed by `filmcraft-aac`.
+//! AAC-LC audio encoder wrapper backed by `craft-aac`.
 
+use craft_aac::{Encoder, EncoderConfig};
 use encodercraft_core::{AudioSampleBuffer, EncoderError};
-use filmcraft_aac::{Encoder, EncoderConfig};
 
 /// AAC-LC (MPEG-4 Audio Low Complexity) audio encoder.
 pub struct AacEncoderWrapper {

@@ -13,11 +13,11 @@ workspace = true
 encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
-filmcraft-h264enc = { workspace = true }
-filmcraft-prores = { workspace = true }
-effectcraft-hevcenc = { workspace = true }
-effectcraft-av1enc = { workspace = true }
-effectcraft-vp9enc = { workspace = true }
+craft-h264enc = { workspace = true }
+craft-prores = { workspace = true }
+craft-hevcenc = { workspace = true }
+craft-av1enc = { workspace = true }
+craft-vp9enc = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

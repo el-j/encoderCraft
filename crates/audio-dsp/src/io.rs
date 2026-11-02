@@ -1,14 +1,14 @@
-//! Audio decoding and encoding wrappers backed by `soundcraft-audio-io`.
+//! Audio decoding and encoding wrappers backed by `craft-audio-io`.
 //!
 //! Provides decoding for compressed formats (MP3, FLAC, Ogg Vorbis, AAC, CAF, WAV, AIFF)
 //! and encoding for FLAC, AIFF, and WAV.
 
+use craft_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError};
-use soundcraft_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 
 /// Decodes any supported audio container and format into a planar `AudioSampleBuffer`.
 pub fn decode_audio(bytes: &[u8]) -> Result<AudioSampleBuffer, EncoderError> {
-    let (_info, buf) = soundcraft_audio_io::decode(bytes, None).map_err(|e| EncoderError::Internal(format!("audio decoding failed: {e}")))?;
+    let (_info, buf) = craft_audio_io::decode(bytes, None).map_err(|e| EncoderError::Internal(format!("audio decoding failed: {e}")))?;
 
     let layout = match buf.channels.len() {
         1 => ChannelLayout::Mono,
@@ -26,7 +26,7 @@ pub fn encode_audio_flac(buffer: &AudioSampleBuffer) -> Result<Vec<u8>, EncoderE
     let audio_buf = AudioBuffer { sample_rate: buffer.sample_rate, channels: buffer.clone().into_planar_channels() };
     let opts = EncodeOptions { format: FileFormat::Flac, bit_depth: BitDepth::Int24, dither: true, bwf: None };
 
-    soundcraft_audio_io::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("FLAC encoding failed: {e}")))
+    craft_audio_io::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("FLAC encoding failed: {e}")))
 }
 
 /// Encodes an `AudioSampleBuffer` to Apple AIFF format.
@@ -34,7 +34,7 @@ pub fn encode_audio_aiff(buffer: &AudioSampleBuffer) -> Result<Vec<u8>, EncoderE
     let audio_buf = AudioBuffer { sample_rate: buffer.sample_rate, channels: buffer.clone().into_planar_channels() };
     let opts = EncodeOptions { format: FileFormat::Aiff, bit_depth: BitDepth::Int24, dither: true, bwf: None };
 
-    soundcraft_audio_io::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("AIFF encoding failed: {e}")))
+    craft_audio_io::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("AIFF encoding failed: {e}")))
 }
 
 #[cfg(test)]

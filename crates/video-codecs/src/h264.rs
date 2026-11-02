@@ -1,7 +1,7 @@
-//! H.264 / AVC video encoder wrapper backed by `filmcraft-h264enc`.
+//! H.264 / AVC video encoder wrapper backed by `craft-h264enc`.
 
+use craft_h264enc::{Encoder, EncoderConfig, PacketFormat, RateControl, YuvFrame};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
-use filmcraft_h264enc::{Encoder, EncoderConfig, PacketFormat, RateControl, YuvFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
 use crate::yuv::frame_to_yuv420_8;

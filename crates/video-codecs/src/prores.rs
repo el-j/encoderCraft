@@ -1,7 +1,7 @@
-//! Apple ProRes video encoder wrapper backed by `filmcraft-prores`.
+//! Apple ProRes video encoder wrapper backed by `craft-prores`.
 
+use craft_prores::{ChromaFormat, ColorInfo, Encoder, EncoderConfig, Frame, Interlace, Profile};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
-use filmcraft_prores::{ChromaFormat, ColorInfo, Encoder, EncoderConfig, Frame, Interlace, Profile};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
 use crate::yuv::frame_to_yuv420_8;

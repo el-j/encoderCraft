@@ -1,6 +1,6 @@
-//! VP9 video encoder wrapper backed by `effectcraft-vp9enc`.
+//! VP9 video encoder wrapper backed by `craft-vp9enc`.
 
-use effectcraft_vp9enc::{EncoderConfig, Vp9Encoder};
+use craft_vp9enc::{EncoderConfig, Vp9Encoder};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};

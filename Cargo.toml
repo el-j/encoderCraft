@@ -58,24 +58,17 @@ authors = ["el-j", "ArtCraft Contributors"]
 [workspace.dependencies]
 # Upstream shared ArtCraft libraries (official storytold/craft-libs repository)
 craft-media = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git", default-features = false, features = ["isobmff", "matroska", "bitstream"] }
-craft-cms = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
-craft-jpeg = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
-craft-crw = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
-craft-i18n = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
-craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git", features = ["egui", "ui"] }
-craft-update = { version = "=0.1.0", git = "https://github.com/storytold/craft-libs.git", features = ["egui"] }
+craft-h264enc = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-prores = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-aac = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-hevcenc = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-av1enc = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-vp9enc = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-audio-io = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
 
-# Sibling Craft app official repositories (to be consolidated into craft-libs)
-filmcraft-bitstream = { git = "https://github.com/storytold/filmcraft.git" }
-filmcraft-h264enc = { git = "https://github.com/storytold/filmcraft.git" }
-filmcraft-prores = { git = "https://github.com/storytold/filmcraft.git" }
-filmcraft-aac = { git = "https://github.com/storytold/filmcraft.git" }
+# Sibling Craft app official repositories
 filmcraft-captions = { git = "https://github.com/storytold/filmcraft.git" }
 filmcraft-time = { git = "https://github.com/storytold/filmcraft.git" }
-effectcraft-hevcenc = { git = "https://github.com/storytold/effectcraft.git" }
-effectcraft-av1enc = { git = "https://github.com/storytold/effectcraft.git" }
-effectcraft-vp9enc = { git = "https://github.com/storytold/effectcraft.git" }
-soundcraft-audio-io = { git = "https://github.com/storytold/soundcraft.git" }
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }
@@ -145,28 +138,15 @@ debug = 0
 # while guaranteeing that canonical builds and downstream consumers rely on official git repositories.
 [patch."https://github.com/storytold/craft-libs.git"]
 craft-media = { path = "../craft-libs/crates/media" }
-craft-cms = { path = "../craft-libs/crates/cms" }
-craft-jpeg = { path = "../craft-libs/crates/jpeg" }
-craft-crw = { path = "../craft-libs/crates/crw" }
-craft-i18n = { path = "../craft-libs/crates/i18n" }
-craft-keymap = { path = "../craft-libs/crates/keymap" }
-craft-update = { path = "../craft-libs/crates/update" }
-craft-docpath = { path = "../craft-libs/crates/docpath" }
-craft-ui = { path = "../craft-libs/crates/ui" }
+craft-h264enc = { path = "../craft-libs/crates/h264enc" }
+craft-prores = { path = "../craft-libs/crates/prores" }
+craft-aac = { path = "../craft-libs/crates/aac" }
+craft-hevcenc = { path = "../craft-libs/crates/hevcenc" }
+craft-av1enc = { path = "../craft-libs/crates/av1enc" }
+craft-vp9enc = { path = "../craft-libs/crates/vp9enc" }
+craft-audio-io = { path = "../craft-libs/crates/audio-io" }
 
 [patch."https://github.com/storytold/filmcraft.git"]
-filmcraft-bitstream = { path = "../filmcraft/crates/bitstream" }
-filmcraft-h264enc = { path = "../filmcraft/crates/h264enc" }
-filmcraft-prores = { path = "../filmcraft/crates/prores" }
-filmcraft-aac = { path = "../filmcraft/crates/aac" }
 filmcraft-captions = { path = "../filmcraft/crates/captions" }
 filmcraft-time = { path = "../filmcraft/crates/time" }
-
-[patch."https://github.com/storytold/effectcraft.git"]
-effectcraft-hevcenc = { path = "../effectcraft/crates/hevcenc" }
-effectcraft-av1enc = { path = "../effectcraft/crates/av1enc" }
-effectcraft-vp9enc = { path = "../effectcraft/crates/vp9enc" }
-
-[patch."https://github.com/storytold/soundcraft.git"]
-soundcraft-audio-io = { path = "../soundcraft/crates/audio-io" }
 

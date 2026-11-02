@@ -1,6 +1,6 @@
-//! AV1 video encoder wrapper backed by `effectcraft-av1enc`.
+//! AV1 video encoder wrapper backed by `craft-av1enc`.
 
-use effectcraft_av1enc::{Encoder, EncoderConfig, Frame, RateControl};
+use craft_av1enc::{Encoder, EncoderConfig, Frame, RateControl};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};

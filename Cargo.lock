@@ -448,11 +448,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-aac"
+version = "0.1.0"
+dependencies = [
+ "craft-bitstream",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-audio-io"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "symphonia",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-av1enc"
+version = "0.1.0"
+
+[[package]]
+name = "craft-bitstream"
+version = "0.1.0"
+dependencies = [
+ "craft-media",
+]
+
+[[package]]
+name = "craft-h264enc"
+version = "0.1.0"
+dependencies = [
+ "craft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-hevcenc"
+version = "0.1.0"
+
+[[package]]
 name = "craft-media"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "craft-prores"
+version = "0.1.0"
+dependencies = [
+ "craft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-vp9enc"
+version = "0.1.0"
 
 [[package]]
 name = "crc32fast"
@@ -602,18 +657,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "effectcraft-av1enc"
-version = "0.20.0"
-
-[[package]]
-name = "effectcraft-hevcenc"
-version = "0.20.0"
-
-[[package]]
-name = "effectcraft-vp9enc"
-version = "0.20.0"
-
-[[package]]
 name = "eframe"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -739,11 +782,11 @@ dependencies = [
 name = "encodercraft-audio-dsp"
 version = "0.1.0"
 dependencies = [
+ "craft-aac",
+ "craft-audio-io",
  "encodercraft-core",
- "filmcraft-aac",
  "proptest",
  "serde",
- "soundcraft-audio-io",
  "thiserror 2.0.21",
 ]
 
@@ -977,14 +1020,14 @@ dependencies = [
 name = "encodercraft-video-codecs"
 version = "0.1.0"
 dependencies = [
- "effectcraft-av1enc",
- "effectcraft-hevcenc",
- "effectcraft-vp9enc",
+ "craft-av1enc",
+ "craft-h264enc",
+ "craft-hevcenc",
+ "craft-prores",
+ "craft-vp9enc",
  "encodercraft-color",
  "encodercraft-core",
  "encodercraft-geom",
- "filmcraft-h264enc",
- "filmcraft-prores",
  "proptest",
  "serde",
  "thiserror 2.0.21",
@@ -1119,21 +1162,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 
 [[package]]
-name = "filmcraft-aac"
-version = "0.16.0"
-dependencies = [
- "filmcraft-bitstream",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "filmcraft-bitstream"
-version = "0.16.0"
-dependencies = [
- "craft-media",
-]
-
-[[package]]
 name = "filmcraft-captions"
 version = "0.16.0"
 dependencies = [
@@ -1178,15 +1206,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "filmcraft-h264enc"
-version = "0.16.0"
-dependencies = [
- "filmcraft-bitstream",
- "rayon",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "filmcraft-media"
 version = "0.16.0"
 dependencies = [
@@ -1212,15 +1231,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "url",
-]
-
-[[package]]
-name = "filmcraft-prores"
-version = "0.16.0"
-dependencies = [
- "filmcraft-bitstream",
- "rayon",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3077,16 +3087,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "soundcraft-audio-io"
-version = "0.16.0"
-dependencies = [
- "log",
- "serde",
- "symphonia",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "spirv"
 version = "0.4.0+sdk-1.4.341.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4334,35 +4334,3 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "craft-cms"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-crw"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-docpath"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-i18n"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-jpeg"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-keymap"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-ui"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-update"
-version = "0.1.0"
