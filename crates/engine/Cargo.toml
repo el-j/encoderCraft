@@ -15,6 +15,9 @@ encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-pipeline = { workspace = true }
+encodercraft-presets = { workspace = true }
+encodercraft-ipc = { workspace = true }
+encodercraft-dispatch = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

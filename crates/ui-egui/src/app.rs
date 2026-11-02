@@ -114,6 +114,23 @@ impl EncoderCraftApp {
         // 3. Central Workspace with Side Panels
         let mut inspect_job = None;
 
+        // Drag-and-drop detection for external media files
+        let dropped_files = ui.input(|i| i.raw.dropped_files.clone());
+        for dropped in dropped_files {
+            let path = dropped.path();
+            if !path.as_os_str().is_empty() {
+                self.add_file_job(path.to_path_buf());
+            }
+        }
+
+        let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+        if self.queue_state.is_running || is_hovering {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            if self.queue_state.is_running {
+                let _ = self.queue_mgr.process_next_job();
+            }
+        }
+
         egui::Panel::right("right_side_dock").resizable(true).default_size(360.0).show(ui, |ui| {
             render_preview_panel(ui, &mut self.preview_state, None, &self.tokens);
             ui.add_space(8.0);
@@ -130,6 +147,20 @@ impl EncoderCraftApp {
         });
 
         egui::CentralPanel::default().show(ui, |ui| {
+            if is_hovering {
+                egui::Frame::new()
+                    .fill(self.tokens.accent_primary.gamma_multiply(0.15))
+                    .stroke(egui::Stroke::new(2.0, self.tokens.accent_primary))
+                    .corner_radius(8)
+                    .inner_margin(16.0)
+                    .show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading(RichText::new("📥 Drop Media Files to Queue for Encoding").color(self.tokens.accent_primary));
+                            ui.label("Files will be automatically queued with Match Source presets.");
+                        });
+                    });
+                ui.add_space(8.0);
+            }
             render_queue_panel(ui, &mut self.queue_state, &self.queue_mgr, &self.tokens, &mut inspect_job);
         });
 
@@ -159,6 +190,40 @@ impl EncoderCraftApp {
                 ui.label(RichText::new("Clean-Room Adobe Media Encoder Parity").strong());
             });
         }
+    }
+
+    /// Ingests a local file path into the queue with Match Source settings (e.g. from Drag & Drop).
+    pub fn add_file_job(&self, path: std::path::PathBuf) {
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("media");
+        let ext = "mp4";
+        let output_path = path.with_file_name(format!("{stem}_encoded.{ext}"));
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: format!("job-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)),
+            client_info: encodercraft_core::ClientInfo {
+                app_name: "Drag & Drop".into(),
+                app_version: "0.1.0".into(),
+                pid: std::process::id(),
+                user_notes: None,
+            },
+            priority: encodercraft_core::JobPriority::Normal,
+            start_policy: encodercraft_core::StartPolicy::AutoStart,
+            source: encodercraft_core::SourceDescriptor::File { path, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![encodercraft_core::OutputTarget {
+                target_id: "target-1".into(),
+                output_path,
+                preset_name: "Match Source - High Bitrate".into(),
+                container: encodercraft_core::ContainerType::IsoBmffMp4,
+                custom_width: Some(1920),
+                custom_height: Some(1080),
+                custom_frame_rate: None,
+                target_bitrate_kbps: Some(16000),
+                target_lufs: Some(-14.0),
+                ..Default::default()
+            }],
+        };
+        let _ = self.queue_mgr.submit_job(spec);
     }
 
     fn quick_add_demo_job(&self) {

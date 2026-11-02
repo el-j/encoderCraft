@@ -3,14 +3,19 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use encodercraft_engine::QueueManager;
+use encodercraft_engine::{EngineIpcHandler, QueueManager};
+use encodercraft_ipc::IpcServer;
 use encodercraft_presets::PresetRegistry;
 use encodercraft_ui_egui::EncoderCraftApp;
 
 struct DesktopApp {
     inner: EncoderCraftApp,
+    _ipc_tcp: Option<IpcServer>,
+    #[cfg(unix)]
+    _ipc_unix: Option<IpcServer>,
 }
 
 impl eframe::App for DesktopApp {
@@ -25,10 +30,39 @@ fn main() -> Result<(), eframe::Error> {
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
     let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
 
+    let handler = Arc::new(EngineIpcHandler::new(queue_mgr.clone(), preset_registry.clone()));
+
+    // Bind TCP daemon on standard port 8998 (or 8999 fallback)
+    let ipc_tcp = IpcServer::bind_tcp("127.0.0.1:8998", handler.clone()).or_else(|_| IpcServer::bind_tcp("127.0.0.1:8999", handler.clone())).ok();
+
+    // Bind Unix domain socket on Unix platforms
+    #[cfg(unix)]
+    let ipc_unix = {
+        let sock_path = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+        let sock_file = PathBuf::from(sock_path).join("encodercraft.sock");
+        let _ = std::fs::remove_file(&sock_file);
+        IpcServer::bind_unix(&sock_file, handler).ok()
+    };
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("encoderCraft").with_inner_size([1120.0, 720.0]).with_min_inner_size([720.0, 480.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_title("encoderCraft")
+            .with_inner_size([1120.0, 720.0])
+            .with_min_inner_size([720.0, 480.0])
+            .with_drag_and_drop(true),
         ..Default::default()
     };
 
-    eframe::run_native("encoderCraft", options, Box::new(|_cc| Ok(Box::new(DesktopApp { inner: EncoderCraftApp::new(queue_mgr, preset_registry) }))))
+    eframe::run_native(
+        "encoderCraft",
+        options,
+        Box::new(|_cc| {
+            Ok(Box::new(DesktopApp {
+                inner: EncoderCraftApp::new(queue_mgr, preset_registry),
+                _ipc_tcp: ipc_tcp,
+                #[cfg(unix)]
+                _ipc_unix: ipc_unix,
+            }))
+        }),
+    )
 }

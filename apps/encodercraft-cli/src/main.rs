@@ -4,66 +4,17 @@
 #![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use encodercraft_core::{ClientInfo, CraftJobSpec, EncoderError, JobPriority, SourceDescriptor, StartPolicy};
 use encodercraft_demux::probe_file;
-use encodercraft_dispatch::{DispatchClient, IpcRequest, IpcResponse};
-use encodercraft_engine::QueueManager;
-use encodercraft_ipc::{IpcHandler, IpcServer};
+use encodercraft_dispatch::DispatchClient;
+use encodercraft_engine::{EngineIpcHandler, QueueManager};
+use encodercraft_ipc::IpcServer;
 use encodercraft_mcp::McpServer;
 use encodercraft_pipeline::TranscodePipeline;
 use encodercraft_presets::{PresetRegistry, evaluate_preset};
 use encodercraft_watch::{WatchFolderConfig, WatchFolderService};
-use serde_json::json;
-
-struct EngineIpcHandler {
-    queue_mgr: Arc<QueueManager>,
-    preset_registry: Arc<Mutex<PresetRegistry>>,
-}
-
-impl IpcHandler for EngineIpcHandler {
-    fn handle(&self, req: &IpcRequest) -> IpcResponse {
-        match req.method.as_str() {
-            "queue.submit" => {
-                let spec: CraftJobSpec = match serde_json::from_value(req.params.clone()) {
-                    Ok(s) => s,
-                    Err(e) => return IpcResponse::error(req.id, format!("invalid job spec: {e}")),
-                };
-                match self.queue_mgr.submit_job(spec) {
-                    Ok(id) => IpcResponse::success(req.id, json!(id)),
-                    Err(e) => IpcResponse::error(req.id, e.to_string()),
-                }
-            }
-            "queue.status" => {
-                let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
-                let jobs = self.queue_mgr.list_jobs();
-                if let Some(j) = jobs.iter().find(|j| j.spec.job_id == job_id) {
-                    IpcResponse::success(req.id, json!(j.status))
-                } else {
-                    IpcResponse::error(req.id, format!("job '{job_id}' not found"))
-                }
-            }
-            "queue.list" => {
-                let jobs = self.queue_mgr.list_jobs();
-                IpcResponse::success(req.id, json!(jobs))
-            }
-            "queue.cancel" => {
-                let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
-                match self.queue_mgr.cancel_job(job_id) {
-                    Ok(()) => IpcResponse::success(req.id, json!(true)),
-                    Err(e) => IpcResponse::error(req.id, e.to_string()),
-                }
-            }
-            "presets.list" => {
-                let reg = self.preset_registry.lock().unwrap_or_else(PoisonError::into_inner);
-                let presets = reg.list();
-                IpcResponse::success(req.id, json!(presets))
-            }
-            _ => IpcResponse::error(req.id, format!("unknown method '{}'", req.method)),
-        }
-    }
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -319,11 +270,19 @@ fn cmd_daemon(args: &[String]) -> Result<(), EncoderError> {
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
     let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
 
-    let handler = Arc::new(EngineIpcHandler { queue_mgr: queue_mgr.clone(), preset_registry });
+    let handler = Arc::new(EngineIpcHandler::new(queue_mgr.clone(), preset_registry));
 
     let addr = format!("127.0.0.1:{port}");
     println!("Starting encoderCraft IPC daemon on {addr}...");
-    let _server = IpcServer::bind_tcp(&addr, handler)?;
+    let _server_tcp = IpcServer::bind_tcp(&addr, handler.clone())?;
+
+    #[cfg(unix)]
+    let _server_unix = {
+        let sock_path = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+        let sock_file = PathBuf::from(sock_path).join("encodercraft.sock");
+        let _ = std::fs::remove_file(&sock_file);
+        IpcServer::bind_unix(&sock_file, handler.clone()).ok()
+    };
 
     println!("Daemon running. Press Ctrl+C to exit.");
     loop {

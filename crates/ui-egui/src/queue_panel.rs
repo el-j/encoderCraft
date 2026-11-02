@@ -131,6 +131,19 @@ fn render_job_row(
             // Status chip
             render_status_chip(ui, &job.status, tokens);
 
+            // Client Origin Chip (FilmCraft, EffectCraft, SoundCraft, PhotoCraft)
+            let client_app = &job.spec.client_info.app_name;
+            if !client_app.is_empty() && client_app != "encoderCraft GUI" && client_app != "encoderCraft CLI" {
+                let chip_color = match client_app.to_lowercase().as_str() {
+                    s if s.contains("film") => egui::Color32::from_rgb(99, 102, 241),
+                    s if s.contains("effect") => egui::Color32::from_rgb(168, 85, 247),
+                    s if s.contains("sound") => egui::Color32::from_rgb(34, 197, 94),
+                    s if s.contains("photo") => egui::Color32::from_rgb(59, 130, 246),
+                    _ => tokens.text_dim,
+                };
+                ui.label(RichText::new(format!("[{client_app}]")).small().color(chip_color));
+            }
+
             // Priority Badge
             if job.spec.priority != JobPriority::Normal {
                 let prio_label = format!("{:?}", job.spec.priority);

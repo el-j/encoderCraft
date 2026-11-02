@@ -7,9 +7,11 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod ipc;
 pub mod queue;
 pub mod state;
 
 pub use cmd::{CommandRegistry, CommandSpec};
+pub use ipc::EngineIpcHandler;
 pub use queue::QueueManager;
 pub use state::{QueueJournal, QueuedJob, load_journal, save_journal_atomic};
