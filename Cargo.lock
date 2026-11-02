@@ -448,33 +448,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "craft-aac"
-version = "0.1.0"
-dependencies = [
- "craft-bitstream",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "craft-audio-io"
-version = "0.1.0"
-dependencies = [
- "log",
- "serde",
- "symphonia",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "craft-av1enc"
 version = "0.1.0"
-
-[[package]]
-name = "craft-bitstream"
-version = "0.1.0"
-dependencies = [
- "craft-media",
-]
 
 [[package]]
 name = "craft-dnx"
@@ -488,7 +463,7 @@ dependencies = [
 name = "craft-h264enc"
 version = "0.1.0"
 dependencies = [
- "craft-bitstream",
+ "craft-media",
  "rayon",
  "thiserror 2.0.21",
 ]
@@ -508,7 +483,7 @@ dependencies = [
 name = "craft-prores"
 version = "0.1.0"
 dependencies = [
- "craft-bitstream",
+ "craft-media",
  "rayon",
  "thiserror 2.0.21",
 ]
@@ -800,11 +775,11 @@ dependencies = [
 name = "encodercraft-audio-dsp"
 version = "0.1.0"
 dependencies = [
- "craft-aac",
- "craft-audio-io",
  "encodercraft-core",
+ "filmcraft-aac",
  "proptest",
  "serde",
+ "soundcraft-audio-io",
  "thiserror 2.0.21",
 ]
 
@@ -1186,6 +1161,21 @@ name = "fearless_simd"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
+
+[[package]]
+name = "filmcraft-aac"
+version = "0.16.0"
+dependencies = [
+ "filmcraft-bitstream",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-bitstream"
+version = "0.16.0"
+dependencies = [
+ "craft-media",
+]
 
 [[package]]
 name = "filmcraft-captions"
@@ -3161,6 +3151,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "soundcraft-audio-io"
+version = "0.16.0"
+dependencies = [
+ "log",
+ "serde",
+ "symphonia",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "spirv"
 version = "0.4.0+sdk-1.4.341.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4459,11 +4459,11 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "craft-codecs"
-version = "0.1.0"
+name = "filmcraft-opus"
+version = "0.16.0"
 
 [[patch.unused]]
-name = "craft-opus"
+name = "craft-codecs"
 version = "0.1.0"
 
 [[patch.unused]]
