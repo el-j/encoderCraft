@@ -449,6 +449,28 @@ flowchart LR
 
 ---
 
+### Milestone 18: Upstream Codec Alignment & Sibling Ecosystem Sync (2026-11-02)
+**Objective:** Synchronize and align `encoderCraft` with upstream `storytold/craft-libs#504` and sibling creative apps (`filmcraft`, `effectcraft`, `soundcraft`), addressing maintainer review feedback and establishing clean domain boundaries.
+
+#### Deliverables:
+1. **Upstream Review Resolution (`storytold/craft-libs#504`):**
+   - Decoupled video codecs from audio to prevent duplicate ownership with the active `#439–#448` (`craft-audio`) PR series.
+   - Refined `craft_testkit::with_deadline` to enforce worker thread execution timeouts under `CRAFT_TEST_TIMEOUT_SECS` and `FILMCRAFT_HOSTILE_TIMEOUT_SECS`.
+   - Added dedicated GitHub Actions CI workflows for each video crate (`h264enc`, `prores`, `hevcenc`, `av1enc`, `vp9enc`, `vp8`, `dnx`, `testkit`, `codecs`).
+2. **Sibling Migration Documentation Sync:**
+   - Updated `storytold/filmcraft#3941` (`docs/codecs-migration-to-craft-libs.md`) reflecting #504 video and #443-#444 AAC audio locations.
+   - Updated `storytold/soundcraft#1275` (`docs/codecs-migration-to-craft-libs.md`) mapping audio I/O and codecs to the #439–#448 `craft-audio` stack.
+   - Updated `storytold/effectcraft#2814` (`docs/codecs-migration-to-craft-libs.md`) clarifying `craft-codecs` video umbrella scope.
+3. **`encoderCraft` Workspace Decoupling:**
+   - Updated root `Cargo.toml` and patches to source video codecs from `craft-libs#504` and audio from sibling repositories (`filmcraft-aac`, `soundcraft-audio-io`).
+   - Verified seamless, zero-breaking changes across all pipeline transcode operations.
+
+#### Verification Gate:
+- `cargo run -p xtask -- ci` passes 100% with all 135 automated tests, zero clippy warnings, zero layer violations.
+- All 5 repositories (`encoderCraft`, `craft-libs`, `filmcraft`, `soundcraft`, `effectcraft`) clean and synced to remote forks/origins.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

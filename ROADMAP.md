@@ -178,3 +178,9 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Added factory presets: `"Wavefront OBJ (.obj)"`, `"3D Print Binary STL (.stl)"`, `"Stanford Polygon PLY (.ply)"`, `"Apple AR Quick Look USDZ (.usdz)"`, `"Still Image PNG (Lossless)"`, `"Broadcast TIFF (16-bit RGB)"`, `"VFX OpenEXR (Half Float)"`, and `"Windows Bitmap BMP (Uncompressed)"`.
   - Added `PresetCategory::StillImage` filter chip in the Preset Browser.
   - Verified 100% CI compliance: 135 automated tests passing with zero warnings under `cargo xtask ci`.
+- [x] **M18: Upstream Codec Alignment & Sibling Ecosystem Sync (2026-11-02)**
+  - Decoupled video codecs from audio in `craft-libs#504` in alignment with the active `#439–#448` (`craft-audio`) PR series.
+  - Implemented timeout enforcement in `craft_testkit::with_deadline` and added dedicated GitHub Actions CI workflows for all video codec crates.
+  - Synchronized migration docs across sibling PRs: `filmcraft#3941`, `soundcraft#1275`, and `effectcraft#2814`.
+  - Updated `encoderCraft` dependency graph for seamless local iteration and clean separation of concerns.
+  - Verified 100% CI compliance: 135 automated tests passing with zero warnings under `cargo xtask ci`.
