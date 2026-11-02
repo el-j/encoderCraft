@@ -2,8 +2,8 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** Implementation Complete & Verified (M0 through M6)  
-> **Verification:** 100% CI compliance via `cargo xtask ci` (88 unit, fuzz, and integration tests passed; strict L0–L7 layers enforced)
+> **Status:** Implementation Complete & Verified (M0 through M12)  
+> **Verification:** 100% CI compliance via `cargo xtask ci` (125 unit, fuzz, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
 
@@ -281,6 +281,69 @@ flowchart LR
 #### Verification Gate:
 - `cargo xtask ci` passes 100% with 120 automated tests, zero clippy warnings, and zero layer violations.
 - Benchmarks verify real-time multipliers across all pipelines.
+
+---
+
+### Milestone 10: Batch Operations, Multi-Selection, Dedicated Watch Folders & Native Pickers
+**Focus:** Full Adobe Media Encoder batch queue parity, keyboard selection navigation, unified watch folder management, and native system file pickers.
+
+#### Deliverables:
+1. **Multi-Job Batch Selection:**
+   - Multi-job selection in Queue Panel (`selected_job_ids`, range select `Shift+Click`, toggle select `Cmd/Ctrl+Click`, select all `Cmd+A`).
+   - Batch operations toolbar: Batch Duplicate (`Cmd+D`), Batch Remove (`Delete`/`Backspace`), Batch Status Reset, and Batch Output Target Appending.
+   - Batch Preset Application: double-clicking or applying presets from Preset Browser updates all selected jobs simultaneously.
+2. **Global Batch Queue Summary:**
+   - Real-time batch progress header with total, queued/ready, encoding, completed, and failed job counters plus overall aggregate progress bar.
+3. **Dedicated Watch Folders Panel (`crates/ui-egui/src/watch_panel.rs`):**
+   - Dual-tab workspace switcher (`[ ≡ Queue ]  [ 📁 Watch Folders ]`).
+   - Interactive watch folder configuration table, manual directory rescan trigger, and background settling monitor.
+4. **Native File Dialogs (`rfd = "0.17"`):**
+   - Multi-file batch add dialog (`Cmd+I`), multi-clip stitching picker, and watch folder directory pickers.
+
+#### Verification Gate:
+- `cargo xtask ci` passes 100% with 124 automated tests, zero clippy warnings, and zero layer violations.
+
+---
+
+### Milestone 11: Background Workers, Preferences, Activity Log & Context Menus
+**Focus:** Non-blocking background worker execution, user preferences persistence, activity audit log, and right-click context menus.
+
+#### Deliverables:
+1. **Asynchronous Background Execution Worker:**
+   - Implemented `QueueManager::start_background_worker` maintaining lock-free 20 Hz progress polling while keeping the UI responsive at 60 FPS.
+2. **Interactive Preferences Modal (`crates/ui-egui/src/prefs_dialog.rs`):**
+   - `Edit > Preferences...` (`Cmd+,`) modal configuring queue completion chime, auto-start on submission, parallel worker count, and default destination directories.
+3. **Persistent Activity Audit Log (`crates/ui-egui/src/log_dialog.rs`):**
+   - `File > Show Encoding Log...` (`Cmd+L`) modal displaying searchable transcode history, execution durations, status badges, and copy-to-clipboard export.
+4. **Context Menus:**
+   - Right-click context menus on queue jobs and target rows for "Reveal in Finder/Explorer", "Copy Output Path", "Inspect Settings", "Duplicate", and "Stitch Selected Clips".
+5. **CLI & MCP Extensions:**
+   - Added CLI `queue start`, `queue pause`, `queue clear`, and `queue log` commands.
+   - Added MCP `encodercraft_get_log` and `encodercraft_set_output_dir` AI agent tools.
+
+#### Verification Gate:
+- `cargo xtask ci` passes 100% with 125 automated tests, zero clippy warnings, and zero layer violations.
+
+---
+
+### Milestone 12: ArtCraft Procedural Vector Icon System & Brand Alignment
+**Focus:** Clean-room procedural vector icon painter (`Pen16`), removal of non-rendering Unicode strings/emojis, and repo rename to canonical `encoderCraft`.
+
+#### Deliverables:
+1. **Procedural Vector Icon System (`crates/ui-egui/src/icons.rs`):**
+   - Implemented `Pen16` pixel-snapped vector painter on a 16×16 grid (`crisp`, `stroke_w`, `snap_pos`, `line`, `closed`, `fill`, `rect`, `rect_fill`, `circle`, `dot`, `arc`).
+   - Defined `Icon` enum covering `Play`, `Pause`, `Stop`, `StepBack`, `StepFwd`, `Plus`, `Minus`, `Trash`, `Duplicate`, `ArrowUp`, `ArrowDown`, `Reset`, `ChevronRight`, `ChevronDown`, `ChevronLeft`, `Folder`, `Gear`, `Search`, `Preset`, `Link`, `Clock`, `Check`, `Close`, `Sliders`, `ListView`, and `Info`.
+   - Reusable `button`, `button_with_label`, `small_button`, and `icon_label` widgets supporting hover, active, and pressed states with theme token integration.
+2. **Theme Tokens Expanded (`crates/ui-egui/src/theme.rs`):**
+   - Added `icon`, `icon_active`, `hover`, `pressed`, and `radius_sm` tokens across `Tokens::dark()` and `Tokens::high_contrast()`.
+3. **Replaced All Unicode Placeholders:**
+   - Cleanly replaced raw Unicode strings and emoji symbols across queue panel, preview transport, watch folders, preset browser, logs dialog, preferences, dual drop zones, and workspace navigation tabs.
+4. **Repository Brand Alignment:**
+   - Standardized repository naming to canonical ArtCraft convention: `encoderCraft` (`github.com/el-j/encoderCraft`).
+
+#### Verification Gate:
+- `cargo run -p xtask -- ci` passes 100% with formatting, zero clippy warnings, zero layer violations, and all automated tests.
+- Desktop UI displays razor-sharp vector icons across all panels without reliance on platform emoji fonts.
 
 ---
 

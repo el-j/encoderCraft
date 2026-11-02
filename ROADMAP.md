@@ -135,3 +135,10 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Extended CLI (`apps/encodercraft-cli`): added `queue start`, `queue pause`, `queue clear`, and `queue log` commands.
   - Extended MCP server (`crates/mcp`): added `encodercraft_get_log` and `encodercraft_set_output_dir` AI agent tools.
   - Verified 100% layer compliance and full test suite (125 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).
+- [x] **M12: ArtCraft Procedural Vector Icon System & Brand Alignment (2026-11-02)**
+  - Implemented `Pen16` pixel-snapped vector painter on a 16×16 grid (`crisp`, `stroke_w`, `snap_pos`, `line`, `closed`, `fill`, `rect`, `rect_fill`, `circle`, `dot`, `arc`) in `crates/ui-egui/src/icons.rs`.
+  - Defined full `Icon` enum (Play, Pause, Stop, StepBack, StepFwd, Plus, Minus, Trash, Duplicate, ArrowUp, ArrowDown, Reset, ChevronRight, ChevronDown, ChevronLeft, Folder, Gear, Search, Preset, Link, Clock, Check, Close, Sliders, ListView, Info).
+  - Replaced all non-rendering Unicode strings and emoji symbols across queue panel, preview transport, watch folders, preset browser, logs, preferences, and workspace tabs.
+  - Expanded `Tokens` in `crates/ui-egui/src/theme.rs` with `icon`, `icon_active`, `hover`, `pressed`, and `radius_sm`.
+  - Standardized repository naming to canonical ArtCraft convention: `encoderCraft` (`github.com/el-j/encoderCraft`).
+  - Verified 100% layer compliance and full test suite (125 automated tests passing with zero warnings under `cargo xtask ci`).
