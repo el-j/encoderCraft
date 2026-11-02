@@ -186,6 +186,143 @@ impl QueueManager {
         result.map(|_| true)
     }
 
+    /// Resets a completed, failed, or cancelled job back to Queued state.
+    pub fn reset_job_status(&self, job_id: &str) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock
+            .jobs
+            .iter_mut()
+            .find(|j| j.spec.job_id == job_id)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
+
+        job.status = JobStatus::Queued;
+        job.progress_percent = 0.0;
+        job.error_message = None;
+        job.current_fps = 0.0;
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(())
+    }
+
+    /// Adds an additional output target to an existing job in the queue.
+    pub fn add_output_target(&self, job_id: &str, target: encodercraft_core::OutputTarget) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock
+            .jobs
+            .iter_mut()
+            .find(|j| j.spec.job_id == job_id)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
+
+        job.spec.targets.push(target);
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(())
+    }
+
+    /// Removes a specific output target from a job.
+    pub fn remove_output_target(&self, job_id: &str, target_idx: usize) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock
+            .jobs
+            .iter_mut()
+            .find(|j| j.spec.job_id == job_id)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
+
+        if job.spec.targets.len() <= 1 {
+            return Err(EncoderError::InvalidJobSpec("cannot remove the last output target of a job".into()));
+        }
+
+        if target_idx < job.spec.targets.len() {
+            job.spec.targets.remove(target_idx);
+        } else {
+            return Err(EncoderError::InvalidJobSpec(format!("target index {target_idx} out of range")));
+        }
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(())
+    }
+
+    /// Duplicates an output target on a job.
+    pub fn duplicate_output_target(&self, job_id: &str, target_idx: usize) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock
+            .jobs
+            .iter_mut()
+            .find(|j| j.spec.job_id == job_id)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
+
+        let target = job
+            .spec
+            .targets
+            .get(target_idx)
+            .cloned()
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("target index {target_idx} out of range")))?;
+
+        let mut dup = target;
+        let mut out_path = dup.output_path;
+        let stem = out_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let ext = out_path.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+        out_path.set_file_name(format!("{stem}_copy.{ext}"));
+        dup.output_path = out_path;
+        dup.target_id = format!("{}_copy", dup.target_id);
+
+        job.spec.targets.push(dup);
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(())
+    }
+
+    /// Clears all completed jobs from the queue, returning the count of removed jobs.
+    pub fn clear_completed_jobs(&self) -> Result<usize, EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let orig_len = lock.jobs.len();
+        lock.jobs.retain(|j| j.status != JobStatus::Completed);
+        let removed = orig_len.saturating_sub(lock.jobs.len());
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(removed)
+    }
+
+    /// Submits a multi-clip stitched sequence as a single batch job.
+    pub fn stitch_sources_into_job(&self, paths: Vec<PathBuf>, output_path: PathBuf, preset_name: String) -> Result<String, EncoderError> {
+        if paths.is_empty() {
+            return Err(EncoderError::InvalidJobSpec("no clips provided for stitching".into()));
+        }
+
+        let clips =
+            paths.into_iter().map(|path| encodercraft_core::StitchedClipSource { path, in_point_ticks: None, out_point_ticks: None }).collect();
+
+        let job_id = format!("stitch-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: job_id.clone(),
+            client_info: encodercraft_core::ClientInfo {
+                app_name: "Stitch Clips".into(),
+                app_version: "0.1.0".into(),
+                pid: std::process::id(),
+                user_notes: None,
+            },
+            priority: JobPriority::Normal,
+            start_policy: encodercraft_core::StartPolicy::AutoStart,
+            source: encodercraft_core::SourceDescriptor::StitchedClips { clips },
+            targets: vec![encodercraft_core::OutputTarget {
+                target_id: "stitch-target-1".into(),
+                output_path,
+                preset_name,
+                container: encodercraft_core::ContainerType::IsoBmffMp4,
+                ..Default::default()
+            }],
+        };
+
+        self.submit_job(spec)
+    }
+
     /// Returns a snapshot of all jobs currently in the queue.
     pub fn list_jobs(&self) -> Vec<QueuedJob> {
         let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);

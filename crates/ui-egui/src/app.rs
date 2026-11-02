@@ -114,12 +114,24 @@ impl EncoderCraftApp {
         // 3. Central Workspace with Side Panels
         let mut inspect_job = None;
 
-        // Drag-and-drop detection for external media files
+        // Drag-and-drop detection for external media files (AME Dual-Zone Parity)
         let dropped_files = ui.input(|i| i.raw.dropped_files.clone());
-        for dropped in dropped_files {
-            let path = dropped.path();
-            if !path.as_os_str().is_empty() {
-                self.add_file_job(path.to_path_buf());
+        if !dropped_files.is_empty() {
+            let pointer_pos = ui.input(|i| i.pointer.hover_pos());
+            let is_stitch_zone = pointer_pos.is_some_and(|pos| pos.x > 450.0);
+
+            let paths: Vec<std::path::PathBuf> =
+                dropped_files.into_iter().map(|d| d.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect();
+
+            if paths.len() > 1 && is_stitch_zone {
+                if let Some(first) = paths.first() {
+                    let out = first.with_file_name("stitched_sequence.mp4");
+                    let _ = self.queue_mgr.stitch_sources_into_job(paths, out, "Match Source - High Bitrate".into());
+                }
+            } else {
+                for p in paths {
+                    self.add_file_job(p);
+                }
             }
         }
 
@@ -148,17 +160,31 @@ impl EncoderCraftApp {
 
         egui::CentralPanel::default().show(ui, |ui| {
             if is_hovering {
-                egui::Frame::new()
-                    .fill(self.tokens.accent_primary.gamma_multiply(0.15))
-                    .stroke(egui::Stroke::new(2.0, self.tokens.accent_primary))
-                    .corner_radius(8)
-                    .inner_margin(16.0)
-                    .show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.heading(RichText::new("📥 Drop Media Files to Queue for Encoding").color(self.tokens.accent_primary));
-                            ui.label("Files will be automatically queued with Match Source presets.");
+                ui.horizontal(|ui| {
+                    egui::Frame::new()
+                        .fill(self.tokens.accent_primary.gamma_multiply(0.15))
+                        .stroke(egui::Stroke::new(2.0, self.tokens.accent_primary))
+                        .corner_radius(6)
+                        .inner_margin(12.0)
+                        .show(ui, |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.heading(RichText::new("📥 Drop as Separate Sources").color(self.tokens.accent_primary));
+                                ui.label("Each file queued as an independent job.");
+                            });
                         });
-                    });
+
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_rgb(168, 85, 247).gamma_multiply(0.15))
+                        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(168, 85, 247)))
+                        .corner_radius(6)
+                        .inner_margin(12.0)
+                        .show(ui, |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.heading(RichText::new("🔗 Drop to Stitch Clips Together").color(egui::Color32::from_rgb(168, 85, 247)));
+                                ui.label("Combines files into one continuous sequence.");
+                            });
+                        });
+                });
                 ui.add_space(8.0);
             }
             render_queue_panel(ui, &mut self.queue_state, &self.queue_mgr, &self.tokens, &mut inspect_job);

@@ -26,16 +26,37 @@ pub fn render_queue_panel(
     on_inspect_job: &mut Option<CraftJobSpec>,
 ) {
     ui.vertical(|ui| {
+        // --- Keyboard shortcuts for AME parity ---
+        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            state.is_running = true;
+            let _ = queue_mgr.process_next_job();
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            state.is_running = false;
+        }
+        if (ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::D)))
+            && let Some(ref id) = state.selected_job_id
+        {
+            let _ = queue_mgr.duplicate_job(id);
+        }
+        if (ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)))
+            && let Some(ref id) = state.selected_job_id
+        {
+            let _ = queue_mgr.remove_job(id);
+            state.selected_job_id = None;
+        }
+
         // --- 1. Top Queue Toolbar ---
+        let jobs = queue_mgr.list_jobs();
+
         ui.horizontal(|ui| {
-            let start_btn = ui.button(format!("{} Start Queue", icons::START_QUEUE));
+            let start_btn = ui.button(format!("{} Start Queue", icons::START_QUEUE)).on_hover_text("Start processing the batch queue (Enter)");
             if start_btn.clicked() {
                 state.is_running = true;
-                // If there are queued jobs, process next in background or trigger
                 let _ = queue_mgr.process_next_job();
             }
 
-            let pause_btn = ui.button(format!("{} Pause", icons::PAUSE_QUEUE));
+            let pause_btn = ui.button(format!("{} Pause", icons::PAUSE_QUEUE)).on_hover_text("Pause active encode");
             if pause_btn.clicked() {
                 state.is_running = false;
                 if let Some(ref id) = state.selected_job_id {
@@ -43,7 +64,7 @@ pub fn render_queue_panel(
                 }
             }
 
-            let stop_btn = ui.button(format!("{} Stop", icons::STOP_QUEUE));
+            let stop_btn = ui.button(format!("{} Stop", icons::STOP_QUEUE)).on_hover_text("Stop batch queue (Esc)");
             if stop_btn.clicked() {
                 state.is_running = false;
                 if let Some(ref id) = state.selected_job_id {
@@ -53,14 +74,52 @@ pub fn render_queue_panel(
 
             ui.separator();
 
-            let dup_btn = ui.add_enabled(state.selected_job_id.is_some(), egui::Button::new(format!("{} Duplicate", icons::DUPLICATE_JOB)));
+            let add_output_btn = ui
+                .add_enabled(state.selected_job_id.is_some(), egui::Button::new("+ Add Output"))
+                .on_hover_text("Add another output target to selected job");
+            if add_output_btn.clicked()
+                && let Some(ref id) = state.selected_job_id
+                && let Some(j) = jobs.iter().find(|j| &j.spec.job_id == id)
+            {
+                let count = j.spec.targets.len() + 1;
+                let new_target = encodercraft_core::OutputTarget {
+                    target_id: format!("target-{count}"),
+                    output_path: std::path::PathBuf::from(format!("output_{count}.mp4")),
+                    preset_name: "Match Source - High Bitrate".into(),
+                    container: encodercraft_core::ContainerType::IsoBmffMp4,
+                    custom_width: Some(1920),
+                    custom_height: Some(1080),
+                    custom_frame_rate: None,
+                    target_bitrate_kbps: Some(12000),
+                    target_lufs: Some(-14.0),
+                    ..Default::default()
+                };
+                let _ = queue_mgr.add_output_target(id, new_target);
+                state.expanded_jobs.insert(id.clone());
+            }
+
+            let dup_btn = ui
+                .add_enabled(state.selected_job_id.is_some(), egui::Button::new(format!("{} Duplicate", icons::DUPLICATE_JOB)))
+                .on_hover_text("Duplicate job (Cmd+D)");
             if dup_btn.clicked()
                 && let Some(ref id) = state.selected_job_id
             {
                 let _ = queue_mgr.duplicate_job(id);
             }
 
-            let remove_btn = ui.add_enabled(state.selected_job_id.is_some(), egui::Button::new(format!("{} Remove", icons::REMOVE_JOB)));
+            let can_reset = state.selected_job_id.as_ref().is_some_and(|id| {
+                jobs.iter().any(|j| &j.spec.job_id == id && matches!(j.status, JobStatus::Completed | JobStatus::Failed(_) | JobStatus::Cancelled))
+            });
+            let reset_btn = ui.add_enabled(can_reset, egui::Button::new("⟳ Reset")).on_hover_text("Reset completed or failed job back to Ready");
+            if reset_btn.clicked()
+                && let Some(ref id) = state.selected_job_id
+            {
+                let _ = queue_mgr.reset_job_status(id);
+            }
+
+            let remove_btn = ui
+                .add_enabled(state.selected_job_id.is_some(), egui::Button::new(format!("{} Remove", icons::REMOVE_JOB)))
+                .on_hover_text("Remove selected job (Delete)");
             if remove_btn.clicked()
                 && let Some(ref id) = state.selected_job_id
             {
@@ -68,14 +127,22 @@ pub fn render_queue_panel(
                 state.selected_job_id = None;
             }
 
-            let inspect_btn = ui.add_enabled(state.selected_job_id.is_some(), egui::Button::new(format!("{} Settings...", icons::SETTINGS)));
+            let inspect_btn = ui
+                .add_enabled(state.selected_job_id.is_some(), egui::Button::new(format!("{} Settings...", icons::SETTINGS)))
+                .on_hover_text("Open Export Settings dialog");
             if inspect_btn.clicked()
                 && let Some(ref id) = state.selected_job_id
+                && let Some(j) = jobs.iter().find(|j| &j.spec.job_id == id)
             {
-                let jobs = queue_mgr.list_jobs();
-                if let Some(j) = jobs.iter().find(|j| &j.spec.job_id == id) {
-                    *on_inspect_job = Some(j.spec.clone());
-                }
+                *on_inspect_job = Some(j.spec.clone());
+            }
+
+            ui.separator();
+
+            let has_completed = jobs.iter().any(|j| j.status == JobStatus::Completed);
+            let clear_btn = ui.add_enabled(has_completed, egui::Button::new("Clear Finished")).on_hover_text("Remove finished jobs from queue");
+            if clear_btn.clicked() {
+                let _ = queue_mgr.clear_completed_jobs();
             }
         });
 
@@ -216,8 +283,32 @@ fn render_job_row(
                 for (idx, target) in job.spec.targets.iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(format!("Target #{}:", idx + 1)).small().color(tokens.text_dim));
-                        ui.label(RichText::new(&target.preset_name).color(tokens.accent_primary));
-                        ui.label(RichText::new(format!("➔ {}", target.output_path.display())).small().color(tokens.text_secondary));
+
+                        // Preset name clickable link
+                        if ui
+                            .link(RichText::new(&target.preset_name).color(tokens.accent_primary))
+                            .on_hover_text("Inspect settings for this target")
+                            .clicked()
+                        {
+                            *on_inspect_job = Some(job.spec.clone());
+                        }
+
+                        // Container format tag
+                        ui.label(RichText::new(format!("{:?}", target.container)).small().color(tokens.text_dim));
+
+                        // Output filename
+                        let path_display = target.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
+                        ui.label(RichText::new(format!("➔ {path_display}")).small().color(tokens.text_secondary));
+
+                        // Actions per target
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if job.spec.targets.len() > 1 && ui.small_button("🗑").on_hover_text("Remove output target").clicked() {
+                                let _ = queue_mgr.remove_output_target(&job_id, idx);
+                            }
+                            if ui.small_button("⎘").on_hover_text("Duplicate output target").clicked() {
+                                let _ = queue_mgr.duplicate_output_target(&job_id, idx);
+                            }
+                        });
                     });
                 }
             });
@@ -237,7 +328,7 @@ fn render_status_chip(ui: &mut Ui, status: &JobStatus, tokens: &Tokens) {
         JobStatus::Cancelled => ("Canceled", tokens.status_cancelled),
     };
 
-    egui::Frame::new()
+    let chip = egui::Frame::new()
         .fill(color.gamma_multiply(0.2))
         .stroke(egui::Stroke::new(1.0, color))
         .corner_radius(3)
@@ -245,4 +336,8 @@ fn render_status_chip(ui: &mut Ui, status: &JobStatus, tokens: &Tokens) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).small().color(color));
         });
+
+    if let JobStatus::Failed(err) = status {
+        chip.response.on_hover_text(format!("Failure detail: {err}"));
+    }
 }
