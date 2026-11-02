@@ -145,7 +145,7 @@ flowchart TD
         DC["DesignCraft (krilla print-PDF & IDML)"]
     end
 
-    subgraph App["encoderCraft (craftEncoder)"]
+    subgraph App["encoderCraft"]
         Engine["encoder-engine (Job Graph & Scheduler)"]
         Bridge["encoder-bridge (Codec Wrappers & Transcoding Matrix)"]
         IPC["encoder-ipc (Local Socket / JSON-RPC / MCP Server)"]
