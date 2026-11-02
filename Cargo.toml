@@ -65,6 +65,10 @@ craft-hevcenc = { version = "0.1.0", git = "https://github.com/storytold/craft-l
 craft-av1enc = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
 craft-vp9enc = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
 craft-audio-io = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-dnx = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-opus = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-vp8 = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
+craft-codecs = { version = "0.1.0", git = "https://github.com/storytold/craft-libs.git" }
 
 # Sibling Craft app official repositories
 filmcraft-captions = { git = "https://github.com/storytold/filmcraft.git" }
@@ -146,6 +150,10 @@ craft-hevcenc = { path = "../craft-libs/crates/hevcenc" }
 craft-av1enc = { path = "../craft-libs/crates/av1enc" }
 craft-vp9enc = { path = "../craft-libs/crates/vp9enc" }
 craft-audio-io = { path = "../craft-libs/crates/audio-io" }
+craft-dnx = { path = "../craft-libs/crates/dnx" }
+craft-opus = { path = "../craft-libs/crates/opus" }
+craft-vp8 = { path = "../craft-libs/crates/vp8" }
+craft-codecs = { path = "../craft-libs/crates/codecs" }
 
 [patch."https://github.com/storytold/filmcraft.git"]
 filmcraft-captions = { path = "../filmcraft/crates/captions" }

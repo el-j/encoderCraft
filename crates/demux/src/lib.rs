@@ -14,6 +14,6 @@ pub mod wav;
 pub use aiff::{AiffHeaderInfo, parse_aiff_header};
 pub use image_probe::{ImageProbeInfo, probe_jpeg, probe_png, probe_webp};
 pub use packet::{DemuxPacket, KeyframeIndexEntry, StreamKind};
-pub use probe::{AudioStreamInfo, MediaInfo, VideoStreamInfo, probe_bytes, probe_file};
+pub use probe::{AudioStreamInfo, MediaInfo, VideoStreamInfo, classify_stream_kind, probe_bytes, probe_file};
 pub use sniff::{ContainerKind, sniff_container};
 pub use wav::{BroadcastWaveMetadata, WavAudioFormat, WavHeaderInfo, decode_wav_samples, parse_wav_header};

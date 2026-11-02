@@ -8,6 +8,7 @@
 
 pub mod av1;
 pub mod dispatcher;
+pub mod dnx;
 pub mod encoder;
 pub mod gif;
 pub mod h264;
@@ -19,6 +20,7 @@ pub mod yuv;
 
 pub use av1::Av1EncoderWrapper;
 pub use dispatcher::{VideoCodecKind, create_video_encoder};
+pub use dnx::DnxEncoderWrapper;
 pub use encoder::{EncodedPacket, VideoEncoder};
 pub use gif::GifEncoder;
 pub use h264::H264EncoderWrapper;

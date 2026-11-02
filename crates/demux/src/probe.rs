@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::Path;
 
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
-use encodercraft_core::{ChannelLayout, EncoderError, Rational64};
+use encodercraft_core::{ChannelLayout, EncoderError, MediaStreamKind, Rational64};
 use encodercraft_geom::Dimensions;
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,70 @@ pub struct MediaInfo {
     pub video_streams: Vec<VideoStreamInfo>,
     pub audio_streams: Vec<AudioStreamInfo>,
     pub metadata: HashMap<String, String>,
+}
+
+impl MediaInfo {
+    /// Classifies the overall stream kind based on discovered elementary streams and container kind.
+    pub fn stream_kind(&self) -> MediaStreamKind {
+        match self.container {
+            ContainerKind::Wav | ContainerKind::Rf64Wav | ContainerKind::Aiff | ContainerKind::Flac | ContainerKind::Mp3 => {
+                MediaStreamKind::AudioOnly
+            }
+            ContainerKind::GltfBinary
+            | ContainerKind::GltfJson
+            | ContainerKind::UsdBinary
+            | ContainerKind::UsdAscii
+            | ContainerKind::Obj
+            | ContainerKind::StlBinary
+            | ContainerKind::StlAscii
+            | ContainerKind::Ply => MediaStreamKind::Spatial3D,
+            ContainerKind::Png
+            | ContainerKind::Jpeg
+            | ContainerKind::WebP
+            | ContainerKind::Tiff
+            | ContainerKind::OpenExr
+            | ContainerKind::RadianceHdr
+            | ContainerKind::Dds => MediaStreamKind::StillImage,
+            _ => {
+                let has_video = !self.video_streams.is_empty();
+                let has_audio = !self.audio_streams.is_empty();
+                if has_video && has_audio {
+                    MediaStreamKind::VideoWithAudio
+                } else if has_video {
+                    MediaStreamKind::VideoOnly
+                } else if has_audio {
+                    MediaStreamKind::AudioOnly
+                } else {
+                    MediaStreamKind::Unknown
+                }
+            }
+        }
+    }
+}
+
+/// Probes or classifies the file at `path`, returning the detected `MediaStreamKind`.
+///
+/// Combines full stream probing, container header sniffing, and file extension fallback.
+pub fn classify_stream_kind(path: &Path) -> MediaStreamKind {
+    if let Ok(info) = probe_file(path) {
+        let kind = info.stream_kind();
+        if kind != MediaStreamKind::Unknown {
+            return kind;
+        }
+    }
+
+    // Fallback based on extension if probe failed or file is headless/mock
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()) {
+        match ext.as_str() {
+            "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" | "alac" | "wma" => MediaStreamKind::AudioOnly,
+            "glb" | "gltf" | "obj" | "stl" | "ply" | "usda" | "usdc" | "usdz" => MediaStreamKind::Spatial3D,
+            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "hdr" | "dds" | "bmp" => MediaStreamKind::StillImage,
+            "mp4" | "mov" | "mkv" | "webm" | "mxf" | "avi" | "m4v" | "mpg" | "mpeg" | "ts" => MediaStreamKind::VideoWithAudio,
+            _ => MediaStreamKind::Unknown,
+        }
+    } else {
+        MediaStreamKind::Unknown
+    }
 }
 
 /// Probes an in-memory byte slice and extracts full media stream information.
@@ -410,5 +474,18 @@ mod tests {
         assert_eq!(audio.sample_rate, 48000);
         assert_eq!(audio.channels, 2);
         assert!((info.duration_seconds.unwrap() - 0.25).abs() < 1e-4);
+        assert_eq!(info.stream_kind(), MediaStreamKind::AudioOnly);
+    }
+
+    #[test]
+    fn test_classify_stream_kind() {
+        assert_eq!(classify_stream_kind(Path::new("song.mp3")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("voice.wav")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("track.flac")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("model.glb")), MediaStreamKind::Spatial3D);
+        assert_eq!(classify_stream_kind(Path::new("scene.gltf")), MediaStreamKind::Spatial3D);
+        assert_eq!(classify_stream_kind(Path::new("picture.png")), MediaStreamKind::StillImage);
+        assert_eq!(classify_stream_kind(Path::new("clip.mp4")), MediaStreamKind::VideoWithAudio);
+        assert_eq!(classify_stream_kind(Path::new("movie.mov")), MediaStreamKind::VideoWithAudio);
     }
 }

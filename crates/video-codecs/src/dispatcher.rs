@@ -5,6 +5,7 @@
 use encodercraft_core::{EncoderError, Rational64};
 
 use crate::av1::Av1EncoderWrapper;
+use crate::dnx::DnxEncoderWrapper;
 use crate::encoder::VideoEncoder;
 use crate::gif::GifEncoder;
 use crate::h264::H264EncoderWrapper;
@@ -92,7 +93,11 @@ pub fn create_video_encoder(
             let enc = GifEncoder::new(width as u16, height as u16, fps_val)?;
             Ok(Box::new(enc))
         }
-        VideoCodecKind::Mjpeg | VideoCodecKind::DnxHd => {
+        VideoCodecKind::DnxHd => {
+            let enc = DnxEncoderWrapper::new(width, height, fps)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::Mjpeg => {
             let enc = MjpegEncoder::new(85);
             Ok(Box::new(enc))
         }
@@ -132,5 +137,8 @@ mod tests {
 
         let enc_vp9 = create_video_encoder(VideoCodecKind::Vp9, 1280, 720, Rational64::FPS_30, Some(1500));
         assert!(enc_vp9.is_ok());
+
+        let enc_dnx = create_video_encoder(VideoCodecKind::DnxHd, 1920, 1080, Rational64::FPS_24, None);
+        assert!(enc_dnx.is_ok());
     }
 }

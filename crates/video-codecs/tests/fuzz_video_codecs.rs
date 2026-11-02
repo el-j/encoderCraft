@@ -36,6 +36,13 @@ fn test_all_sibling_encoders_frame() {
     let mut vp9 = create_video_encoder(VideoCodecKind::Vp9, 128, 64, Rational64::FPS_24, Some(800)).unwrap();
     let pkts = vp9.encode_frame(&frame).unwrap();
     assert_eq!(pkts.len(), 1);
+
+    // Avid DNxHR
+    let mut dnx = create_video_encoder(VideoCodecKind::DnxHd, 128, 64, Rational64::FPS_24, None).unwrap();
+    let pkts = dnx.encode_frame(&frame).unwrap();
+    assert_eq!(pkts.len(), 1);
+    assert!(pkts[0].is_keyframe);
+    assert!(!pkts[0].data.is_empty());
 }
 
 proptest! {

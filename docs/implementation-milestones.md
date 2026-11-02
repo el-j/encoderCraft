@@ -347,6 +347,57 @@ flowchart LR
 
 ---
 
+### Milestone 13: Centralize Media Codecs in `craft-libs` & Avid DNxHR Integration
+**Objective:** Unify all clean-room, pure-Rust media codecs into `craft-libs` as the One True Source for the ArtCraft ecosystem, and wire Avid DNxHR/DNxHD into `encoderCraft`.
+
+#### Deliverables:
+1. **Upstream Codecs in `craft-libs`:**
+   - Added `craft-dnx`: Pure-Rust SMPTE ST 2019-1 Avid DNxHD/DNxHR progressive CBR encoder and full-profile decoder.
+   - Added `craft-opus`: Pure-Rust RFC 6716 / RFC 8251 Opus audio packet parser and decoder.
+   - Added `craft-vp8`: Pure-Rust RFC 6386 VP8 frame decoder.
+   - Re-exported via `craft-codecs` and pushed branch `feat/centralize-media-codecs` to `git@github.com:el-j/craft-libs.git`.
+2. **`encoderCraft` Codec Integration:**
+   - Wired `craft-dnx` into `encodercraft-video-codecs` with `DnxEncoderWrapper`.
+   - Connected `VideoCodecKind::DnxHd` in `create_video_encoder` and `TranscodePipeline`.
+   - Added factory presets: `"Avid DNxHR HQ 1080p"` and `"Avid DNxHR HQX 4K (10-bit)"`.
+
+---
+
+### Milestone 14: Media Stream Classification & Ingestion Format Guardrails
+**Objective:** Intelligently detect media stream payloads on ingestion, preventing mismatched codec applications (e.g. converting an MP3 to an MP4 video).
+
+#### Deliverables:
+1. **Media Stream Kind Classification (`crates/core`, `crates/demux`):**
+   - Defined `MediaStreamKind`: `AudioOnly`, `VideoWithAudio`, `VideoOnly`, `StillImage`, `ImageSequence`, `Spatial3D`, `Unknown`.
+   - Implemented `classify_stream_kind` analyzing elementary streams with file extension fallback.
+2. **Smart Ingestion Routing (`crates/ui-egui/src/app.rs`):**
+   - `add_file_job` auto-selects `.wav` and `"Broadcast Wave BWF (-23 LUFS)"` for audio-only files (`.mp3`, `.wav`, `.flac`, `.aiff`, `.ogg`, `.m4a`).
+   - Auto-selects `.glb` and `"glTF 2.0 Binary (.glb)"` for 3D spatial models.
+   - Auto-selects `.mp4` and `"Match Source - High Bitrate"` for video containers.
+3. **Format Guardrails (`crates/ui-egui/src/preset_browser.rs`, `queue_panel.rs`):**
+   - Disables video preset application on audio-only files with clear warning badges.
+   - Dynamically targets matching container types when clicking `+ Add Output`.
+
+---
+
+### Milestone 15: Desktop Viewport Clamping & Bounded Action Popups
+**Objective:** Ensure all queue row action menus, context dialogs, and dock sidebars remain strictly inside window bounds without overflow or clipping.
+
+#### Deliverables:
+1. **Anchored Popups with Upward Flipping (`crates/ui-egui/src/queue_panel.rs`):**
+   - Replaced unconstrained `ui.menu_button("•••")` with an anchored `egui::Area` popup clamped to `ctx.input(|i| i.raw.screen_rect)`.
+   - Automatically flips upward when items are located near the bottom of the window.
+   - Handled outside clicks and `Escape` key dismissal.
+2. **Horizontal Ellipsis Truncation:**
+   - Truncated source names (>38 chars) and output target paths (>32 chars) with hover tooltips, preventing row expansion.
+3. **Sidebar Dock Constraints:**
+   - Set `.min_size(260.0).max_size(480.0)` on the right dock.
+
+#### Verification Gate:
+- `cargo run -p xtask -- ci` passes 100% with formatting, zero clippy warnings, zero layer violations, and all automated tests passing.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

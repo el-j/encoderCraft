@@ -302,7 +302,7 @@ impl EncoderCraftApp {
             .as_ref()
             .and_then(|id| self.queue_mgr.list_jobs().into_iter().find(|j| &j.spec.job_id == id).map(|j| j.spec));
 
-        egui::Panel::right("right_side_dock").resizable(true).default_size(360.0).show(ui, |ui| {
+        egui::Panel::right("right_side_dock").resizable(true).default_size(360.0).min_size(260.0).max_size(480.0).show(ui, |ui| {
             render_preview_panel(ui, &mut self.preview_state, selected_job_spec.as_ref(), &self.tokens);
             ui.add_space(8.0);
             ui.separator();
@@ -460,8 +460,30 @@ impl EncoderCraftApp {
 
     /// Ingests a local file path into the queue with Match Source settings (e.g. from File Picker or Drag & Drop).
     pub fn add_file_job(&self, path: std::path::PathBuf) {
+        let stream_kind = encodercraft_demux::classify_stream_kind(&path);
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("media");
-        let ext = "mp4";
+
+        let (ext, container, preset_name, custom_width, custom_height, bitrate, lufs) = match stream_kind {
+            encodercraft_core::MediaStreamKind::AudioOnly => {
+                ("wav", encodercraft_core::ContainerType::Wave, "Broadcast Wave BWF (-23 LUFS)".to_string(), None, None, None, Some(-23.0))
+            }
+            encodercraft_core::MediaStreamKind::Spatial3D => {
+                ("glb", encodercraft_core::ContainerType::Gltf, "glTF 2.0 Binary (.glb)".to_string(), None, None, None, None)
+            }
+            encodercraft_core::MediaStreamKind::StillImage => {
+                ("png", encodercraft_core::ContainerType::StillSequence, "Still Image PNG".to_string(), None, None, None, None)
+            }
+            _ => (
+                "mp4",
+                encodercraft_core::ContainerType::IsoBmffMp4,
+                "Match Source - High Bitrate".to_string(),
+                Some(1920),
+                Some(1080),
+                Some(16000),
+                Some(-14.0),
+            ),
+        };
+
         let output_path = path.with_file_name(format!("{stem}_encoded.{ext}"));
 
         let spec = CraftJobSpec {
@@ -479,13 +501,13 @@ impl EncoderCraftApp {
             targets: vec![encodercraft_core::OutputTarget {
                 target_id: "target-1".into(),
                 output_path,
-                preset_name: "Match Source - High Bitrate".into(),
-                container: encodercraft_core::ContainerType::IsoBmffMp4,
-                custom_width: Some(1920),
-                custom_height: Some(1080),
+                preset_name,
+                container,
+                custom_width,
+                custom_height,
                 custom_frame_rate: None,
-                target_bitrate_kbps: Some(16000),
-                target_lufs: Some(-14.0),
+                target_bitrate_kbps: bitrate,
+                target_lufs: lufs,
                 ..Default::default()
             }],
         };

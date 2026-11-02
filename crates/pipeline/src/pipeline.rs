@@ -188,6 +188,8 @@ impl TranscodePipeline {
         let lower_preset = target.preset_name.to_ascii_lowercase();
         let codec_kind = if is_mov && lower_preset.contains("prores") {
             VideoCodecKind::ProRes
+        } else if lower_preset.contains("dnx") {
+            VideoCodecKind::DnxHd
         } else if lower_preset.contains("hevc") || lower_preset.contains("h265") {
             VideoCodecKind::Hevc
         } else if lower_preset.contains("av1") {
@@ -618,5 +620,33 @@ mod tests {
         assert!(stem_r.exists());
         assert!(stem_l.metadata().unwrap().len() > 100);
         assert!(stem_r.metadata().unwrap().len() > 100);
+    }
+
+    #[test]
+    fn test_execute_dnxhr_transcode() {
+        let dir = tempdir().unwrap();
+        let target_video = dir.path().join("output_dnx.mov");
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-dnx-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: target_video.clone(),
+                preset_name: "Avid DNxHR HQ 1080p".into(),
+                container: ContainerType::QuickTimeMov,
+                custom_width: Some(1920),
+                custom_height: Some(1080),
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+        assert!(target_video.exists());
     }
 }

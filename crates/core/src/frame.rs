@@ -176,6 +176,23 @@ fn compute_plane_descriptors(dim: Dimensions, format: PixelFormat, _data: &mut [
             let v_offset = y_size.checked_add(uv_size).ok_or(EncoderError::Color(encodercraft_color::ColorError::Overflow))?;
             descriptors.push(PlaneDescriptor { offset: v_offset, stride: uv_stride, width: uv_w, height: uv_h });
         }
+        PixelFormat::Yuv422p => {
+            let y_stride = w;
+            let y_size = w.checked_mul(h).ok_or(EncoderError::Color(encodercraft_color::ColorError::Overflow))?;
+
+            let uv_w = dim.width.div_ceil(2);
+            let uv_h = dim.height;
+            let uv_stride = uv_w as usize;
+            let uv_size = (uv_w as usize).checked_mul(uv_h as usize).ok_or(EncoderError::Color(encodercraft_color::ColorError::Overflow))?;
+
+            // Y plane
+            descriptors.push(PlaneDescriptor { offset: 0, stride: y_stride, width: dim.width, height: dim.height });
+            // U plane
+            descriptors.push(PlaneDescriptor { offset: y_size, stride: uv_stride, width: uv_w, height: uv_h });
+            // V plane
+            let v_offset = y_size.checked_add(uv_size).ok_or(EncoderError::Color(encodercraft_color::ColorError::Overflow))?;
+            descriptors.push(PlaneDescriptor { offset: v_offset, stride: uv_stride, width: uv_w, height: uv_h });
+        }
         PixelFormat::Yuv420p10 | PixelFormat::Yuv422p10 | PixelFormat::Yuv444p12 => {
             // Planar 16-bit word samples
             let y_stride = w.checked_mul(2).ok_or(EncoderError::Color(encodercraft_color::ColorError::Overflow))?;

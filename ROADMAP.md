@@ -142,3 +142,22 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Expanded `Tokens` in `crates/ui-egui/src/theme.rs` with `icon`, `icon_active`, `hover`, `pressed`, and `radius_sm`.
   - Standardized repository naming to canonical ArtCraft convention: `encoderCraft` (`github.com/el-j/encoderCraft`).
   - Verified 100% layer compliance and full test suite (125 automated tests passing with zero warnings under `cargo xtask ci`).
+- [x] **M13: Centralize Media Codecs in `craft-libs` & Avid DNxHR Integration (2026-11-02)**
+  - Migrated clean-room pure-Rust codecs to `craft-libs`: `craft-dnx` (SMPTE ST 2019-1 Avid DNxHD / DNxHR progressive CBR encoder and full-profile decoder), `craft-opus` (RFC 6716 Opus audio decoder), `craft-vp8` (RFC 6386 pure-Rust VP8 decoder).
+  - Unified re-export and codec discovery in `craft-codecs` and pushed branch `feat/centralize-media-codecs` to `git@github.com:el-j/craft-libs.git`.
+  - Integrated `craft-dnx` into `encodercraft-video-codecs` via `DnxEncoderWrapper` with 8-bit HQ and 10/12-bit HQX profile support.
+  - Added factory presets: `"Avid DNxHR HQ 1080p"` and `"Avid DNxHR HQX 4K (10-bit)"` in `crates/presets/src/factory.rs`.
+  - Connected DNxHR encoding pipeline in `crates/pipeline/src/pipeline.rs` with verified end-to-end transcode tests.
+- [x] **M14: Media Stream Classification & Ingestion Format Guardrails (2026-11-02)**
+  - Defined `MediaStreamKind` in `encodercraft-core` (`AudioOnly`, `VideoWithAudio`, `VideoOnly`, `StillImage`, `ImageSequence`, `Spatial3D`, `Unknown`).
+  - Implemented `classify_stream_kind` in `encodercraft-demux`, inspecting elementary container manifests with file extension fallback.
+  - Upgraded file ingestion in `crates/ui-egui/src/app.rs` (`add_file_job`): audio files (.mp3, .wav, .flac, .aiff, .ogg, .m4a) automatically route to audio containers (.wav) and `"Broadcast Wave BWF (-23 LUFS)"` preset; 3D assets route to `.glb` and glTF binary presets.
+  - Enforced format guardrails in `crates/ui-egui/src/preset_browser.rs`: audio-only jobs reject video presets with explicit warning badges and disabled apply buttons.
+  - Upgraded `+ Add Output` in `crates/ui-egui/src/queue_panel.rs` to dynamically generate matching stream outputs (audio targets for audio jobs).
+- [x] **M15: Desktop Viewport Clamping & Bounded Action Popups (2026-11-02)**
+  - Replaced unconstrained `ui.menu_button("•••")` with an anchored `Area` popup clamped to `ctx.input(|i| i.raw.screen_rect)`.
+  - Implemented upward-flipping popup positioning when row items are located near the bottom of the display.
+  - Added click-outside and `Escape` key listeners with local state tracking in `QueuePanelState`.
+  - Added horizontal ellipsis truncation for long source paths and output filenames in queue rows to eliminate horizontal overflow.
+  - Constrained right dock sizing (`.min_size(260.0).max_size(480.0)`) preventing sidebar collapse and clipping.
+  - Verified 100% layer compliance, formatting, and tests (125 tests passing under `cargo xtask ci`).

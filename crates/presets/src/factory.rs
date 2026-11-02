@@ -105,6 +105,54 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 target_lufs: None,
             }),
         },
+        // 4b. Avid DNxHR HQ 1080p
+        EncodingPreset {
+            name: "Avid DNxHR HQ 1080p".into(),
+            description: "Avid DNxHR HQ 8-bit 4:2:2 mastering codec for broadcast television and post-production".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::QuickTimeMov,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(1920),
+                height: MatchSourceOr::Exact(1080),
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
+                target_bitrate_kbps: 220000,
+                keyframe_interval: 1, // Intra-frame
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24le".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::MatchSource,
+                bitrate_kbps: None,
+                target_lufs: None,
+            }),
+        },
+        // 4c. Avid DNxHR HQX 4K (10-bit)
+        EncodingPreset {
+            name: "Avid DNxHR HQX 4K (10-bit)".into(),
+            description: "Avid DNxHR HQX 10-bit 4:2:2 UHD broadcast master with high dynamic range headroom".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::QuickTimeMov,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(3840),
+                height: MatchSourceOr::Exact(2160),
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p10),
+                target_bitrate_kbps: 880000,
+                keyframe_interval: 1, // Intra-frame
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24le".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::MatchSource,
+                bitrate_kbps: None,
+                target_lufs: None,
+            }),
+        },
         // 5. TikTok / Instagram Reels 9:16 Vertical
         EncodingPreset {
             name: "TikTok / Reels 9:16 Vertical".into(),

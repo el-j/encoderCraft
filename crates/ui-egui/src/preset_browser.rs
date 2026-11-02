@@ -134,6 +134,19 @@ pub fn render_preset_browser(
 
                     ui.add_space(4.0);
 
+                    // AME Format Guardrail: Audio-only sources cannot be converted to video formats
+                    let has_audio_only_selection = selected_job_ids.iter().any(|id| is_job_audio_only(id, queue_mgr));
+                    let is_video_preset = preset.video.is_some();
+                    let is_incompatible = has_audio_only_selection && is_video_preset;
+
+                    if is_incompatible {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("⚠️ Format Guard:").small().color(tokens.status_failed).strong());
+                            ui.label(RichText::new("Cannot apply video presets to audio-only files (MP3/WAV)").small().color(tokens.text_dim));
+                        });
+                        ui.add_space(2.0);
+                    }
+
                     // Apply to selected job buttons (batch support)
                     let has_jobs = !selected_job_ids.is_empty();
                     let count = selected_job_ids.len();
@@ -141,14 +154,18 @@ pub fn render_preset_browser(
                     let add_target_text = if count > 1 { format!("Add as Output to {count} Jobs") } else { "Add as Output".into() };
 
                     ui.horizontal(|ui| {
-                        ui.add_enabled_ui(has_jobs, |ui| {
+                        ui.add_enabled_ui(has_jobs && !is_incompatible, |ui| {
                             let apply_btn = icons::button_with_label(
                                 ui,
                                 icons::Icon::Check,
                                 &apply_text,
                                 false,
                                 tokens,
-                                "Replace target preset on selected job(s)",
+                                if is_incompatible {
+                                    "Disabled: Audio-only sources cannot encode video tracks"
+                                } else {
+                                    "Replace target preset on selected job(s)"
+                                },
                             );
                             if apply_btn.clicked() {
                                 for job_id in selected_job_ids {
@@ -162,7 +179,11 @@ pub fn render_preset_browser(
                                 &add_target_text,
                                 false,
                                 tokens,
-                                "Add this preset as an additional output target on selected job(s)",
+                                if is_incompatible {
+                                    "Disabled: Audio-only sources cannot encode video tracks"
+                                } else {
+                                    "Add this preset as an additional output target on selected job(s)"
+                                },
                             );
                             if add_target_btn.clicked() {
                                 for job_id in selected_job_ids {
@@ -179,7 +200,20 @@ pub fn render_preset_browser(
     crate::preset_editor::render_preset_editor(ui.ctx(), &mut state.editor, registry, tokens);
 }
 
+fn is_job_audio_only(job_id: &str, queue_mgr: &Arc<QueueManager>) -> bool {
+    let jobs = queue_mgr.list_jobs();
+    jobs.iter().find(|j| j.spec.job_id == job_id).is_some_and(|j| match &j.spec.source {
+        encodercraft_core::SourceDescriptor::File { path, .. } => encodercraft_demux::classify_stream_kind(path).is_audio_only(),
+        _ => false,
+    })
+}
+
 fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {
+    if is_job_audio_only(job_id, queue_mgr) && preset.video.is_some() {
+        log::warn!("Rejected applying video preset '{}' to audio-only job '{}'", preset.name, job_id);
+        return;
+    }
+
     let jobs = queue_mgr.list_jobs();
     if let Some(job) = jobs.iter().find(|j| j.spec.job_id == job_id) {
         let mut new_spec = job.spec.clone();
@@ -208,6 +242,11 @@ fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<Qu
 }
 
 fn add_preset_target_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {
+    if is_job_audio_only(job_id, queue_mgr) && preset.video.is_some() {
+        log::warn!("Rejected adding video preset target '{}' to audio-only job '{}'", preset.name, job_id);
+        return;
+    }
+
     let jobs = queue_mgr.list_jobs();
     if let Some(job) = jobs.iter().find(|j| j.spec.job_id == job_id) {
         let count = job.spec.targets.len() + 1;

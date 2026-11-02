@@ -13,6 +13,7 @@ workspace = true
 encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
+encodercraft-demux = { workspace = true }
 encodercraft-engine = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-watch = { workspace = true }

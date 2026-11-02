@@ -98,6 +98,44 @@ pub enum AudioStemMode {
     StereoPairs,
 }
 
+/// Classification of media payload in a container or stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum MediaStreamKind {
+    /// Audio-only media (e.g. MP3, WAV, FLAC, AIFF, Ogg, AAC, M4A).
+    AudioOnly,
+    /// Video containing one or more audio tracks.
+    VideoWithAudio,
+    /// Video-only media (no audio tracks present).
+    VideoOnly,
+    /// Single still image (PNG, TIFF, JPEG, EXR, WebP).
+    StillImage,
+    /// Sequence of still images.
+    ImageSequence,
+    /// 3D spatial asset (glTF, GLB, OBJ, STL, PLY).
+    Spatial3D,
+    /// Unknown or unprobed format.
+    #[default]
+    Unknown,
+}
+
+impl MediaStreamKind {
+    /// Returns true if this media kind contains a video stream.
+    pub fn has_video(&self) -> bool {
+        matches!(self, Self::VideoWithAudio | Self::VideoOnly | Self::StillImage | Self::ImageSequence)
+    }
+
+    /// Returns true if this media kind is strictly audio.
+    pub fn is_audio_only(&self) -> bool {
+        matches!(self, Self::AudioOnly)
+    }
+
+    /// Returns true if this media kind is a 3D asset.
+    pub fn is_spatial_3d(&self) -> bool {
+        matches!(self, Self::Spatial3D)
+    }
+}
+
 /// Mode of media source ingestion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]

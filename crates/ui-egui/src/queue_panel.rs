@@ -17,6 +17,7 @@ pub struct QueuePanelState {
     pub expanded_jobs: std::collections::HashSet<String>,
     pub is_running: bool,
     pub last_clicked_index: Option<usize>,
+    pub active_action_menu: Option<String>,
 }
 
 impl QueuePanelState {
@@ -200,16 +201,45 @@ pub fn render_queue_panel(
                     for id in state.selected_ids_list() {
                         if let Some(j) = jobs.iter().find(|j| j.spec.job_id == id) {
                             let count = j.spec.targets.len() + 1;
+                            let stream_kind = match &j.spec.source {
+                                encodercraft_core::SourceDescriptor::File { path, .. } => encodercraft_demux::classify_stream_kind(path),
+                                _ => encodercraft_core::MediaStreamKind::VideoWithAudio,
+                            };
+
+                            let (ext, container, preset_name, cw, ch, br, lufs) = match stream_kind {
+                                encodercraft_core::MediaStreamKind::AudioOnly => (
+                                    "wav",
+                                    encodercraft_core::ContainerType::Wave,
+                                    "Broadcast Wave BWF (-23 LUFS)".to_string(),
+                                    None,
+                                    None,
+                                    None,
+                                    Some(-23.0),
+                                ),
+                                encodercraft_core::MediaStreamKind::Spatial3D => {
+                                    ("glb", encodercraft_core::ContainerType::Gltf, "glTF 2.0 Binary (.glb)".to_string(), None, None, None, None)
+                                }
+                                _ => (
+                                    "mp4",
+                                    encodercraft_core::ContainerType::IsoBmffMp4,
+                                    "Match Source - High Bitrate".to_string(),
+                                    Some(1920),
+                                    Some(1080),
+                                    Some(12000),
+                                    Some(-14.0),
+                                ),
+                            };
+
                             let new_target = encodercraft_core::OutputTarget {
                                 target_id: format!("target-{count}"),
-                                output_path: std::path::PathBuf::from(format!("output_{count}.mp4")),
-                                preset_name: "Match Source - High Bitrate".into(),
-                                container: encodercraft_core::ContainerType::IsoBmffMp4,
-                                custom_width: Some(1920),
-                                custom_height: Some(1080),
+                                output_path: std::path::PathBuf::from(format!("output_{count}.{ext}")),
+                                preset_name,
+                                container,
+                                custom_width: cw,
+                                custom_height: ch,
                                 custom_frame_rate: None,
-                                target_bitrate_kbps: Some(12000),
-                                target_lufs: Some(-14.0),
+                                target_bitrate_kbps: br,
+                                target_lufs: lufs,
                                 ..Default::default()
                             };
                             let _ = queue_mgr.add_output_target(&id, new_target);
@@ -460,7 +490,14 @@ fn render_job_row(
                 encodercraft_core::SourceDescriptor::ProjectReference { composition_id, .. } => composition_id.as_str(),
             };
 
-            let job_select_btn = ui.selectable_label(is_selected, RichText::new(source_name).strong());
+            let display_source_name = if source_name.chars().count() > 38 {
+                let prefix: String = source_name.chars().take(35).collect();
+                format!("{prefix}…")
+            } else {
+                source_name.to_string()
+            };
+
+            let job_select_btn = ui.selectable_label(is_selected, RichText::new(display_source_name).strong()).on_hover_text(source_name);
             if job_select_btn.clicked() {
                 let cmd_held = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                 let shift_held = ui.input(|i| i.modifiers.shift);
@@ -548,30 +585,70 @@ fn render_job_row(
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Actions menu
-                ui.menu_button("•••", |ui| {
-                    if ui.button("Inspect Settings...").clicked() {
-                        *on_inspect_job = Some(job.spec.clone());
-                        ui.close();
+                // Actions menu with boundary clamping and upward flipping
+                let menu_id = ui.make_persistent_id(format!("job_row_actions_menu_{job_id}"));
+                let is_menu_open = state.active_action_menu.as_deref() == Some(&job_id);
+                let btn = ui.add(egui::Button::new(RichText::new("•••").size(14.0)).frame(true));
+                if btn.clicked() {
+                    state.active_action_menu = if is_menu_open { None } else { Some(job_id.clone()) };
+                }
+
+                if is_menu_open {
+                    let screen_rect = ui.ctx().input(|i| i.raw.screen_rect).unwrap_or_else(|| ui.max_rect());
+                    let menu_width = 180.0;
+                    let menu_height = 170.0;
+
+                    let x = (btn.rect.max.x - menu_width).clamp(screen_rect.min.x + 8.0, screen_rect.max.x - menu_width - 8.0);
+
+                    let y = if btn.rect.max.y + menu_height > screen_rect.max.y - 12.0 {
+                        (btn.rect.min.y - menu_height).max(screen_rect.min.y + 8.0)
+                    } else {
+                        btn.rect.max.y + 2.0
+                    };
+
+                    let popup_rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(menu_width, menu_height));
+
+                    let close_menu = ui.input(|i| {
+                        (i.pointer.any_click() && i.pointer.interact_pos().map(|p| !popup_rect.contains(p) && !btn.rect.contains(p)).unwrap_or(false))
+                            || i.key_pressed(egui::Key::Escape)
+                    });
+
+                    if close_menu {
+                        state.active_action_menu = None;
+                    } else {
+                        egui::Area::new(menu_id).order(egui::Order::Foreground).fixed_pos(egui::pos2(x, y)).show(ui.ctx(), |ui| {
+                            egui::Frame::menu(ui.style())
+                                .fill(tokens.bg_panel_darker)
+                                .stroke(egui::Stroke::new(1.0, tokens.border_subtle))
+                                .corner_radius(6)
+                                .inner_margin(6.0)
+                                .show(ui, |ui| {
+                                    ui.set_width(menu_width - 12.0);
+                                    if ui.button("Inspect Settings...").clicked() {
+                                        *on_inspect_job = Some(job.spec.clone());
+                                        state.active_action_menu = None;
+                                    }
+                                    if ui.button("Duplicate").clicked() {
+                                        let _ = queue_mgr.duplicate_job(&job_id);
+                                        state.active_action_menu = None;
+                                    }
+                                    if ui.button("Start Now").clicked() {
+                                        let _ = queue_mgr.start_job(&job_id);
+                                        let _ = queue_mgr.process_next_job();
+                                        state.active_action_menu = None;
+                                    }
+                                    if ui.button("Pause").clicked() {
+                                        let _ = queue_mgr.pause_job(&job_id);
+                                        state.active_action_menu = None;
+                                    }
+                                    if ui.button("Remove").clicked() {
+                                        let _ = queue_mgr.remove_job(&job_id);
+                                        state.active_action_menu = None;
+                                    }
+                                });
+                        });
                     }
-                    if ui.button("Duplicate").clicked() {
-                        let _ = queue_mgr.duplicate_job(&job_id);
-                        ui.close();
-                    }
-                    if ui.button("Start Now").clicked() {
-                        let _ = queue_mgr.start_job(&job_id);
-                        let _ = queue_mgr.process_next_job();
-                        ui.close();
-                    }
-                    if ui.button("Pause").clicked() {
-                        let _ = queue_mgr.pause_job(&job_id);
-                        ui.close();
-                    }
-                    if ui.button("Remove").clicked() {
-                        let _ = queue_mgr.remove_job(&job_id);
-                        ui.close();
-                    }
-                });
+                }
 
                 // FPS & Metrics
                 if job.status == JobStatus::Processing {
@@ -628,7 +705,14 @@ fn render_job_row(
 
                         // Output filename
                         let path_display = target.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
-                        ui.label(RichText::new(format!("➔ {path_display}")).small().color(tokens.text_secondary));
+                        let display_out_name = if path_display.chars().count() > 32 {
+                            let prefix: String = path_display.chars().take(29).collect();
+                            format!("{prefix}…")
+                        } else {
+                            path_display.to_string()
+                        };
+                        ui.label(RichText::new(format!("➔ {display_out_name}")).small().color(tokens.text_secondary))
+                            .on_hover_text(target.output_path.display().to_string());
 
                         // Actions per target
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

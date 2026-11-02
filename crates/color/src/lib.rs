@@ -33,6 +33,8 @@ pub enum PixelFormat {
     RgbaF32,
     /// Planar YUV 4:2:0 8-bit (standard H.264 / WebM / JPEG).
     Yuv420p,
+    /// Planar YUV 4:2:2 8-bit (Avid DNxHD/DNxHR SQ/HQ, broadcast standard).
+    Yuv422p,
     /// Planar YUV 4:2:0 10-bit little-endian (HDR10, HEVC Main 10).
     Yuv420p10,
     /// Planar YUV 4:2:2 10-bit little-endian (Apple ProRes 422, broadcast MXF).
@@ -53,13 +55,13 @@ impl PixelFormat {
 
     /// Returns true if this format is planar (Y, U, V in separate memory buffers).
     pub fn is_planar(&self) -> bool {
-        matches!(self, Self::Yuv420p | Self::Yuv420p10 | Self::Yuv422p10 | Self::Yuv444p12)
+        matches!(self, Self::Yuv420p | Self::Yuv422p | Self::Yuv420p10 | Self::Yuv422p10 | Self::Yuv444p12)
     }
 
     /// Bit depth per color component.
     pub fn bits_per_component(&self) -> u8 {
         match self {
-            Self::Rgba8 | Self::Bgra8 | Self::Rgb8 | Self::Yuv420p | Self::Gray8 => 8,
+            Self::Rgba8 | Self::Bgra8 | Self::Rgb8 | Self::Yuv420p | Self::Yuv422p | Self::Gray8 => 8,
             Self::Yuv420p10 | Self::Yuv422p10 => 10,
             Self::Yuv444p12 => 12,
             Self::Rgba16 | Self::Gray16 => 16,
@@ -77,7 +79,7 @@ impl PixelFormat {
             Self::RgbaF32 => 16,
             Self::Gray8 => 1,
             Self::Gray16 => 2,
-            Self::Yuv420p | Self::Yuv420p10 | Self::Yuv422p10 | Self::Yuv444p12 => {
+            Self::Yuv420p | Self::Yuv422p | Self::Yuv420p10 | Self::Yuv422p10 | Self::Yuv444p12 => {
                 // For planar, this calculates the Y-plane stride
                 let bpc = self.bits_per_component().div_ceil(8);
                 bpc as usize
@@ -108,6 +110,13 @@ impl PixelFormat {
                 let half_w = w.div_ceil(2);
                 let half_h = h.div_ceil(2);
                 let uv_pixels = half_w.checked_mul(half_h).ok_or(ColorError::Overflow)?;
+                let total_uv = uv_pixels.checked_mul(2).ok_or(ColorError::Overflow)?;
+                pixels.checked_add(total_uv).ok_or(ColorError::Overflow)
+            }
+            Self::Yuv422p => {
+                // 8-bit YUV 4:2:2: Y: w*h, U: (w/2)*h, V: (w/2)*h -> 2 * pixels
+                let half_w = w.div_ceil(2);
+                let uv_pixels = half_w.checked_mul(h).ok_or(ColorError::Overflow)?;
                 let total_uv = uv_pixels.checked_mul(2).ok_or(ColorError::Overflow)?;
                 pixels.checked_add(total_uv).ok_or(ColorError::Overflow)
             }
