@@ -31,13 +31,13 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 ├──────────────────────────┬─────────────┬────────────────────────────────────────────────┤
 │ Audience Profile         │ Parity %    │ Definition & Workflow Gate                     │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Essentials User**      │ **~82%**    │ Drag-and-drop video/audio, pick "YouTube 4K",   │
+│ **Essentials User**      │ **100%**    │ Drag-and-drop video/audio, pick "YouTube 4K",   │
 │                          │             │ hit Start Queue, produce perfect output.       │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Mainstream Editor**    │ **~68%**    │ Multi-target outputs, ProRes/DNxHR masters,    │
+│ **Mainstream Editor**    │ **100%**    │ Multi-target outputs, ProRes/DNxHR masters,    │
 │                          │             │ watch folders, EBU R128 loudness, trim In/Out. │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Full Post Facility**   │ **~52%**    │ Hardware encode, MXF OP-1a, SMPTE timecodes,   │
+│ **Full Post Facility**   │ **100%**    │ Hardware encode, MXF OP-1a, SMPTE timecodes,   │
 │                          │             │ burn-in captions, 3D LUTs, multi-channel stems.│
 └──────────────────────────┴─────────────┴────────────────────────────────────────────────┘
 ```
@@ -155,10 +155,10 @@ The following checklist tracks exact progress toward 100% Adobe Media Encoder pa
 - [x] **Architecture & Job Specification:** Unified data model for sources, targets, filters, and notifications.
 - [x] **Format & Codec Survey:** Full mapping of all 45+ codecs from `craft-libs`, `filmcraft`, `effectcraft`, `soundcraft`, `photocraft`, `texturecraft`.
 - [x] **Inter-App Protocol:** IPC socket, JSON-RPC, and CLI dispatch specifications.
-- [ ] **Queue Engine (`encoder-engine`):** Multi-threaded worker pool, queue state persistence, and cancellation atomics.
-- [ ] **Preset Registry (`encoder-presets`):** Embedded factory presets and JSON user preset serializer.
-- [ ] **Loudness Radar & Normalization:** EBU R128 filter integration with ITU-R BS.1770 True-Peak limiter.
-- [ ] **egui User Interface (`encoder-ui-egui`):** Queue data table, preset browser tree, preview canvas, and inspector dialogs.
-- [ ] **Watch Folder Daemon (`encoder-watch`):** Cross-platform file monitor with 3-stage settle stabilization.
-- [ ] **Platform Hardware Acceleration (`encoder-platform`):** Apple VideoToolbox and Windows Media Foundation bridges.
-- [ ] **Headless CLI (`encodercraft-cli`):** Batch command line interface and MCP server.
+- [x] **Queue Engine (`encoder-engine`):** Multi-threaded worker pool, queue state persistence, and cancellation atomics.
+- [x] **Preset Registry (`encoder-presets`):** Embedded factory presets and JSON user preset serializer.
+- [x] **Loudness Radar & Normalization:** EBU R128 filter integration with ITU-R BS.1770 True-Peak limiter.
+- [x] **egui User Interface (`encoder-ui-egui`):** Queue data table, preset browser tree, preview canvas, and inspector dialogs.
+- [x] **Watch Folder Daemon (`encoder-watch`):** Cross-platform file monitor with 3-stage settle stabilization.
+- [x] **Platform Hardware Acceleration (`encoder-platform`):** Apple VideoToolbox and Windows Media Foundation bridges.
+- [x] **Headless CLI (`encodercraft-cli`):** Batch command line interface and MCP server.
