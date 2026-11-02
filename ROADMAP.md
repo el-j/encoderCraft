@@ -24,7 +24,7 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
 | **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
 | **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **124 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Automated Tests** | **>80 tests** | **125 passed** | Unit, fuzz, and integration tests across L0-L7. |
 | **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
@@ -127,3 +127,11 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Integrated native file dialogs (`rfd = "0.17"`): multi-file batch add (`Cmd+I`), multi-clip stitching picker, and watch folder directory pickers.
   - Resolved 100% of review comments on `storytold/craft-libs#504` (CodeRabbit `SUCCESS`); sibling PRs `filmcraft#3941`, `effectcraft#2814`, and `soundcraft#1275` verified with green CodeRabbit checkmarks.
   - Verified 100% layer compliance and full test suite (124 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).
+- [x] **M11: Background Workers, Preferences, Activity Log & Context Menus (2026-11-02)**
+  - Implemented lock-free asynchronous background queue execution worker (`QueueManager::start_background_worker`) with 20 Hz atomic progress monitoring and responsive 60 FPS rendering.
+  - Implemented interactive Preferences modal dialog (`Edit > Preferences...` / `Cmd+,`) configuring chime sounds, auto-start, parallel workers, and default destination directories.
+  - Implemented persistent Encoding Activity Log dialog (`File > Show Encoding Log...` / `Cmd+L`) displaying searchable transcode history, durations, status chips, and clipboard exports.
+  - Implemented comprehensive right-click context menus (`reveal_in_file_manager`, copy paths, inspect settings, batch stitch, batch set output destination).
+  - Extended CLI (`apps/encodercraft-cli`): added `queue start`, `queue pause`, `queue clear`, and `queue log` commands.
+  - Extended MCP server (`crates/mcp`): added `encodercraft_get_log` and `encodercraft_set_output_dir` AI agent tools.
+  - Verified 100% layer compliance and full test suite (125 automated unit, fuzz, and integration tests passing under `cargo xtask ci`).
