@@ -41,7 +41,7 @@ impl VideoEncoder for HevcEncoderWrapper {
     fn encode_frame(&mut self, frame: &VideoFrame) -> Result<Vec<EncodedPacket>, EncoderError> {
         let yuv = frame_to_yuv420_16(frame)?;
         let input = Frame { y: &yuv.y, u: &yuv.u, v: &yuv.v, y_stride: yuv.y_stride, uv_stride: yuv.uv_stride };
-        let pkt = self.inner.encode(&input);
+        let pkt = self.inner.encode(&input).map_err(|e| EncoderError::Internal(format!("HEVC encode error: {e}")))?;
 
         Ok(vec![EncodedPacket { data: pkt.data, pts: frame.pts, dts: frame.pts, is_keyframe: pkt.keyframe, duration_ticks: 1000 }])
     }
