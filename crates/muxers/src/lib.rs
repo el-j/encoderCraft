@@ -9,9 +9,11 @@
 pub mod mkv;
 pub mod mp4;
 pub mod muxer;
+pub mod mxf;
 pub mod wav;
 
 pub use mkv::{MkvMuxer, MkvMuxerBuilder};
 pub use mp4::{Mp4Muxer, append_xmp_uuid_box};
 pub use muxer::{AudioSample, AudioStreamConfig, BextMetadata, VideoSample, VideoStreamConfig};
+pub use mxf::MxfMuxer;
 pub use wav::{BwfWavWriter, WavFormatTag};

@@ -87,12 +87,43 @@ fn render_inspector_content(ui: &mut Ui, spec: &mut CraftJobSpec, active_tab: &m
         ui.horizontal(|ui| {
             ui.label("Container Format:");
             egui::ComboBox::from_id_salt("container_combo").selected_text(format!("{:?}", target.container)).show_ui(ui, |ui| {
+                // Video & Broadcast Containers
                 ui.selectable_value(&mut target.container, ContainerType::IsoBmffMp4, "MP4 (MPEG-4 Part 14)");
                 ui.selectable_value(&mut target.container, ContainerType::QuickTimeMov, "MOV (QuickTime Movie)");
                 ui.selectable_value(&mut target.container, ContainerType::MatroskaMkv, "MKV (Matroska)");
-                ui.selectable_value(&mut target.container, ContainerType::WebM, "WebM");
+                ui.selectable_value(&mut target.container, ContainerType::WebM, "WebM (VP9 / AV1 / Opus)");
+                ui.selectable_value(&mut target.container, ContainerType::MxfOp1a, "MXF OP1a (SMPTE ST 377-1 Broadcast)");
+                ui.selectable_value(&mut target.container, ContainerType::MxfOpAtom, "MXF OP-Atom (Avid DNxHR / ProRes)");
+                ui.separator();
+                // Audio Containers
                 ui.selectable_value(&mut target.container, ContainerType::Wave, "WAV (Broadcast Wave Format)");
+                ui.selectable_value(&mut target.container, ContainerType::Aiff, "AIFF (Audio Interchange)");
+                ui.selectable_value(&mut target.container, ContainerType::Flac, "FLAC (Lossless Audio)");
+                ui.selectable_value(&mut target.container, ContainerType::OggAudio, "Ogg Audio (Opus / Vorbis)");
+                ui.selectable_value(&mut target.container, ContainerType::Mp3, "MP3 (MPEG-1 Audio Layer III)");
+                ui.separator();
+                // Still Images & Sequences
+                ui.selectable_value(&mut target.container, ContainerType::Png, "PNG (Lossless Raster)");
+                ui.selectable_value(&mut target.container, ContainerType::Jpeg, "JPEG (Baseline / Progressive)");
+                ui.selectable_value(&mut target.container, ContainerType::WebP, "WebP (Lossless Raster)");
+                ui.selectable_value(&mut target.container, ContainerType::Tiff, "TIFF (16-bit Archival)");
+                ui.selectable_value(&mut target.container, ContainerType::OpenExr, "OpenEXR (16/32-bit Float HDR)");
+                ui.selectable_value(&mut target.container, ContainerType::Bmp, "BMP (Uncompressed Bitmap)");
+                ui.selectable_value(&mut target.container, ContainerType::StillSequence, "Still Image Sequence");
+                ui.selectable_value(&mut target.container, ContainerType::AnimatedGif, "Animated GIF");
+                ui.separator();
+                // Vector & Documents
+                ui.selectable_value(&mut target.container, ContainerType::Svg, "SVG (Scalable Vector Graphics)");
+                ui.selectable_value(&mut target.container, ContainerType::Pdf, "PDF (Print / Archival Document)");
+                ui.selectable_value(&mut target.container, ContainerType::Docx, "DOCX (Office Open XML)");
+                ui.selectable_value(&mut target.container, ContainerType::Idml, "IDML (InDesign Markup)");
+                ui.separator();
+                // 3D Spatial & CAD
                 ui.selectable_value(&mut target.container, ContainerType::Gltf, "glTF 2.0 / GLB");
+                ui.selectable_value(&mut target.container, ContainerType::Usdz, "USDZ (Universal Scene Description)");
+                ui.selectable_value(&mut target.container, ContainerType::Obj, "Wavefront OBJ");
+                ui.selectable_value(&mut target.container, ContainerType::Stl, "Binary STL (CAD / 3D Print)");
+                ui.selectable_value(&mut target.container, ContainerType::Ply, "Stanford PLY (Mesh / Point Cloud)");
             });
         });
 

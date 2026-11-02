@@ -14,6 +14,7 @@ encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
 craft-media = { workspace = true }
+filmcraft-mxf = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

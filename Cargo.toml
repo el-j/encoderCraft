@@ -70,6 +70,7 @@ craft-codecs = { version = "0.1.0", git = "https://github.com/storytold/craft-li
 # Sibling Craft app official repositories (until craft-audio #439-#448 PR series lands in craft-libs)
 filmcraft-captions = { git = "https://github.com/storytold/filmcraft.git" }
 filmcraft-time = { git = "https://github.com/storytold/filmcraft.git" }
+filmcraft-mxf = { git = "https://github.com/storytold/filmcraft.git" }
 craft-aac = { package = "filmcraft-aac", git = "https://github.com/storytold/filmcraft.git" }
 craft-opus = { package = "filmcraft-opus", git = "https://github.com/storytold/filmcraft.git" }
 craft-audio-io = { package = "soundcraft-audio-io", git = "https://github.com/storytold/soundcraft.git" }
@@ -155,6 +156,7 @@ craft-codecs = { path = "../craft-libs/crates/codecs" }
 [patch."https://github.com/storytold/filmcraft.git"]
 filmcraft-captions = { path = "../filmcraft/crates/captions" }
 filmcraft-time = { path = "../filmcraft/crates/time" }
+filmcraft-mxf = { path = "../filmcraft/crates/mxf" }
 filmcraft-aac = { path = "../filmcraft/crates/aac" }
 filmcraft-opus = { path = "../filmcraft/crates/opus" }
 

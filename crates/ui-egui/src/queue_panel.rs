@@ -472,14 +472,25 @@ fn render_job_row(
             // Status chip
             render_status_chip(ui, &job.status, tokens);
 
-            // Client Origin Chip (FilmCraft, EffectCraft, SoundCraft, PhotoCraft)
+            // Client Origin Chip (All 14 ArtCraft Sibling Applications — el-j/encoderCraft#1)
             let client_app = &job.spec.client_info.app_name;
             if !client_app.is_empty() && client_app != "encoderCraft GUI" && client_app != "encoderCraft CLI" {
                 let chip_color = match client_app.to_lowercase().as_str() {
-                    s if s.contains("film") => egui::Color32::from_rgb(99, 102, 241),
-                    s if s.contains("effect") => egui::Color32::from_rgb(168, 85, 247),
-                    s if s.contains("sound") => egui::Color32::from_rgb(34, 197, 94),
-                    s if s.contains("photo") => egui::Color32::from_rgb(59, 130, 246),
+                    s if s.contains("film") => egui::Color32::from_rgb(99, 102, 241), // FilmCraft (Indigo)
+                    s if s.contains("effect") => egui::Color32::from_rgb(168, 85, 247), // EffectCraft (Purple)
+                    s if s.contains("sound") => egui::Color32::from_rgb(34, 197, 94), // SoundCraft (Emerald)
+                    s if s.contains("photo") => egui::Color32::from_rgb(59, 130, 246), // PhotoCraft (Blue)
+                    s if s.contains("vector") => egui::Color32::from_rgb(249, 115, 22), // VectorCraft (Orange)
+                    s if s.contains("design") => egui::Color32::from_rgb(236, 72, 153), // DesignCraft (Magenta/Pink)
+                    s if s.contains("pdf") => egui::Color32::from_rgb(239, 68, 68),   // PdfCraft (Crimson Red)
+                    s if s.contains("fig") => egui::Color32::from_rgb(20, 184, 166),  // FigCraft (Teal)
+                    s if s.contains("cad") => egui::Color32::from_rgb(6, 182, 212),   // CadCraft (Cyan)
+                    s if s.contains("deck") => egui::Color32::from_rgb(245, 158, 11), // DeckCraft (Amber)
+                    s if s.contains("solid") => egui::Color32::from_rgb(14, 165, 233), // SolidCraft (Sky Blue)
+                    s if s.contains("word") => egui::Color32::from_rgb(37, 99, 235),  // WordCraft (Royal Blue)
+                    s if s.contains("texture") => egui::Color32::from_rgb(217, 119, 6), // TextureCraft (Warm Ochre)
+                    s if s.contains("grid") => egui::Color32::from_rgb(16, 185, 129), // GridCraft (Mint Green)
+                    s if s.contains("light") => egui::Color32::from_rgb(139, 92, 246), // LightCraft (Violet)
                     _ => tokens.text_dim,
                 };
                 ui.label(RichText::new(format!("[{client_app}]")).small().color(chip_color));

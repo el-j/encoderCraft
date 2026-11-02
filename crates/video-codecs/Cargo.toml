@@ -18,6 +18,7 @@ craft-prores = { workspace = true }
 craft-hevcenc = { workspace = true }
 craft-av1enc = { workspace = true }
 craft-vp9enc = { workspace = true }
+craft-vp8 = { workspace = true }
 craft-dnx = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

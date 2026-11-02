@@ -489,6 +489,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-vp8"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-vp9enc"
 version = "0.1.0"
 
@@ -834,6 +841,7 @@ dependencies = [
  "encodercraft-color",
  "encodercraft-core",
  "encodercraft-geom",
+ "filmcraft-mxf",
  "proptest",
  "serde",
  "serde_json",
@@ -928,6 +936,7 @@ dependencies = [
  "encodercraft-core",
  "encodercraft-demux",
  "encodercraft-geom",
+ "filmcraft-mxf",
  "proptest",
  "serde",
  "thiserror 2.0.21",
@@ -938,6 +947,7 @@ name = "encodercraft-pipeline"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "craft-media",
  "crossbeam-channel",
  "encodercraft-audio-dsp",
  "encodercraft-color",
@@ -950,6 +960,7 @@ dependencies = [
  "encodercraft-spatial-io",
  "encodercraft-video-codecs",
  "filmcraft-captions",
+ "filmcraft-mxf",
  "filmcraft-time",
  "log",
  "proptest",
@@ -1025,6 +1036,7 @@ dependencies = [
  "craft-h264enc",
  "craft-hevcenc",
  "craft-prores",
+ "craft-vp8",
  "craft-vp9enc",
  "encodercraft-color",
  "encodercraft-core",
@@ -1233,6 +1245,13 @@ dependencies = [
  "rayon",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-mxf"
+version = "0.16.0"
+dependencies = [
+ "chrono",
 ]
 
 [[package]]
@@ -4464,8 +4483,4 @@ version = "0.16.0"
 
 [[patch.unused]]
 name = "craft-codecs"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "craft-vp8"
 version = "0.1.0"

@@ -153,6 +153,48 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 target_lufs: None,
             }),
         },
+        // 4d. Broadcast MXF OP1a DNxHR HQ
+        EncodingPreset {
+            name: "Broadcast MXF OP1a DNxHR HQ".into(),
+            description: "SMPTE ST 377-1 / ST 378 MXF OP1a broadcast master with Avid DNxHR HQ VC-3 video and 24-bit 48 kHz PCM audio".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::MxfOp1a,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(1920),
+                height: MatchSourceOr::Exact(1080),
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
+                target_bitrate_kbps: 220000,
+                keyframe_interval: 1,
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24le".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::MatchSource,
+                bitrate_kbps: None,
+                target_lufs: Some(-23.0),
+            }),
+        },
+        // 4e. Avid Media Composer MXF OP-Atom
+        EncodingPreset {
+            name: "Avid Media Composer MXF OP-Atom".into(),
+            description: "SMPTE ST 390 MXF OP-Atom clip-wrapped Avid DNxHR HQ essence for direct Avid MediaFiles ingestion".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::MxfOpAtom,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(1920),
+                height: MatchSourceOr::Exact(1080),
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
+                target_bitrate_kbps: 220000,
+                keyframe_interval: 1,
+            }),
+            audio: None,
+        },
         // 5. TikTok / Instagram Reels 9:16 Vertical
         EncodingPreset {
             name: "TikTok / Reels 9:16 Vertical".into(),

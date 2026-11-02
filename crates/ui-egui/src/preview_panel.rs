@@ -18,6 +18,7 @@ pub enum PreviewMode {
 /// State for the preview canvas and scrub controls.
 #[derive(Debug, Clone)]
 pub struct PreviewState {
+    pub active_job_id: Option<String>,
     pub mode: PreviewMode,
     pub current_frame: u64,
     pub total_frames: u64,
@@ -31,6 +32,7 @@ pub struct PreviewState {
 impl Default for PreviewState {
     fn default() -> Self {
         Self {
+            active_job_id: None,
             mode: PreviewMode::Source,
             current_frame: 0,
             total_frames: 1800, // 60s at 30fps default placeholder
@@ -45,6 +47,31 @@ impl Default for PreviewState {
 
 /// Renders the preview monitor pane.
 pub fn render_preview_panel(ui: &mut Ui, state: &mut PreviewState, job: Option<&CraftJobSpec>, tokens: &Tokens) {
+    // Synchronize In/Out trim state when selection changes
+    if let Some(j) = job {
+        if state.active_job_id.as_deref() != Some(j.job_id.as_str()) {
+            state.active_job_id = Some(j.job_id.clone());
+            if let encodercraft_core::SourceDescriptor::File { start_tick, duration_ticks, .. } = &j.source {
+                state.in_point = start_tick.and_then(|s| u64::try_from(s).ok());
+                state.out_point = match (state.in_point, duration_ticks) {
+                    (Some(s), Some(d)) if *d > 0 => Some(s.saturating_add((*d as u64).saturating_sub(1))),
+                    (None, Some(d)) if *d > 0 => Some((*d as u64).saturating_sub(1)),
+                    _ => None,
+                };
+            } else {
+                state.in_point = None;
+                state.out_point = None;
+            }
+        }
+    } else {
+        state.active_job_id = None;
+    }
+
+    if state.is_playing {
+        state.current_frame = (state.current_frame + 1) % (state.total_frames.max(1) + 1);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    }
+
     ui.vertical(|ui| {
         // --- 1. Header with Mode Selector ---
         ui.horizontal(|ui| {
@@ -71,7 +98,7 @@ pub fn render_preview_panel(ui: &mut Ui, state: &mut PreviewState, job: Option<&
         painter.rect_filled(rect, 4.0, tokens.bg_panel_darker);
         painter.rect_stroke(rect, 4.0, Stroke::new(1.0, tokens.border_subtle), StrokeKind::Inside);
 
-        // Simulated Frame Display with aspect ratio box
+        // Frame Display with aspect ratio box
         let frame_width = (rect.height() * state.aspect_ratio).min(rect.width() - 8.0);
         let frame_height = frame_width / state.aspect_ratio;
         let frame_x = rect.min.x + (rect.width() - frame_width) / 2.0;
@@ -79,15 +106,69 @@ pub fn render_preview_panel(ui: &mut Ui, state: &mut PreviewState, job: Option<&
         let frame_rect = Rect::from_min_size(Pos2::new(frame_x, frame_y), Vec2::new(frame_width, frame_height));
 
         painter.rect_filled(frame_rect, 2.0, Color32::from_rgb(16, 16, 18));
+
+        // Render subtle SMPTE reference bars & active frame scanline when a job is selected
+        if job.is_some() {
+            let smpte_colors = [
+                Color32::from_rgba_unmultiplied(192, 192, 192, 28),
+                Color32::from_rgba_unmultiplied(192, 192, 0, 28),
+                Color32::from_rgba_unmultiplied(0, 192, 192, 28),
+                Color32::from_rgba_unmultiplied(0, 192, 0, 28),
+                Color32::from_rgba_unmultiplied(192, 0, 192, 28),
+                Color32::from_rgba_unmultiplied(192, 0, 0, 28),
+                Color32::from_rgba_unmultiplied(0, 0, 192, 28),
+            ];
+            let bar_w = frame_rect.width() / smpte_colors.len() as f32;
+            for (i, col) in smpte_colors.iter().enumerate() {
+                let bx = frame_rect.min.x + (i as f32) * bar_w;
+                let bar_rect = Rect::from_min_size(Pos2::new(bx, frame_rect.min.y), Vec2::new(bar_w, frame_rect.height()));
+                painter.rect_filled(bar_rect, 0.0, *col);
+            }
+
+            // Animated playhead indicator inside frame
+            let progress_frac = (state.current_frame as f32) / (state.total_frames.max(1) as f32);
+            let scan_x = frame_rect.min.x + frame_rect.width() * progress_frac.clamp(0.0, 1.0);
+            painter.line_segment(
+                [Pos2::new(scan_x, frame_rect.min.y), Pos2::new(scan_x, frame_rect.max.y)],
+                Stroke::new(1.0, tokens.accent_primary.gamma_multiply(0.45)),
+            );
+        }
+
+        // Draw In/Out Trim Range Highlight Strip at bottom of frame_rect
+        if state.in_point.is_some() || state.out_point.is_some() {
+            let total = state.total_frames.max(1) as f32;
+            let in_frac = (state.in_point.unwrap_or(0) as f32 / total).clamp(0.0, 1.0);
+            let out_frac = (state.out_point.unwrap_or(state.total_frames) as f32 / total).clamp(in_frac, 1.0);
+            let rx0 = frame_rect.min.x + frame_rect.width() * in_frac;
+            let rx1 = frame_rect.min.x + frame_rect.width() * out_frac;
+            let strip_rect = Rect::from_min_max(Pos2::new(rx0, frame_rect.max.y - 5.0), Pos2::new(rx1, frame_rect.max.y));
+            painter.rect_filled(strip_rect, 1.0, tokens.accent_primary);
+        }
+
         painter.rect_stroke(frame_rect, 2.0, Stroke::new(1.0, tokens.border_strong), StrokeKind::Inside);
 
-        // Title / Resolution text in canvas
+        // Title / Resolution / Container text in canvas
         let (info_text, source_tag) = if let Some(j) = job {
             let label = match &j.source {
                 encodercraft_core::SourceDescriptor::File { path, .. } => path.file_name().and_then(|s| s.to_str()).unwrap_or("Media"),
-                _ => "Stream",
+                encodercraft_core::SourceDescriptor::StitchedClips { clips } => {
+                    if clips.is_empty() {
+                        "Stitched Sequence"
+                    } else {
+                        "Stitched Multi-Clip Sequence"
+                    }
+                }
+                encodercraft_core::SourceDescriptor::Pipe { endpoint, .. } => endpoint.as_str(),
+                encodercraft_core::SourceDescriptor::ProjectReference { composition_id, .. } => composition_id.as_str(),
             };
-            (format!("{} · 3840x2160 · Rec.709", label), "Source: Ready")
+            let target_summary = if let Some(t) = j.targets.first() {
+                let w = t.custom_width.unwrap_or(1920);
+                let h = t.custom_height.unwrap_or(1080);
+                format!("{label} · {w}x{h} · {:?}", t.container)
+            } else {
+                format!("{label} · Match Source")
+            };
+            (target_summary, "Source: Ready")
         } else {
             ("No Active Clip Selected".to_string(), "Idle")
         };

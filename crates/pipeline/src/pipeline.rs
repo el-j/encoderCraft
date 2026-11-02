@@ -7,12 +7,14 @@ use std::io::BufWriter;
 use std::sync::Arc;
 use std::time::Instant;
 
-use encodercraft_audio_dsp::{normalize_loudness, remix_channels};
+use encodercraft_audio_dsp::{AacEncoderWrapper, normalize_loudness, remix_channels};
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor, VideoFrame};
 use encodercraft_geom::{Dimensions, ScaleMode};
-use encodercraft_muxers::{BextMetadata, BwfWavWriter, Mp4Muxer, VideoSample, VideoStreamConfig, WavFormatTag};
-use encodercraft_video_codecs::{VideoCodecKind, create_video_encoder};
+use encodercraft_muxers::{
+    AudioSample, AudioStreamConfig, BextMetadata, BwfWavWriter, MkvMuxerBuilder, Mp4Muxer, MxfMuxer, VideoSample, VideoStreamConfig, WavFormatTag,
+};
+use encodercraft_video_codecs::{VideoCodecKind, Vp8DecoderWrapper, create_video_encoder, decode_video_packet_auto};
 
 use crate::progress::JobProgress;
 use crate::scale::FrameScaler;
@@ -78,6 +80,11 @@ impl TranscodePipeline {
             ContainerType::OggAudio | ContainerType::Mp3 => self.execute_audio_flac(target, start_time)?,
             ContainerType::IsoBmffMp4 => self.execute_video_mp4(target, false, start_time)?,
             ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time)?,
+            ContainerType::MxfOp1a => self.execute_video_mxf(target, false, start_time)?,
+            ContainerType::MxfOpAtom => self.execute_video_mxf(target, true, start_time)?,
+            ContainerType::MatroskaMkv => self.execute_video_mkv(target, false, start_time)?,
+            ContainerType::WebM => self.execute_video_mkv(target, true, start_time)?,
+            ContainerType::AnimatedGif => self.execute_animated_gif(target, start_time)?,
             ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
             ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml => self.execute_document_pdf(target, start_time)?,
             ContainerType::Gltf | ContainerType::Usdz | ContainerType::Obj | ContainerType::Stl | ContainerType::Ply => {
@@ -90,7 +97,6 @@ impl TranscodePipeline {
             | ContainerType::OpenExr
             | ContainerType::Bmp
             | ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
-            _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported target container: {:?}", target.container))),
         }
 
         // Export multichannel audio stems if configured
@@ -111,9 +117,174 @@ impl TranscodePipeline {
             if let Ok(decoded) = encodercraft_audio_dsp::decode_audio(&bytes) {
                 return Ok(decoded);
             }
+            if filmcraft_mxf::sniff(&bytes)
+                && let Ok(mxf) = filmcraft_mxf::open(bytes.as_slice())
+            {
+                for track in &mxf.tracks {
+                    if track.kind == filmcraft_mxf::TrackKind::Sound
+                        && let Some(snd) = &track.sound
+                    {
+                        let mut pcm_bytes = Vec::new();
+                        for chunk in &track.chunks {
+                            let start = usize::try_from(chunk.offset).unwrap_or(bytes.len());
+                            let end = start.saturating_add(usize::try_from(chunk.size).unwrap_or(0)).min(bytes.len());
+                            if let Some(slice) = bytes.get(start..end) {
+                                pcm_bytes.extend_from_slice(slice);
+                            }
+                        }
+                        if !pcm_bytes.is_empty()
+                            && let Ok(planes) =
+                                filmcraft_mxf::decode_pcm(&pcm_bytes, track.sound_format, snd.channels as usize, snd.bits, snd.frame_bytes())
+                        {
+                            let sr = if snd.sample_rate.den > 0 {
+                                u32::try_from((snd.sample_rate.num / snd.sample_rate.den).max(8000)).unwrap_or(48_000)
+                            } else {
+                                48_000
+                            };
+                            let layout = match planes.len() {
+                                1 => encodercraft_core::ChannelLayout::Mono,
+                                2 => encodercraft_core::ChannelLayout::Stereo,
+                                6 => encodercraft_core::ChannelLayout::Surround51,
+                                8 => encodercraft_core::ChannelLayout::Surround71,
+                                _ => encodercraft_core::ChannelLayout::Stereo,
+                            };
+                            if let Ok(buf) = AudioSampleBuffer::from_planar_channels(sr, layout, 0, planes) {
+                                return Ok(buf);
+                            }
+                        }
+                    }
+                }
+            }
         }
         let sample_rate = 48000;
         AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)
+    }
+
+    fn load_source_video_frames(&self, fallback_dims: Dimensions, fallback_fps: Rational64) -> Result<Vec<VideoFrame>, EncoderError> {
+        let mut start_frame = 0usize;
+        let mut max_frames: Option<usize> = None;
+
+        if let SourceDescriptor::File { path, start_tick, duration_ticks, timebase } = &self.spec.source {
+            let fps_val = fallback_fps.as_f64().max(1.0);
+            if let Some(st) = start_tick
+                && *st > 0
+            {
+                if let Some(tb) = timebase
+                    && tb.as_f64() > 0.0
+                {
+                    start_frame = ((*st as f64 / tb.as_f64()) * fps_val).floor().max(0.0) as usize;
+                } else {
+                    start_frame = usize::try_from(*st).unwrap_or(0);
+                }
+            }
+            if let Some(dt) = duration_ticks
+                && *dt > 0
+            {
+                if let Some(tb) = timebase
+                    && tb.as_f64() > 0.0
+                {
+                    max_frames = Some(((*dt as f64 / tb.as_f64()) * fps_val).ceil().max(1.0) as usize);
+                } else {
+                    max_frames = Some(usize::try_from(*dt).unwrap_or(24).max(1));
+                }
+            }
+
+            if path.exists()
+                && let Ok(bytes) = std::fs::read(path)
+            {
+                let decoded_frames = Self::decode_container_video_frames(&bytes, start_frame, max_frames, fallback_fps);
+                if !decoded_frames.is_empty() {
+                    return Ok(decoded_frames);
+                }
+            }
+        }
+
+        let count = max_frames.unwrap_or(24).clamp(1, 3600);
+        let mut synthetic = Vec::with_capacity(count);
+        for f in 0..count {
+            let frame = VideoFrame::new_allocated(fallback_dims, PixelFormat::Rgb8, ColorSpaceTag::SRGB, (start_frame + f) as i64, 1, fallback_fps)?;
+            synthetic.push(frame);
+        }
+        Ok(synthetic)
+    }
+
+    fn decode_container_video_frames(bytes: &[u8], start_frame: usize, max_frames: Option<usize>, fallback_fps: Rational64) -> Vec<VideoFrame> {
+        let mut decoded_frames = Vec::new();
+        let mut vp8_dec: Option<Vp8DecoderWrapper> = None;
+
+        if bytes.starts_with(b"BM") {
+            if let Ok(frame) = encodercraft_image_codecs::decode_bmp(bytes) {
+                decoded_frames.push(frame);
+            }
+        } else if filmcraft_mxf::sniff(bytes) {
+            if let Ok(mxf) = filmcraft_mxf::open(bytes) {
+                for track in &mxf.tracks {
+                    if track.kind == filmcraft_mxf::TrackKind::Picture {
+                        for (idx, sample) in track.samples.iter().enumerate() {
+                            if idx < start_frame {
+                                continue;
+                            }
+                            if let Some(limit) = max_frames
+                                && decoded_frames.len() >= limit
+                            {
+                                break;
+                            }
+                            let start = usize::try_from(sample.offset).unwrap_or(bytes.len());
+                            let end = start.saturating_add(sample.size as usize).min(bytes.len());
+                            if let Some(pkt) = bytes.get(start..end)
+                                && let Ok(Some(vf)) = decode_video_packet_auto(pkt, sample.pts, fallback_fps, &mut vp8_dec)
+                            {
+                                decoded_frames.push(vf);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+            if let Ok(mkv) = craft_media::matroska::open(bytes)
+                && let Some(v_track_idx) = mkv.track_of_kind(craft_media::matroska::TrackKind::Video)
+                && let Some(track) = mkv.tracks.get(v_track_idx)
+            {
+                for (idx, sample) in track.samples.iter().enumerate() {
+                    if idx < start_frame {
+                        continue;
+                    }
+                    if let Some(limit) = max_frames
+                        && decoded_frames.len() >= limit
+                    {
+                        break;
+                    }
+                    if let Ok(pkt) = mkv.read_sample(&bytes, v_track_idx, idx)
+                        && let Ok(Some(vf)) = decode_video_packet_auto(&pkt, sample.pts, fallback_fps, &mut vp8_dec)
+                    {
+                        decoded_frames.push(vf);
+                    }
+                }
+            }
+        } else if let Ok(mp4) = craft_media::isobmff::open(bytes) {
+            for (t_idx, track) in mp4.tracks.iter().enumerate() {
+                if track.kind == craft_media::isobmff::TrackKind::Video {
+                    for (idx, sample) in track.samples.iter().enumerate() {
+                        if idx < start_frame {
+                            continue;
+                        }
+                        if let Some(limit) = max_frames
+                            && decoded_frames.len() >= limit
+                        {
+                            break;
+                        }
+                        if let Ok(pkt) = mp4.read_sample(&bytes, t_idx, idx)
+                            && let Ok(Some(vf)) = decode_video_packet_auto(&pkt, sample.pts, fallback_fps, &mut vp8_dec)
+                        {
+                            decoded_frames.push(vf);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        decoded_frames
     }
 
     fn execute_audio_flac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
@@ -438,10 +609,27 @@ impl TranscodePipeline {
             codec_private: vec![0, 0, 0, 1],
         };
 
-        let track_idx = mp4_muxer.add_video_stream(&v_cfg)?;
+        let v_track_idx = mp4_muxer.add_video_stream(&v_cfg)?;
         let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
 
-        let total_frames = 24; // 1 second sequence
+        // Prepare and add multiplexed AAC-LC audio stream
+        let mut audio_buf = self.load_source_audio()?;
+        audio_buf = remix_channels(&audio_buf, encodercraft_core::ChannelLayout::Stereo)?;
+        if let Some(target_lufs) = target.target_lufs {
+            let _ = normalize_loudness(&mut audio_buf, target_lufs as f64, -1.0)?;
+        }
+        let mut aac_enc = AacEncoderWrapper::new(audio_buf.sample_rate, 2, 192_000)?;
+        let a_cfg = AudioStreamConfig {
+            codec_fourcc: *b"mp4a",
+            sample_rate: audio_buf.sample_rate,
+            layout: encodercraft_core::ChannelLayout::Stereo,
+            bits_per_sample: 16,
+            codec_private: aac_enc.audio_specific_config(),
+        };
+        let a_track_idx = mp4_muxer.add_audio_stream(&a_cfg)?;
+
+        let source_frames = self.load_source_video_frames(dims, fps)?;
+        let total_frames = source_frames.len() as u64;
         self.progress.set_total_frames(total_frames);
 
         let scaler = FrameScaler::new(ScaleMode::Fit);
@@ -466,12 +654,12 @@ impl TranscodePipeline {
             (None, None)
         };
 
-        for f in 0..total_frames {
+        for (f, mut frame) in source_frames.into_iter().enumerate() {
             if self.progress.is_cancelled() {
                 return Err(EncoderError::Internal("job cancelled by user".into()));
             }
 
-            let frame = encodercraft_core::VideoFrame::new_allocated(dims, PixelFormat::Rgb8, ColorSpaceTag::SRGB, f as i64, 1, fps)?;
+            frame.pts = f as i64;
             let mut scaled_frame = scaler.scale(&frame, dims)?;
 
             if let Some(ref l) = lut {
@@ -491,7 +679,7 @@ impl TranscodePipeline {
             let packets = encoder.encode_frame(&scaled_frame)?;
             for pkt in packets {
                 let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: 1000, is_keyframe: pkt.is_keyframe };
-                mp4_muxer.write_video_sample(track_idx, sample)?;
+                mp4_muxer.write_video_sample(v_track_idx, sample)?;
             }
 
             self.progress.advance_frame(start_time);
@@ -500,7 +688,15 @@ impl TranscodePipeline {
         let flushed = encoder.flush()?;
         for pkt in flushed {
             let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: 1000, is_keyframe: pkt.is_keyframe };
-            mp4_muxer.write_video_sample(track_idx, sample)?;
+            mp4_muxer.write_video_sample(v_track_idx, sample)?;
+        }
+
+        // Write encoded AAC audio packets
+        let mut aac_packets = aac_enc.encode_buffer(&audio_buf)?;
+        aac_packets.extend(aac_enc.flush()?);
+        for (a_idx, pkt) in aac_packets.iter().enumerate() {
+            let a_sample = AudioSample { data: pkt, pts: (a_idx as i64) * 1024, duration_ticks: 1024 };
+            mp4_muxer.write_audio_sample(a_track_idx, a_sample)?;
         }
 
         mp4_muxer.finish(false)?;
@@ -515,6 +711,194 @@ impl TranscodePipeline {
             encodercraft_muxers::append_xmp_uuid_box(&mut file, &xmp_packet)?;
         }
 
+        Ok(())
+    }
+
+    fn execute_video_mxf(&self, target: &OutputTarget, is_op_atom: bool, start_time: Instant) -> Result<(), EncoderError> {
+        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MXF output file: {e}")))?;
+        let writer = BufWriter::new(out_file);
+
+        let w = target.custom_width.unwrap_or(1920);
+        let h = target.custom_height.unwrap_or(1080);
+        let dims = Dimensions::new(w, h)?;
+        let fps = target.custom_frame_rate.unwrap_or(Rational64::FPS_24);
+
+        let lower_preset = target.preset_name.to_ascii_lowercase();
+        let codec_kind = if lower_preset.contains("prores") {
+            VideoCodecKind::ProRes
+        } else if lower_preset.contains("h264") || lower_preset.contains("avc") {
+            VideoCodecKind::H264
+        } else {
+            VideoCodecKind::DnxHd
+        };
+
+        let bit_depth = if lower_preset.contains("hqx") || lower_preset.contains("10-bit") || codec_kind == VideoCodecKind::ProRes { 10 } else { 8 };
+
+        let v_cfg = VideoStreamConfig {
+            codec_fourcc: codec_kind.default_fourcc(),
+            dimensions: dims,
+            frame_rate: fps,
+            pixel_format: if bit_depth >= 10 { PixelFormat::Yuv422p10 } else { PixelFormat::Yuv422p },
+            color_space: ColorSpaceTag::REC709,
+            bit_depth,
+            codec_private: Vec::new(),
+        };
+
+        let mut audio_buf = self.load_source_audio()?;
+        audio_buf = remix_channels(&audio_buf, encodercraft_core::ChannelLayout::Stereo)?;
+        if let Some(target_lufs) = target.target_lufs {
+            let _ = normalize_loudness(&mut audio_buf, target_lufs as f64, -1.0)?;
+        }
+
+        let a_cfg = AudioStreamConfig {
+            codec_fourcc: *b"sowt",
+            sample_rate: audio_buf.sample_rate,
+            layout: encodercraft_core::ChannelLayout::Stereo,
+            bits_per_sample: 24,
+            codec_private: Vec::new(),
+        };
+
+        let pkg_name = target.output_path.file_stem().and_then(|s| s.to_str()).unwrap_or("encoderCraft_MXF");
+        let audio_cfgs: &[AudioStreamConfig] = if is_op_atom { &[] } else { std::slice::from_ref(&a_cfg) };
+        let mut mxf_muxer = MxfMuxer::new(writer, is_op_atom, pkg_name, Some(&v_cfg), audio_cfgs)?;
+
+        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
+        let source_frames = self.load_source_video_frames(dims, fps)?;
+        self.progress.set_total_frames(source_frames.len() as u64);
+
+        let scaler = FrameScaler::new(ScaleMode::Fit);
+        for (f, mut frame) in source_frames.into_iter().enumerate() {
+            if self.progress.is_cancelled() {
+                return Err(EncoderError::Internal("job cancelled by user".into()));
+            }
+            frame.pts = f as i64;
+            let scaled_frame = scaler.scale(&frame, dims)?;
+            let packets = encoder.encode_frame(&scaled_frame)?;
+            for pkt in packets {
+                mxf_muxer.write_video_sample(VideoSample {
+                    data: &pkt.data,
+                    pts: pkt.pts,
+                    dts: pkt.dts,
+                    duration_ticks: 1,
+                    is_keyframe: pkt.is_keyframe,
+                })?;
+            }
+            self.progress.advance_frame(start_time);
+        }
+
+        let flushed = encoder.flush()?;
+        for pkt in flushed {
+            mxf_muxer.write_video_sample(VideoSample {
+                data: &pkt.data,
+                pts: pkt.pts,
+                dts: pkt.dts,
+                duration_ticks: 1,
+                is_keyframe: pkt.is_keyframe,
+            })?;
+        }
+
+        if !is_op_atom {
+            mxf_muxer.write_audio_buffer(0, &audio_buf, 24)?;
+        }
+
+        let mut finished = mxf_muxer.finish()?;
+        std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush MXF file: {e}")))?;
+        Ok(())
+    }
+
+    fn execute_video_mkv(&self, target: &OutputTarget, is_webm: bool, start_time: Instant) -> Result<(), EncoderError> {
+        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
+        let writer = BufWriter::new(out_file);
+
+        let w = target.custom_width.unwrap_or(1920);
+        let h = target.custom_height.unwrap_or(1080);
+        let dims = Dimensions::new(w, h)?;
+        let fps = target.custom_frame_rate.unwrap_or(Rational64::FPS_24);
+
+        let lower_preset = target.preset_name.to_ascii_lowercase();
+        let codec_kind = if is_webm {
+            if lower_preset.contains("av1") { VideoCodecKind::Av1 } else { VideoCodecKind::Vp9 }
+        } else if lower_preset.contains("av1") {
+            VideoCodecKind::Av1
+        } else if lower_preset.contains("vp9") {
+            VideoCodecKind::Vp9
+        } else if lower_preset.contains("hevc") || lower_preset.contains("h265") {
+            VideoCodecKind::Hevc
+        } else {
+            VideoCodecKind::H264
+        };
+
+        let v_cfg = VideoStreamConfig {
+            codec_fourcc: codec_kind.default_fourcc(),
+            dimensions: dims,
+            frame_rate: fps,
+            pixel_format: PixelFormat::Yuv420p,
+            color_space: ColorSpaceTag::REC709,
+            bit_depth: 8,
+            codec_private: Vec::new(),
+        };
+
+        let mut builder = MkvMuxerBuilder::new(writer, is_webm);
+        let v_track = builder.add_video_stream(&v_cfg);
+        let mut mkv_muxer = builder.build()?;
+
+        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
+        let source_frames = self.load_source_video_frames(dims, fps)?;
+        self.progress.set_total_frames(source_frames.len() as u64);
+
+        let scaler = FrameScaler::new(ScaleMode::Fit);
+        let frame_dur_ms = (1000.0 / fps.as_f64().max(1.0)).round() as u32;
+
+        for (f, mut frame) in source_frames.into_iter().enumerate() {
+            if self.progress.is_cancelled() {
+                return Err(EncoderError::Internal("job cancelled by user".into()));
+            }
+            frame.pts = (f as i64) * i64::from(frame_dur_ms);
+            let scaled_frame = scaler.scale(&frame, dims)?;
+            let packets = encoder.encode_frame(&scaled_frame)?;
+            for pkt in packets {
+                mkv_muxer.write_video_sample(
+                    v_track,
+                    VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_dur_ms, is_keyframe: pkt.is_keyframe },
+                )?;
+            }
+            self.progress.advance_frame(start_time);
+        }
+
+        let flushed = encoder.flush()?;
+        for pkt in flushed {
+            mkv_muxer.write_video_sample(
+                v_track,
+                VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_dur_ms, is_keyframe: pkt.is_keyframe },
+            )?;
+        }
+
+        let mut finished = mkv_muxer.finish()?;
+        std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush MKV file: {e}")))?;
+        Ok(())
+    }
+
+    fn execute_animated_gif(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let w = target.custom_width.unwrap_or(480);
+        let h = target.custom_height.unwrap_or(270);
+        let dims = Dimensions::new(w, h)?;
+        let fps = target.custom_frame_rate.unwrap_or(Rational64::new(12, 1)?);
+
+        let source_frames = self.load_source_video_frames(dims, fps)?;
+        self.progress.set_total_frames(source_frames.len() as u64);
+
+        let scaler = FrameScaler::new(ScaleMode::Fit);
+        let fps_u32 = (fps.as_f64().round() as u32).max(1);
+        let mut gif_enc = encodercraft_video_codecs::GifEncoder::new(dims.width as u16, dims.height as u16, fps_u32)?;
+
+        for frame in source_frames {
+            let scaled = scaler.scale(&frame, dims)?;
+            gif_enc.add_frame(&scaled)?;
+            self.progress.advance_frame(start_time);
+        }
+
+        let gif_bytes = gif_enc.finish();
+        std::fs::write(&target.output_path, gif_bytes).map_err(|e| EncoderError::Io(format!("failed to write GIF file: {e}")))?;
         Ok(())
     }
 
@@ -1158,5 +1542,92 @@ mod tests {
         assert!(tiff_out.exists());
         let tiff_bytes = std::fs::read(&tiff_out).unwrap();
         assert!(tiff_bytes.starts_with(b"II*\x00") || tiff_bytes.starts_with(b"MM\x00*"));
+    }
+
+    #[test]
+    fn test_real_prores_mov_to_dnxhr_mxf_to_h264_mp4_roundtrip() {
+        let dir = tempdir().unwrap();
+        let prores_mov = dir.path().join("master_prores.mov");
+        let dnx_mxf = dir.path().join("broadcast_dnxhr.mxf");
+        let delivery_mp4 = dir.path().join("delivery_h264.mp4");
+
+        // 1. Generate a 4-frame ProRes 422 QuickTime MOV with multiplexed AAC audio
+        let spec_prores = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-prores-gen".into(),
+            client_info: ClientInfo { app_name: "FilmCraft".into(), app_version: "1.0".into(), pid: 100, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: dir.path().join("synthetic.raw"), start_tick: Some(0), duration_ticks: Some(4), timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_mov".into(),
+                output_path: prores_mov.clone(),
+                preset_name: "Apple ProRes 422".into(),
+                container: ContainerType::QuickTimeMov,
+                custom_width: Some(320),
+                custom_height: Some(180),
+                custom_frame_rate: Some(Rational64::FPS_24),
+                ..Default::default()
+            }],
+        };
+        TranscodePipeline::new(spec_prores).execute().unwrap();
+        assert!(prores_mov.exists());
+
+        let mov_info = encodercraft_demux::probe_file(&prores_mov).unwrap();
+        assert_eq!(mov_info.video_streams.len(), 1);
+        assert_eq!(mov_info.audio_streams.len(), 1);
+
+        // 2. Transcode the real ProRes MOV (decoding real ProRes frames!) into Broadcast MXF OP1a (DNxHR + 24-bit PCM)
+        let spec_mxf = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-mov-to-mxf".into(),
+            client_info: ClientInfo { app_name: "FilmCraft".into(), app_version: "1.0".into(), pid: 100, user_notes: None },
+            priority: JobPriority::High,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: prores_mov, start_tick: Some(0), duration_ticks: Some(3), timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_mxf".into(),
+                output_path: dnx_mxf.clone(),
+                preset_name: "Avid DNxHR HQ 1080p".into(),
+                container: ContainerType::MxfOp1a,
+                custom_width: Some(320),
+                custom_height: Some(180),
+                custom_frame_rate: Some(Rational64::FPS_24),
+                ..Default::default()
+            }],
+        };
+        TranscodePipeline::new(spec_mxf).execute().unwrap();
+        assert!(dnx_mxf.exists());
+
+        let mxf_info = encodercraft_demux::probe_file(&dnx_mxf).unwrap();
+        assert_eq!(mxf_info.video_streams.len(), 1);
+        assert_eq!(mxf_info.audio_streams.len(), 1);
+        assert_eq!(mxf_info.video_streams[0].codec_name, "VC-3");
+
+        // 3. Transcode the real DNxHR MXF (decoding VC-3 frames + PCM audio!) into H.264 MP4 + AAC
+        let spec_mp4 = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-mxf-to-mp4".into(),
+            client_info: ClientInfo { app_name: "encoderCraft".into(), app_version: "1.0".into(), pid: 100, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: dnx_mxf, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_mp4".into(),
+                output_path: delivery_mp4.clone(),
+                preset_name: "YouTube 1080p Full HD".into(),
+                container: ContainerType::IsoBmffMp4,
+                custom_width: Some(320),
+                custom_height: Some(180),
+                custom_frame_rate: Some(Rational64::FPS_24),
+                ..Default::default()
+            }],
+        };
+        TranscodePipeline::new(spec_mp4).execute().unwrap();
+        assert!(delivery_mp4.exists());
+
+        let mp4_info = encodercraft_demux::probe_file(&delivery_mp4).unwrap();
+        assert_eq!(mp4_info.video_streams.len(), 1);
+        assert_eq!(mp4_info.audio_streams.len(), 1);
     }
 }

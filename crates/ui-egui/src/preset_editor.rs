@@ -180,11 +180,37 @@ pub fn render_preset_editor(ctx: &Context, state: &mut PresetEditorState, regist
                         ui.label("Format Container:");
                         egui::ComboBox::from_id_salt("editor_container_box").selected_text(format!("{:?}", state.container)).show_ui(ui, |ui| {
                             ui.selectable_value(&mut state.container, ContainerType::IsoBmffMp4, "MP4 (H.264/HEVC/AV1)");
-                            ui.selectable_value(&mut state.container, ContainerType::QuickTimeMov, "QuickTime MOV (ProRes)");
+                            ui.selectable_value(&mut state.container, ContainerType::QuickTimeMov, "QuickTime MOV (ProRes/DNxHR)");
                             ui.selectable_value(&mut state.container, ContainerType::MatroskaMkv, "Matroska MKV");
+                            ui.selectable_value(&mut state.container, ContainerType::WebM, "WebM (VP9/AV1/Opus)");
+                            ui.selectable_value(&mut state.container, ContainerType::MxfOp1a, "MXF OP1a (SMPTE Broadcast)");
+                            ui.selectable_value(&mut state.container, ContainerType::MxfOpAtom, "MXF OP-Atom (Avid NLE)");
+                            ui.separator();
                             ui.selectable_value(&mut state.container, ContainerType::Wave, "Broadcast Wave (WAV)");
-                            ui.selectable_value(&mut state.container, ContainerType::Flac, "FLAC Audio");
+                            ui.selectable_value(&mut state.container, ContainerType::Flac, "FLAC Lossless Audio");
                             ui.selectable_value(&mut state.container, ContainerType::Aiff, "AIFF Audio");
+                            ui.selectable_value(&mut state.container, ContainerType::OggAudio, "Ogg Opus Audio");
+                            ui.selectable_value(&mut state.container, ContainerType::Mp3, "MP3 Audio");
+                            ui.separator();
+                            ui.selectable_value(&mut state.container, ContainerType::Png, "PNG Image");
+                            ui.selectable_value(&mut state.container, ContainerType::Jpeg, "JPEG Image");
+                            ui.selectable_value(&mut state.container, ContainerType::WebP, "WebP Image");
+                            ui.selectable_value(&mut state.container, ContainerType::Tiff, "TIFF 16-bit Image");
+                            ui.selectable_value(&mut state.container, ContainerType::OpenExr, "OpenEXR HDR Image");
+                            ui.selectable_value(&mut state.container, ContainerType::Bmp, "BMP Image");
+                            ui.selectable_value(&mut state.container, ContainerType::StillSequence, "Still Image Sequence");
+                            ui.selectable_value(&mut state.container, ContainerType::AnimatedGif, "Animated GIF");
+                            ui.separator();
+                            ui.selectable_value(&mut state.container, ContainerType::Svg, "SVG Vector");
+                            ui.selectable_value(&mut state.container, ContainerType::Pdf, "PDF Document");
+                            ui.selectable_value(&mut state.container, ContainerType::Docx, "DOCX Document");
+                            ui.selectable_value(&mut state.container, ContainerType::Idml, "IDML Package");
+                            ui.separator();
+                            ui.selectable_value(&mut state.container, ContainerType::Gltf, "glTF 2.0 / GLB 3D");
+                            ui.selectable_value(&mut state.container, ContainerType::Usdz, "USDZ 3D Scene");
+                            ui.selectable_value(&mut state.container, ContainerType::Obj, "Wavefront OBJ 3D");
+                            ui.selectable_value(&mut state.container, ContainerType::Stl, "Binary STL 3D");
+                            ui.selectable_value(&mut state.container, ContainerType::Ply, "Stanford PLY 3D");
                         });
                     });
                 });
@@ -201,10 +227,12 @@ pub fn render_preset_editor(ctx: &Context, state: &mut PresetEditorState, regist
                             ui.label("Video Codec:");
                             egui::ComboBox::from_id_salt("editor_vcodec_box").selected_text(&state.video_codec).show_ui(ui, |ui| {
                                 ui.selectable_value(&mut state.video_codec, "H.264".into(), "H.264 (AVC)");
-                                ui.selectable_value(&mut state.video_codec, "ProRes".into(), "Apple ProRes 422");
                                 ui.selectable_value(&mut state.video_codec, "HEVC".into(), "HEVC (H.265)");
+                                ui.selectable_value(&mut state.video_codec, "ProRes".into(), "Apple ProRes 422 / 4444");
+                                ui.selectable_value(&mut state.video_codec, "DNxHR".into(), "Avid DNxHR (SMPTE VC-3)");
                                 ui.selectable_value(&mut state.video_codec, "AV1".into(), "AOMedia AV1");
                                 ui.selectable_value(&mut state.video_codec, "VP9".into(), "Google VP9");
+                                ui.selectable_value(&mut state.video_codec, "MJPEG".into(), "Motion JPEG");
                             });
                         });
 
@@ -253,6 +281,7 @@ pub fn render_preset_editor(ctx: &Context, state: &mut PresetEditorState, regist
                             ui.label("Audio Codec:");
                             egui::ComboBox::from_id_salt("editor_acodec_box").selected_text(&state.audio_codec).show_ui(ui, |ui| {
                                 ui.selectable_value(&mut state.audio_codec, "AAC-LC".into(), "AAC-LC (FilmCraft)");
+                                ui.selectable_value(&mut state.audio_codec, "Opus".into(), "Opus Interactive Audio (IETF RFC 6716)");
                                 ui.selectable_value(&mut state.audio_codec, "PCM".into(), "Uncompressed PCM 24-bit");
                                 ui.selectable_value(&mut state.audio_codec, "FLAC".into(), "FLAC Lossless");
                             });

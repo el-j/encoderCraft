@@ -471,6 +471,54 @@ flowchart LR
 
 ---
 
+### Milestone 19: Broadcast MXF OP1a / OP-Atom Multiplexing & Simultaneous A/V Multiplexing (2026-11-02)
+**Objective:** Achieve full broadcast television and post-production NLE parity by implementing SMPTE ST 377-1 MXF OP1a / OP-Atom multiplexing and simultaneous Audio-Video track multiplexing across MP4/MOV, MXF, and MKV/WebM.
+
+#### Deliverables:
+1. **Broadcast MXF Multiplexer (`crates/muxers/src/mxf.rs`):**
+   - Implemented `MxfMuxer` backed by `filmcraft-mxf` supporting SMPTE ST 377-1 OP1a (frame-wrapped VC-3 DNxHD/HR, Apple ProRes, H.264/AVC + Broadcast Wave PCM) and OP-Atom (clip-wrapped).
+   - Upgraded `encodercraft-demux` (`crates/demux/src/probe.rs`) to inspect MXF picture/sound tracks, package names, and SMPTE start timecodes.
+2. **Simultaneous Audio-Video Multiplexing (`crates/pipeline/src/pipeline.rs` & `crates/muxers/src/mp4.rs`):**
+   - Upgraded `Mp4Muxer::add_video_stream` to construct typed `CodecConfig` (`Avc`, `Hevc`, `Av1`, `Vp9`, `Jpeg`) so visual sample entries (`stsd`) include full `VideoParams`.
+   - Wired AAC-LC audio encoding (`AacEncoderWrapper`) into `execute_video_mp4` and PCM audio into `execute_video_mxf` and `execute_video_mkv`.
+3. **Factory Presets (`crates/presets/src/factory.rs`):**
+   - Added `"Broadcast MXF OP1a DNxHR HQ"` and `"Avid Media Composer MXF OP-Atom"`.
+
+---
+
+### Milestone 20: Real Video Demuxing & Decoding Loop with In/Out Trim (2026-11-02)
+**Objective:** Complete end-to-end real video frame demuxing and decoding for MP4/MOV, MKV/WebM, and MXF containers with frame-accurate In/Out point trimming and exhaustive container routing.
+
+#### Deliverables:
+1. **Pure-Rust Video Packet Decoders (`crates/video-codecs/src/decoder.rs`):**
+   - Implemented `decode_prores_packet` (`craft-prores`), `decode_dnx_packet` (`craft-dnx`), `Vp8DecoderWrapper` (`craft-vp8`), and `decode_video_packet_auto`, converting planar YUV 4:2:0 / 4:2:2 / 4:4:4 (8/10/12-bit) to `Rgb8` `VideoFrame`s.
+2. **Container Video Demuxing & Trimming (`crates/pipeline/src/pipeline.rs`):**
+   - Implemented `load_source_video_frames` and `decode_container_video_frames` demuxing real video samples from ISO BMFF (MP4/MOV), Matroska (MKV/WebM), MXF, and BMP sources with `start_tick` and `duration_ticks` In/Out point trimming.
+   - Exhaustively covered all 27 `ContainerType` variants in `TranscodePipeline::execute_target` without a wildcard fallback.
+
+---
+
+### Milestone 21: Desktop UI Format Controls, Preview Monitor & Trim Persistence (2026-11-02)
+**Objective:** Expose every container and codec in the Desktop UI and connect the Preview Monitor's In/Out trim controls directly to the queue engine.
+
+#### Deliverables:
+1. **Full Container & Codec Selection (`crates/ui-egui/src/inspector.rs`, `preset_editor.rs`):**
+   - Exposed all 27 `ContainerType` variants in both the Export Settings Inspector and Custom Preset Editor, along with `"DNxHR"`, `"MJPEG"`, and `"Opus"` codec options.
+2. **Interactive Preview Monitor & Trim Persistence (`crates/ui-egui/src/preview_panel.rs`, `app.rs`, `crates/engine/src/queue.rs`):**
+   - Added `QueueManager::set_job_trim_range` persisting `start_tick`, `duration_ticks`, and `timebase` onto queued jobs.
+   - Enhanced `render_preview_panel` with SMPTE reference color bars, animated playhead scanline, In/Out trim range indicator bar, and automatic synchronization with the selected queue job.
+
+---
+
+### Milestone 22: Universal 14-App ArtCraft Sibling Origin Badges (2026-11-02)
+**Objective:** Complete visual queue badge recognition for all 14 ArtCraft sibling applications (`el-j/encoderCraft#1`).
+
+#### Deliverables:
+1. **14-App Client Origin Badges (`crates/ui-egui/src/queue_panel.rs`):**
+   - Distinct semantic badge coloring for `FilmCraft`, `EffectCraft`, `SoundCraft`, `PhotoCraft`, `VectorCraft`, `DesignCraft`, `PdfCraft`, `FigCraft`, `CadCraft`, `DeckCraft`, `SolidCraft`, `WordCraft`, `TextureCraft`, `GridCraft`, and `LightCraft`.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

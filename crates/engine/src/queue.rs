@@ -623,6 +623,47 @@ impl QueueManager {
         Ok(modified)
     }
 
+    /// Updates the In/Out trim range (`start_tick`, `duration_ticks`, `timebase`) on a queued job's file source.
+    pub fn set_job_trim_range(&self, job_id: &str, in_frame: Option<u64>, out_frame: Option<u64>, fps: u64) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock
+            .jobs
+            .iter_mut()
+            .find(|j| j.spec.job_id == job_id)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
+
+        if let encodercraft_core::SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut job.spec.source {
+            let safe_fps = fps.max(1) as i64;
+            match (in_frame, out_frame) {
+                (None, None) => {
+                    *start_tick = None;
+                    *duration_ticks = None;
+                }
+                (Some(inf), None) => {
+                    *start_tick = Some(inf as i64);
+                    *duration_ticks = None;
+                    *timebase = Some(encodercraft_core::Rational64::new(1, safe_fps)?);
+                }
+                (None, Some(outf)) => {
+                    *start_tick = Some(0);
+                    *duration_ticks = Some((outf as i64).saturating_add(1));
+                    *timebase = Some(encodercraft_core::Rational64::new(1, safe_fps)?);
+                }
+                (Some(inf), Some(outf)) => {
+                    let lo = inf.min(outf) as i64;
+                    let hi = inf.max(outf) as i64;
+                    *start_tick = Some(lo);
+                    *duration_ticks = Some(hi.saturating_sub(lo).saturating_add(1));
+                    *timebase = Some(encodercraft_core::Rational64::new(1, safe_fps)?);
+                }
+            }
+        }
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(())
+    }
+
     /// Returns a list of all historical transcode log entries.
     pub fn list_log_entries(&self) -> Vec<LogEntry> {
         let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);

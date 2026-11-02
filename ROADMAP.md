@@ -2,7 +2,7 @@
 
 > **Stage: Complete Implementation (Alpha Release Candidate)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-01 · **Change:** Complete M0–M6 implementation suite and CI verification  
+> **Last reviewed:** 2026-11-02 · **Last updated:** 2026-11-02 · **Change:** Complete M0–M22 implementation suite, MXF OP1a/OP-Atom muxing, full video decode loop, and CI verification  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -184,3 +184,18 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Synchronized migration docs across sibling PRs: `filmcraft#3941`, `soundcraft#1275`, and `effectcraft#2814`.
   - Updated `encoderCraft` dependency graph for seamless local iteration and clean separation of concerns.
   - Verified 100% CI compliance: 135 automated tests passing with zero warnings under `cargo xtask ci`.
+- [x] **M19: Broadcast MXF OP1a / OP-Atom Multiplexing & Simultaneous A/V Multiplexing (2026-11-02)**
+  - Implemented `MxfMuxer` (`crates/muxers/src/mxf.rs`) wrapping `filmcraft-mxf` for SMPTE ST 377-1 OP1a (frame-wrapped VC-3 DNxHD/HR, ProRes, H.264/AVC + Broadcast Wave PCM) and OP-Atom (clip-wrapped).
+  - Upgraded `encodercraft-demux` (`crates/demux/src/probe.rs`) to extract picture/sound tracks, package names, and start timecodes from MXF containers.
+  - Upgraded `Mp4Muxer::add_video_stream` to construct typed ISO BMFF visual sample entries (`avc1`, `hvc1`, `av01`, `vp09`, `mjpa`) with `VideoParams`.
+  - Wired simultaneous Audio-Video multiplexing into `execute_video_mp4`, `execute_video_mxf`, and `execute_video_mkv` (with AAC-LC and Broadcast PCM audio tracks).
+  - Added factory presets: `"Broadcast MXF OP1a DNxHR HQ"` and `"Avid Media Composer MXF OP-Atom"`.
+- [x] **M20: Real Video Demuxing & Decoding Loop with In/Out Trim (2026-11-02)**
+  - Implemented pure-Rust video packet decoders in `crates/video-codecs/src/decoder.rs`: `decode_prores_packet` (`craft-prores`), `decode_dnx_packet` (`craft-dnx`), `Vp8DecoderWrapper` (`craft-vp8`), and `decode_video_packet_auto`.
+  - Implemented `load_source_video_frames` and `decode_container_video_frames` in `TranscodePipeline`, demuxing and decoding real video frames from MP4/MOV, MKV/WebM, MXF, and BMP sources with `start_tick` / `duration_ticks` In/Out point trimming.
+  - Exhaustively covered all 27 `ContainerType` variants in `TranscodePipeline::execute_target` (including `MxfOp1a`, `MxfOpAtom`, `MatroskaMkv`, `WebM`, `AnimatedGif`, `OggAudio`, `Mp3`, `Jpeg`, `WebP`, `StillSequence`).
+- [x] **M21: Desktop UI Format Controls, Preview Monitor & Trim Persistence (2026-11-02)**
+  - Exposed all 27 `ContainerType` variants in both the Export Settings Inspector (`inspector.rs`) and Custom Preset Editor (`preset_editor.rs`), plus `"DNxHR"`, `"MJPEG"`, and `"Opus"` codec options.
+  - Upgraded the Preview Monitor (`preview_panel.rs` & `app.rs`) with SMPTE reference color bars, animated playhead scanline, In/Out trim range strip, and live synchronization with `QueueManager::set_job_trim_range`.
+- [x] **M22: Universal 14-App ArtCraft Sibling Origin Badges (2026-11-02)**
+  - Expanded queue row client origin badges (`queue_panel.rs`) to color-code all 14 ArtCraft sibling applications (`FilmCraft`, `EffectCraft`, `SoundCraft`, `PhotoCraft`, `VectorCraft`, `DesignCraft`, `PdfCraft`, `FigCraft`, `CadCraft`, `DeckCraft`, `SolidCraft`, `WordCraft`, `TextureCraft`, `GridCraft`, `LightCraft`).

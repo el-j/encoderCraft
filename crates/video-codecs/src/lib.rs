@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod av1;
+pub mod decoder;
 pub mod dispatcher;
 pub mod dnx;
 pub mod encoder;
@@ -19,6 +20,7 @@ pub mod vp9;
 pub mod yuv;
 
 pub use av1::Av1EncoderWrapper;
+pub use decoder::{Vp8DecoderWrapper, decode_dnx_packet, decode_prores_packet, decode_video_packet_auto};
 pub use dispatcher::{VideoCodecKind, create_video_encoder};
 pub use dnx::DnxEncoderWrapper;
 pub use encoder::{EncodedPacket, VideoEncoder};

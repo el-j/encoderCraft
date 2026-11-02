@@ -79,7 +79,13 @@ impl EncoderCraftApp {
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::I))
             && let Some(files) = rfd::FileDialog::new()
                 .set_title("Select Media Files")
-                .add_filter("Media Files", &["mov", "mp4", "mkv", "avi", "webm", "wav", "aiff", "flac", "mp3", "png", "exr", "tiff", "gltf"])
+                .add_filter(
+                    "Media Files",
+                    &[
+                        "mov", "mp4", "mkv", "avi", "webm", "mxf", "wav", "aiff", "flac", "mp3", "ogg", "opus", "png", "jpg", "jpeg", "webp", "exr",
+                        "tiff", "bmp", "gif", "svg", "pdf", "docx", "idml", "gltf", "glb", "usdz", "obj", "stl", "ply",
+                    ],
+                )
                 .pick_files()
         {
             for path in files {
@@ -106,7 +112,10 @@ impl EncoderCraftApp {
                             .set_title("Select Media Files")
                             .add_filter(
                                 "Media Files",
-                                &["mov", "mp4", "mkv", "avi", "webm", "wav", "aiff", "flac", "mp3", "png", "exr", "tiff", "gltf"],
+                                &[
+                                    "mov", "mp4", "mkv", "avi", "webm", "mxf", "wav", "aiff", "flac", "mp3", "ogg", "opus", "png", "jpg", "jpeg",
+                                    "webp", "exr", "tiff", "bmp", "gif", "svg", "pdf", "docx", "idml", "gltf", "glb", "usdz", "obj", "stl", "ply",
+                                ],
                             )
                             .pick_files()
                         {
@@ -303,7 +312,20 @@ impl EncoderCraftApp {
             .and_then(|id| self.queue_mgr.list_jobs().into_iter().find(|j| &j.spec.job_id == id).map(|j| j.spec));
 
         egui::Panel::right("right_side_dock").resizable(true).default_size(360.0).min_size(260.0).max_size(480.0).show(ui, |ui| {
+            let prev_job_id = self.preview_state.active_job_id.clone();
+            let prev_in = self.preview_state.in_point;
+            let prev_out = self.preview_state.out_point;
+
             render_preview_panel(ui, &mut self.preview_state, selected_job_spec.as_ref(), &self.tokens);
+
+            // Persist In/Out trim changes back to the selected job in QueueManager
+            if let Some(ref spec) = selected_job_spec
+                && prev_job_id.as_deref() == Some(spec.job_id.as_str())
+                && (self.preview_state.in_point != prev_in || self.preview_state.out_point != prev_out)
+            {
+                let _ = self.queue_mgr.set_job_trim_range(&spec.job_id, self.preview_state.in_point, self.preview_state.out_point, 30);
+            }
+
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(4.0);

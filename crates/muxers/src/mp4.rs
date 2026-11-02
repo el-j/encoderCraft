@@ -6,7 +6,8 @@
 use std::io::{Read, Seek, Write};
 
 use craft_media::isobmff::{
-    AacConfig, AudioParams, Brand, CodecConfig, FourCc, Mp4Writer, SampleEntry, TrackConfig, VideoParams, WriteSample, WriterOptions,
+    AacConfig, AudioParams, Av1Config, AvcConfig, Brand, CodecConfig, FourCc, HevcConfig, Mp4Writer, SampleEntry, TrackConfig, VideoParams,
+    VpcConfig, WriteSample, WriterOptions,
 };
 use encodercraft_core::EncoderError;
 
@@ -32,8 +33,29 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
 
         let fourcc = FourCc::new(&cfg.codec_fourcc);
         let codec_config = match &cfg.codec_fourcc {
+            b"avc1" | b"avc3" => CodecConfig::Avc(AvcConfig::new(vec![vec![0x67, 0x64, 0x00, 0x1F]], vec![vec![0x68, 0xEB]], 4)),
+            b"hvc1" | b"hev1" => CodecConfig::Hevc(HevcConfig {
+                general_profile_idc: 1,
+                general_level_idc: 93,
+                chroma_format_idc: 1,
+                bit_depth_luma: cfg.bit_depth.max(8),
+                bit_depth_chroma: cfg.bit_depth.max(8),
+                length_size: 4,
+                ..Default::default()
+            }),
+            b"av01" => CodecConfig::Av1(Av1Config {
+                seq_profile: 0,
+                seq_level_idx_0: 8,
+                chroma_subsampling_x: true,
+                chroma_subsampling_y: true,
+                ..Default::default()
+            }),
+            b"vp09" => {
+                CodecConfig::Vp9(VpcConfig { profile: 0, level: 31, bit_depth: cfg.bit_depth.max(8), chroma_subsampling: 1, ..Default::default() })
+            }
             b"apch" | b"apcn" | b"apcs" | b"apco" | b"ap4h" | b"ap4x" => CodecConfig::ProRes { fourcc },
             b"AVdn" | b"AVdh" => CodecConfig::Dnx { fourcc },
+            b"jpeg" | b"mjpa" | b"mjpb" => CodecConfig::Jpeg { fourcc },
             _ => CodecConfig::Unknown { fourcc, raw: cfg.codec_private.clone() },
         };
 
