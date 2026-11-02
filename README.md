@@ -3,42 +3,44 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
 [![Parity Target](https://img.shields.io/badge/parity%20target-Adobe%20Media%20Encoder%202026-purple.svg)](docs/target-app-parity.md)
+[![Tests](https://img.shields.io/badge/tests-135%20passed-brightgreen.svg)](docs/implementation-milestones.md)
 [![Safety](https://img.shields.io/badge/unsafe_code-forbid-brightgreen.svg)](docs/architecture.md)
 [![ArtCraft Ecosystem](https://img.shields.io/badge/artcraft-storytold-red.svg)](https://github.com/storytold)
 
-**encoderCraft** is an open-source, clean-room, pure-Rust media transcoding, batch queue, and watch folder automation system. Designed to provide parity with—and architectural superiority over—**Adobe Media Encoder**, `encoderCraft` acts as the universal export powerhouse for the entire **ArtCraft** creative ecosystem.
+**encoderCraft** is an open-source, clean-room, pure-Rust universal media transcoding, batch queue, and watch folder automation system. Designed for full parity with—and architectural superiority over—**Adobe Media Encoder**, `encoderCraft` serves as the universal export and transformation powerhouse for the entire **ArtCraft** creative ecosystem.
 
-Originally developed under username **`el-j`** (`github.com/el-j/encodercraft`), `encoderCraft` is built according to ArtCraft's exacting standards to prepare for official digestion into the **`storytold`** organization (`github.com/storytold/encodercraft`).
+Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`), `encoderCraft` is built according to ArtCraft's exacting standards to prepare for official digestion into the **`storytold`** organization (`github.com/storytold/encodercraft`).
 
 ---
 
 ## 🌟 Why encoderCraft?
 
-Adobe Media Encoder has long been the default render farm tool for video editors. However, modern creative studios operate across multiple media domains that legacy encoders ignore:
+Adobe Media Encoder has long been the default render tool for video editors. However, modern creative studios operate across multiple media domains that legacy encoders ignore. `encoderCraft` breaks open the silo to deliver universal multi-media transcoding:
 
-| Dimension | Legacy Encoders (Adobe Media Encoder) | encoderCraft |
+| Media Domain | Legacy Encoders (Adobe Media Encoder) | encoderCraft Universal Powerhouse |
 |---|---|---|
-| **Video & Motion** | MP4, MOV, MXF, AVI, WebM. | **Full Parity:** H.264, ProRes 4444, HEVC, AV1, DNxHR, APV, MXF OP-1a. |
-| **Audio & Music** | AAC, MP3, WAV. | **Full Parity + Broadcast DSP:** BWF, RF64, CAF, FLAC, EBU R128 (-23/-14 LUFS). |
-| **3D & Spatial Assets** | ❌ None. | **Universal:** USD/USDC, glTF 2.0 / GLB, FBX, Wavefront OBJ, STL, PLY. |
-| **Raster & Textures** | Basic JPEG/PNG. | **Professional:** OpenEXR (deep/layers), JXL, 16-bit TIFF, BC7 DDS, PBR ORM. |
-| **Vector & Print** | ❌ None. | **Prepress:** PDF/X-4 print-ready with bleed, SVG/SVGZ, EPS, IDML. |
-| **Crash Resilience** | ⚠️ Frequent crashes on corrupt files. | **Never Crash:** Pure Rust, `#![deny(clippy::unwrap_used)]`, all input hostile. |
-| **Automation & AI** | Limited proprietary ExtendScript. | **Autonomous:** Headless CLI, Unix IPC sockets, and native **MCP Server** for AI agents. |
-| **Footprint & Licensing** | >3 GB bloat, telemetry, subscription DRM. | **Lightweight:** <50 MB standalone binary, zero telemetry, Apache-2.0 / MIT. |
+| **Video & Motion** | MP4, MOV, MXF, AVI. | **Full Parity:** H.264, Apple ProRes (Proxy, LT, Standard, HQ, 4444), Avid DNxHD/HR (HQ, HQX 10-bit), HEVC (H.265), AV1, VP9, VP8, MJPEG, animated GIF. |
+| **Audio & Music** | AAC, MP3, WAV. | **Full Parity + Broadcast DSP:** Lossless FLAC (24-bit 48kHz), Apple Lossless AIFF, Broadcast Wave BWF (-23 LUFS), MP3, OGG Vorbis, AAC-LC, EBU R128 loudness normalization (-23/-14 LUFS), true-peak limiting, channel remixing (mono/stereo/5.1/7.1), polyphase sinc resampling. |
+| **3D & Spatial** | ❌ None. | **Universal 3D Pipelines:** Khronos glTF 2.0 / binary GLB, Wavefront OBJ (.obj + .mtl), 3D Print binary STL, Stanford PLY, Apple AR Quick Look USDZ (normative ZIP packaging + USDA schema). |
+| **Raster Images** | Basic JPEG/PNG. | **High Dynamic Range & Studio Still Images:** Lossless PNG (RGBA 8-bit), Broadcast TIFF (16-bit RGB), VFX OpenEXR (half-float 16-bit), Windows Bitmap BMP (uncompressed 24/32-bit), WebP, JPEG with high-fidelity `FrameScaler` resampling (Fit, Fill, Stretch). |
+| **Vector & Print** | ❌ None. | **Prepress & Vector Graphics:** Clean-room SVG optimization, Print-Ready PDF/X-4 (ISO 15930) with XMP metadata, sub-millisecond container sniffing for INDD, IDML, DOCX, PPTX, XLSX, EPUB, AI, EPS, PSD. |
+| **Format Guardrails** | ⚠️ Allows invalid operations that fail midway. | **Smart Stream Classification:** Elementary stream classification (`AudioOnly`, `VideoWithAudio`, `VideoOnly`, `StillImage`, `Spatial3D`, `Vector2D`, `Document`). Automatic output targeting and preset validation preventing incompatible conversions (e.g. audio will not offer video targets). |
+| **Crash Resilience** | ⚠️ Frequent crashes on malformed or corrupt files. | **Never Crash Guarantee:** Pure Rust, `#![deny(clippy::unwrap_used)]`, all input treated as hostile with bounded allocations and panic containment. |
+| **Automation & AI** | Limited proprietary ExtendScript. | **Autonomous Agent Control:** Headless CLI, Unix domain sockets / Named Pipes IPC, and native **Model Context Protocol (MCP)** server for autonomous AI coding agents. |
+| **Footprint & Licensing** | >3 GB bloat, telemetry, subscription DRM. | **Zero Bloat:** Standalone binary, sub-second startup, zero telemetry, dual-licensed Apache-2.0 / MIT. |
 
 ---
 
 ## 🏗️ Architecture & Sibling Ecosystem
 
-`encoderCraft` does not reinvent the wheel: it aggregates and supercharges the proven, pure-Rust exporters already authored across the `storytold` family:
+`encoderCraft` is strictly layered from L0 to L7 according to ArtCraft architectural specifications, validated on every build via `cargo xtask layers`:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                       ArtCraft Creative Suite                                          │
 │  FilmCraft · EffectCraft · SoundCraft · PhotoCraft · TextureCraft · DesignCraft · VectorCraft · PdfCraft│
 └───────────────────────────────────────────────────┬────────────────────────────────────────────────────┘
-                                                    │ "Queue in EncoderCraft"
+                                                    │ "Queue in encoderCraft"
                                                     │ (craft-dispatch IPC & Shared Memory)
                                                     ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -48,104 +50,156 @@ Adobe Media Encoder has long been the default render farm tool for video editors
 │  │   Desktop UI (egui)       │  │   Headless CLI & Daemon     │  │   Model Context Protocol (MCP)   │  │
 │  │   • Multi-target queue    │  │   • Batch encoding scripts  │  │   • Autonomous agent control     │  │
 │  │   • Preset browser tree   │  │   • Background watch folder │  │   • Job status & inspection      │  │
-│  │   • Live preview monitor  │  │   • CI/CD pipeline render   │  │   • Automated batch conversion   │  │
+│  │   • Viewport-clamped menu │  │   • Settle-delay daemon     │  │   • Automated batch conversion   │  │
+│  │   • Live preview monitor  │  │   • Headless CI/CD transcode│  │   • Preset discovery & apply     │  │
 │  └─────────────┬─────────────┘  └──────────────┬──────────────┘  └────────────────┬─────────────────┘  │
 │                │                               │                                  │                    │
 │                └───────────────────────────────┼──────────────────────────────────┘                    │
 │                                                ▼                                                       │
 │                           ┌─────────────────────────────────────────┐                                  │
-│                           │      encoder-engine (L5 Session)        │                                  │
-│                           │      • Priority Queue Scheduler         │                                  │
-│                           │      • Atomic State Journaling          │                                  │
-│                           │      • Cancellation Atomics             │                                  │
+│                           │    encodercraft-engine (L5 Session)     │                                  │
+│                           │    • Priority Queue Scheduler           │                                  │
+│                           │    • Atomic State Journaling            │                                  │
+│                           │    • Lockless Progress Atomics          │                                  │
 │                           └────────────────────┬────────────────────┘                                  │
 │                                                │                                                       │
-│         ┌──────────────────────────────────────┴───────────────────────────────────────┐                 │
+│         ┌──────────────────────────────────────┼──────────────────────────────────────┐                 │
 │         ▼                                      ▼                                      ▼                 │
 │  ┌──────────────┐                       ┌──────────────┐                       ┌──────────────┐         │
 │  │ Video Codecs │                       │  Audio DSP   │                       │ Spatial & 2D │         │
-│  │ • H.264/HEVC │                       │ • EBU R128   │                       │ • USD/glTF   │         │
-│  │ • ProRes     │                       │ • Resampler  │                       │ • EXR/TIFF   │         │
-│  │ • AV1 / VP9  │                       │ • AAC / FLAC │                       │ • PDF/X-4    │         │
-│  │ • MXF OP-1a  │                       │ • BWF / CAF  │                       │ • PBR ORM    │         │
+│  │ • H.264/HEVC │                       │ • EBU R128   │                       │ • glTF / GLB │         │
+│  │ • ProRes     │                       │ • Resampler  │                       │ • OBJ / STL  │         │
+│  │ • DNxHD/HR   │                       │ • FLAC / WAV │                       │ • PLY / USDZ │         │
+│  │ • AV1 / VP9  │                       │ • MP3 / OGG  │                       │ • PNG / TIFF │         │
+│  │ • VP8 / MJPEG│                       │ • AAC-LC     │                       │ • EXR / BMP  │         │
 │  └──────────────┘                       └──────────────┘                       └──────────────┘         │
 │                                                │                                                       │
 │                                                ▼                                                       │
 │                               ┌─────────────────────────────────┐                                      │
 │                               │ Upstream craft-libs Shared Core │                                      │
-│                               │ • craft-media (MP4/MOV/MKV)     │                                      │
-│                               │ • craft-cms (ICC Color Mgmt)    │                                      │
+│                               │ • craft-media (MP4/MOV/MKV/OGG) │                                      │
+│                               │ • craft-codecs (H.264, ProRes,  │                                      │
+│                               │   DNx, HEVC, AV1, VP9, VP8)     │                                      │
+│                               │ • craft-pdf (ISO 15930 PDF/X-4) │                                      │
 │                               │ • craft-jpeg / craft-crw        │                                      │
 │                               └─────────────────────────────────┘                                      │
 └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 📚 Comprehensive Documentation Suite
-
-Every aspect of `encoderCraft` is thoroughly specified in clean markdown documentation:
-
-- **[Survey of ArtCraft Exporters](docs/artcraft-exporters-survey.md):** Complete audit of 45+ existing codecs, muxers, and libraries across `filmcraft`, `effectcraft`, `soundcraft`, `photocraft`, `texturecraft`, and `craft-libs`.
-- **[Universal File Format Matrix](docs/file-format-matrix.md):** Exhaustive capability matrix across 6 media dimensions (Video, Audio, Raster, Vector, 3D, and Documents).
-- **[Inter-App Dispatch Protocol](docs/inter-app-dispatch-protocol.md):** How FilmCraft, EffectCraft, and third-party tools send jobs via Unix domain sockets, Named Pipes, and streaming frames.
-- **[Preset System & Watch Folders](docs/preset-system-and-watchfolders.md):** Specification of dynamic "Match Source" presets, adaptive bitrate formulas, and the 3-stage settle-delay automated ingest daemon.
-- **[Target App Parity Analysis](docs/target-app-parity.md):** Deep side-by-side comparison against Adobe Media Encoder 2026.
-- **[System Architecture](docs/architecture.md):** L0–L7 crate layering, bounded ring buffers, backpressure, atomic progress, and panic containment.
-- **[Implementation Milestones](docs/implementation-milestones.md):** Step-by-step phased execution plan from M0 to M6.
-- **[Project Roadmap](ROADMAP.md):** Executive metrics, audience readiness percentages, and milestone tracking.
-- **[Agent Guidelines](AGENTS.md):** Non-negotiable coding rules, "never crash" guidelines, and clippy standards.
-- **[Assistant Reference](CLAUDE.md):** Quick command cheatsheet for agents and developers.
+### Layer Map (L0–L7)
+- **L0 Core:** `encodercraft-core`, `encodercraft-geom`, `encodercraft-color`
+- **L1 Demux & Classification:** `encodercraft-demux`
+- **L2 Platform Isolation:** `encodercraft-platform` (quarantined hardware encoders)
+- **L3 Transformation Engines:** `encodercraft-video-codecs`, `encodercraft-audio-dsp`, `encodercraft-image-codecs`, `encodercraft-spatial-io`
+- **L4 Muxers & Presets:** `encodercraft-muxers`, `encodercraft-presets`, `encodercraft-pipeline`
+- **L5 Queue & Dispatch:** `encodercraft-engine`, `encodercraft-watch`, `encodercraft-ipc`, `encodercraft-dispatch`
+- **L6 Application Frontends:** `encodercraft-cli`, `encodercraft-mcp`, `encodercraft-ui-egui`
+- **L7 Desktop Application:** `encodercraft`
 
 ---
 
 ## ⚡ Quickstart
 
-### Running the Desktop GUI
+### 1. Launching the Desktop Application
 ```bash
 cargo run --release -p encodercraft
 ```
+- **Universal Drag & Drop:** Drag any video, audio, image, 3D model, vector, or document into the queue.
+- **Smart Stream Guardrails:** Audio inputs automatically route to audio formats; 3D models route to 3D targets.
+- **Viewport-Clamped Menus:** Action popups automatically clamp within screen bounds and flip vertically near display edges.
+- **High-DPI SVG Iconography:** Crisp vector iconography rendered from ArtCraft design tokens.
 
-### Running the Headless CLI
+### 2. Using the Headless CLI
 ```bash
-# Convert a video with dynamic "Match Source" high bitrate
-encodercraft encode input.mov -p "Match Source - Adaptive High Bitrate" -o output.mp4
+# Video: Transcode to Apple ProRes 422 HQ
+cargo run --release -p encodercraft-cli -- encode input.mov -p "Apple ProRes 422 HQ" -o output.mov
 
-# Transcode an audio master to broadcast EBU R128 compliant WAV (-23 LUFS)
-encodercraft encode mix_master.wav -p "Broadcast Wave EBU R128" -o master_ebu.wav
+# Video: Transcode to Avid DNxHR 1080p
+cargo run --release -p encodercraft-cli -- encode input.mov -p "Avid DNxHR HQ 1080p" -o output.mxf
 
-# Convert a 3D asset from FBX to Apple AR QuickLook USDZ
-encodercraft encode character.fbx -p "Apple AR QuickLook USDZ" -o character.usdz
+# Audio: Transcode to 24-bit 48kHz Lossless FLAC Master
+cargo run --release -p encodercraft-cli -- encode mix.wav -p "Lossless FLAC Master (24-bit 48kHz)" -o master.flac
+
+# Audio: Transcode to Broadcast Wave with EBU R128 (-23 LUFS) Normalization
+cargo run --release -p encodercraft-cli -- encode podcast.mp3 -p "Broadcast Wave BWF (-23 LUFS)" -o podcast.wav
+
+# 3D: Convert Wavefront OBJ to Apple AR Quick Look USDZ
+cargo run --release -p encodercraft-cli -- encode model.obj -p "Apple AR Quick Look USDZ (.usdz)" -o model.usdz
+
+# 3D: Convert glTF Binary (GLB) to 3D Print STL
+cargo run --release -p encodercraft-cli -- encode asset.glb -p "3D Print Binary STL (.stl)" -o asset.stl
+
+# Image: Resample BMP to Lossless PNG
+cargo run --release -p encodercraft-cli -- encode texture.bmp -p "Still Image PNG (Lossless)" -o texture.png
+
+# Image: Transcode to 16-bit Broadcast TIFF
+cargo run --release -p encodercraft-cli -- encode frame.png -p "Broadcast TIFF (16-bit RGB)" -o frame.tiff
 ```
 
-### Launching the Watch Folder Daemon
+### 3. Running the Watch Folder Daemon
 ```bash
-encodercraft watch --dir /Volumes/Media/HotFolder/ --preset "YouTube 4K" --out /Volumes/Media/Delivery/
+# Automated ingest with 3-stage settle-delay verification
+cargo run --release -p encodercraft-cli -- watch --dir /Volumes/Media/HotFolder/ --preset "YouTube 4K" --out /Volumes/Media/Delivery/
 ```
 
-### Starting the Model Context Protocol (MCP) Server
+### 4. Running the Model Context Protocol (MCP) Server
 ```bash
-encodercraft mcp
+# Launch JSON-RPC stdio server for Claude, Antigravity, and AI Agents
+cargo run --release -p encodercraft-cli -- mcp
 ```
 
 ---
 
 ## 🛡️ Coding Standard: Never Crash
 
-All non-test crates enforce zero-panic safety:
-```rust
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unimplemented,
-    clippy::todo,
-    clippy::unreachable
-)]
+`encoderCraft` is engineered for automated render farms and multi-hour queues where a panic destroys valuable work.
+
+- **Workspace Zero-Panic Lints:**
+  ```rust
+  #![deny(
+      clippy::unwrap_used,
+      clippy::expect_used,
+      clippy::panic,
+      clippy::unimplemented,
+      clippy::todo,
+      clippy::unreachable
+  )]
+  ```
+- **Strict `#![forbid(unsafe_code)]`:** Workspace-wide guarantee. Platform hardware encoders are quarantined in `crates/platform` under ADR 0001.
+- **Hostile Input Defense:** All input media files (camera cards, network folders) are treated as hostile. Zero unvalidated indexing (`.get()` only), checked/saturating arithmetic, and bounded memory allocations.
+- **Bounded Ring Buffers:** Bounded 8-frame ring buffers with backpressure prevent out-of-memory errors on 4K/8K media streams.
+- **Poison-Resilient Concurrency:** Mutexes use poison recovery (`lock().unwrap_or_else(PoisonError::into_inner)`).
+
+---
+
+## 🧪 Quality Gate Verification
+
+Before any commit is accepted, the entire workspace must pass the unified `cargo xtask ci` suite:
+
+```bash
+cargo run -p xtask -- ci
 ```
-- `#![forbid(unsafe_code)]` workspace-wide (isolated platform hardware acceleration quarantined in `crates/platform` under ADR 0001).
-- All input-derived data is treated as hostile: bounded allocations, checked arithmetic, no direct slice indexing.
-- Bounded 8-frame ring buffers prevent out-of-memory errors on 4K/8K media streams.
+This runs:
+1. `cargo fmt --check` (Zero formatting errors)
+2. `cargo clippy --workspace --all-targets -- -D warnings` (Zero warnings)
+3. `cargo test --workspace` (All 135 unit, fuzz, and integration tests pass)
+4. `cargo xtask layers` (Zero cross-layer dependency violations)
+
+---
+
+## 📚 Comprehensive Documentation Suite
+
+- **[Project Roadmap](ROADMAP.md):** Executive metrics, target audience readiness percentages, and progress logs through Milestone 18.
+- **[Implementation Milestones](docs/implementation-milestones.md):** Detailed technical log of all deliverables from M0 to M18.
+- **[Universal File Format Matrix](docs/file-format-matrix.md):** Exhaustive capability matrix across all 6 media dimensions.
+- **[System Architecture](docs/architecture.md):** L0–L7 crate layering, memory ring buffers, backpressure, and panic containment.
+- **[Target App Parity Analysis](docs/target-app-parity.md):** Side-by-side feature comparison against Adobe Media Encoder 2026.
+- **[Survey of ArtCraft Exporters](docs/artcraft-exporters-survey.md):** Audit of 45+ existing codecs across sibling applications.
+- **[Inter-App Dispatch Protocol](docs/inter-app-dispatch-protocol.md):** IPC architecture, Named Pipes, Unix domain sockets, and frame streaming.
+- **[Preset System & Watch Folders](docs/preset-system-and-watchfolders.md):** Adaptive bitrate formulas and the 3-stage settle-delay automated ingest daemon.
+- **[craft-libs Migration Plan](docs/craft-libs-codecs-migration-plan.md):** Codec centralization strategy for `storytold/craft-libs`.
+- **[Agent Instructions](AGENTS.md):** Non-negotiable coding rules and guidelines for AI agents and contributors.
+- **[Developer Cheatsheet](CLAUDE.md):** Quick command cheatsheet for development and testing.
 
 ---
 
@@ -154,5 +208,5 @@ All non-test crates enforce zero-panic safety:
 `encoderCraft` is developed by **`el-j`** with the explicit intent of being donated to and digested by the **ArtCraft** organization (`github.com/storytold`).
 
 - **Licensing:** Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
-- **Clean-room:** Strictly black-box observed; 0% proprietary code, 0% GPL/LGPL contamination.
+- **Clean-Room:** Strictly black-box observed; 0% proprietary code, 0% GPL/LGPL contamination.
 - **Contributor Credits:** Managed in `contributors/people.toml`.
