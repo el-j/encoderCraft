@@ -91,6 +91,12 @@ pub fn render_preset_browser(
                     if label.clicked() {
                         state.selected_preset = Some(preset.clone());
                     }
+                    if label.double_clicked() {
+                        state.selected_preset = Some(preset.clone());
+                        if let Some(job_id) = selected_job_id {
+                            apply_preset_to_job(job_id, &preset, queue_mgr);
+                        }
+                    }
                 });
             }
         });
@@ -128,15 +134,28 @@ pub fn render_preset_browser(
 
                     ui.add_space(4.0);
 
-                    // Apply to selected job button
+                    // Apply to selected job buttons
                     let has_job = selected_job_id.is_some();
-                    let apply_btn = ui.add_enabled(has_job, egui::Button::new(format!("{} Apply to Selected Job", icons::STATUS_OK)));
+                    ui.horizontal(|ui| {
+                        let apply_btn = ui
+                            .add_enabled(has_job, egui::Button::new(format!("{} Apply to Job", icons::STATUS_OK)))
+                            .on_hover_text("Replace target preset on selected job");
 
-                    if apply_btn.clicked()
-                        && let Some(job_id) = selected_job_id
-                    {
-                        apply_preset_to_job(job_id, preset, queue_mgr);
-                    }
+                        if apply_btn.clicked()
+                            && let Some(job_id) = selected_job_id
+                        {
+                            apply_preset_to_job(job_id, preset, queue_mgr);
+                        }
+
+                        let add_target_btn = ui
+                            .add_enabled(has_job, egui::Button::new("+ Add as Output"))
+                            .on_hover_text("Add this preset as an additional output target on selected job");
+                        if add_target_btn.clicked()
+                            && let Some(job_id) = selected_job_id
+                        {
+                            add_preset_target_to_job(job_id, preset, queue_mgr);
+                        }
+                    });
                 });
         }
     });
@@ -152,9 +171,73 @@ fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<Qu
         if let Some(target) = new_spec.targets.first_mut() {
             target.preset_name = preset.name.clone();
             target.container = preset.container;
+            if let Some(ref v) = preset.video {
+                target.custom_width = match v.width {
+                    encodercraft_presets::MatchSourceOr::Exact(w) => Some(w),
+                    encodercraft_presets::MatchSourceOr::MatchSource => None,
+                };
+                target.custom_height = match v.height {
+                    encodercraft_presets::MatchSourceOr::Exact(h) => Some(h),
+                    encodercraft_presets::MatchSourceOr::MatchSource => None,
+                };
+                target.target_bitrate_kbps = Some(v.target_bitrate_kbps);
+            }
+            if let Some(ref a) = preset.audio {
+                target.target_lufs = a.target_lufs.map(|x| x as f32);
+            }
         }
         // Update job
         let _ = queue_mgr.remove_job(job_id);
         let _ = queue_mgr.submit_job(new_spec);
+    }
+}
+
+fn add_preset_target_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {
+    let jobs = queue_mgr.list_jobs();
+    if let Some(job) = jobs.iter().find(|j| j.spec.job_id == job_id) {
+        let count = job.spec.targets.len() + 1;
+        let ext = match preset.container {
+            encodercraft_core::ContainerType::IsoBmffMp4 => "mp4",
+            encodercraft_core::ContainerType::QuickTimeMov => "mov",
+            encodercraft_core::ContainerType::MatroskaMkv => "mkv",
+            encodercraft_core::ContainerType::WebM => "webm",
+            encodercraft_core::ContainerType::Wave => "wav",
+            encodercraft_core::ContainerType::Aiff => "aiff",
+            encodercraft_core::ContainerType::Flac => "flac",
+            encodercraft_core::ContainerType::AnimatedGif => "gif",
+            encodercraft_core::ContainerType::Gltf => "glb",
+            encodercraft_core::ContainerType::Usdz => "usdz",
+            encodercraft_core::ContainerType::Pdf => "pdf",
+            encodercraft_core::ContainerType::MxfOp1a | encodercraft_core::ContainerType::MxfOpAtom => "mxf",
+            encodercraft_core::ContainerType::StillSequence => "png",
+        };
+        let (cw, ch, br) = if let Some(ref v) = preset.video {
+            let w = match v.width {
+                encodercraft_presets::MatchSourceOr::Exact(w) => Some(w),
+                encodercraft_presets::MatchSourceOr::MatchSource => None,
+            };
+            let h = match v.height {
+                encodercraft_presets::MatchSourceOr::Exact(h) => Some(h),
+                encodercraft_presets::MatchSourceOr::MatchSource => None,
+            };
+            (w, h, Some(v.target_bitrate_kbps))
+        } else {
+            (None, None, None)
+        };
+        let lufs = preset.audio.as_ref().and_then(|a| a.target_lufs.map(|x| x as f32));
+
+        let new_target = encodercraft_core::OutputTarget {
+            target_id: format!("target-{count}"),
+            output_path: std::path::PathBuf::from(format!("output_{count}.{ext}")),
+            preset_name: preset.name.clone(),
+            container: preset.container,
+            custom_width: cw,
+            custom_height: ch,
+            custom_frame_rate: None,
+            target_bitrate_kbps: br,
+            target_lufs: lufs,
+            ..Default::default()
+        };
+        let _ = queue_mgr.add_output_target(job_id, new_target);
     }
 }

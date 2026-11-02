@@ -145,6 +145,32 @@ impl QueueManager {
         Ok(())
     }
 
+    /// Moves a job up by one position in the queue (higher priority).
+    pub fn move_job_up(&self, job_id: &str) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(pos) = lock.jobs.iter().position(|j| j.spec.job_id == job_id)
+            && pos > 0
+        {
+            lock.jobs.swap(pos, pos - 1);
+            drop(lock);
+            self.persist_state()?;
+        }
+        Ok(())
+    }
+
+    /// Moves a job down by one position in the queue (lower priority).
+    pub fn move_job_down(&self, job_id: &str) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(pos) = lock.jobs.iter().position(|j| j.spec.job_id == job_id)
+            && pos + 1 < lock.jobs.len()
+        {
+            lock.jobs.swap(pos, pos + 1);
+            drop(lock);
+            self.persist_state()?;
+        }
+        Ok(())
+    }
+
     /// Processes the next available `Queued` job to completion synchronously.
     /// Returns true if a job was found and executed.
     pub fn process_next_job(&self) -> Result<bool, EncoderError> {
@@ -416,5 +442,22 @@ mod tests {
         let jobs = queue.list_jobs();
         assert_eq!(jobs[0].status, JobStatus::Completed);
         assert!(target_path.exists());
+    }
+
+    #[test]
+    fn test_move_job_up_down() {
+        let queue = QueueManager::new_in_memory();
+        queue.submit_job(make_test_spec("job-1", JobPriority::Normal)).unwrap();
+        queue.submit_job(make_test_spec("job-2", JobPriority::Normal)).unwrap();
+
+        queue.move_job_up("job-2").unwrap();
+        let jobs = queue.list_jobs();
+        assert_eq!(jobs[0].spec.job_id, "job-2");
+        assert_eq!(jobs[1].spec.job_id, "job-1");
+
+        queue.move_job_down("job-2").unwrap();
+        let jobs2 = queue.list_jobs();
+        assert_eq!(jobs2[0].spec.job_id, "job-1");
+        assert_eq!(jobs2[1].spec.job_id, "job-2");
     }
 }

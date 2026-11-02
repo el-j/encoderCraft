@@ -34,6 +34,16 @@ pub fn render_queue_panel(
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             state.is_running = false;
         }
+        if (ui.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::ArrowUp)))
+            && let Some(ref id) = state.selected_job_id
+        {
+            let _ = queue_mgr.move_job_up(id);
+        }
+        if (ui.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::ArrowDown)))
+            && let Some(ref id) = state.selected_job_id
+        {
+            let _ = queue_mgr.move_job_down(id);
+        }
         if (ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::D)))
             && let Some(ref id) = state.selected_job_id
         {
@@ -105,6 +115,26 @@ pub fn render_queue_panel(
                 && let Some(ref id) = state.selected_job_id
             {
                 let _ = queue_mgr.duplicate_job(id);
+            }
+
+            let can_move_up =
+                state.selected_job_id.as_ref().is_some_and(|id| jobs.iter().position(|j| &j.spec.job_id == id).is_some_and(|pos| pos > 0));
+            let move_up_btn = ui.add_enabled(can_move_up, egui::Button::new("▲")).on_hover_text("Move job up in queue (Alt+Up)");
+            if move_up_btn.clicked()
+                && let Some(ref id) = state.selected_job_id
+            {
+                let _ = queue_mgr.move_job_up(id);
+            }
+
+            let can_move_down = state
+                .selected_job_id
+                .as_ref()
+                .is_some_and(|id| jobs.iter().position(|j| &j.spec.job_id == id).is_some_and(|pos| pos + 1 < jobs.len()));
+            let move_down_btn = ui.add_enabled(can_move_down, egui::Button::new("▼")).on_hover_text("Move job down in queue (Alt+Down)");
+            if move_down_btn.clicked()
+                && let Some(ref id) = state.selected_job_id
+            {
+                let _ = queue_mgr.move_job_down(id);
             }
 
             let can_reset = state.selected_job_id.as_ref().is_some_and(|id| {
