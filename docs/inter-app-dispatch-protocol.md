@@ -308,3 +308,27 @@ let job_id = client.submit_job(&my_job_spec)?;
 ```
 
 If `encoderCraft` is installed, the job appears instantly in the queue. If not installed, `craft-dispatch` gracefully returns `DispatchError::EncoderCraftNotInstalled`, allowing the host app to offer a download prompt or fall back to its internal synchronous export.
+
+---
+
+## 8. Sibling Ecosystem Integration Tracking
+
+Every application across the entire ArtCraft creative suite has a dedicated companion issue tracking its export hand-off integration with `encoderCraft`:
+
+| Application | Domain & Media Specialty | Delegated Workflows | Tracking Issue |
+| :--- | :--- | :--- | :--- |
+| **FilmCraft** | Video Editing & Timeline NLE | Multi-track sequence rendering, rough cuts, mastering | [storytold/filmcraft#3942](https://github.com/storytold/filmcraft/issues/3942) |
+| **EffectCraft** | Compositing & Motion Graphics | High-overhead multi-pass compositions, VFX, particle cache | [storytold/effectcraft#2816](https://github.com/storytold/effectcraft/issues/2816) |
+| **SoundCraft** | Digital Audio Workstation (DAW) | Multitrack stem exports, surround/Atmos mixdowns, EBU R128 | [storytold/soundcraft#1276](https://github.com/storytold/soundcraft/issues/1276) |
+| **PhotoCraft** | Raster Photo & Graphics Editor | Animation sequences, video layers, deep multi-layer PSB/PSD | [storytold/photocraft#10816](https://github.com/storytold/photocraft/issues/10816) |
+| **VectorCraft** | Vector Illustration & Icons | Artboard batches, SVG optimization, vector slices, PDF/EPS | [storytold/vectorcraft#5251](https://github.com/storytold/vectorcraft/issues/5251) |
+| **DesignCraft** | Desktop Publishing & Prepress | Print-ready PDF/X-1a/4, prepress bleed packaging, EPUB, IDML | [storytold/designcraft#2156](https://github.com/storytold/designcraft/issues/2156) |
+| **PdfCraft** | Acrobat-Class PDF Processing | PDF batch optimization, PDF/A archival flattening, linearizing | [storytold/pdfcraft#5753](https://github.com/storytold/pdfcraft/issues/5753) |
+| **FigCraft** | UI/UX & Digital Product Design | Multi-density screen assets (@1x, @2x, @3x WebP/PNG/SVG) | [storytold/figcraft#1880](https://github.com/storytold/figcraft/issues/1880) |
+| **CadCraft / SolidCraft** | 3D CAD & Parametric Modeling | 3D mesh export (glTF/GLB, OBJ, STL, PLY, USDZ), blueprints | [storytold/cadcraft#2644](https://github.com/storytold/cadcraft/issues/2644) |
+| **DeckCraft** | Presentation & Slide Design | PDF decks, animated video presentations (MP4/ProRes), HTML5 | [storytold/deckcraft#1688](https://github.com/storytold/deckcraft/issues/1688) |
+| **WordCraft** | Word Processing & Publishing | Batch book publishing, DOCX to PDF/EPUB, clean web outputs | [storytold/wordcraft#5285](https://github.com/storytold/wordcraft/issues/5285) |
+| **TextureCraft** | 3D Texturing & PBR Baking | PBR texture map baking (Albedo, Normal, ORM, BC7 DDS, EXR) | [storytold/texturecraft#161](https://github.com/storytold/texturecraft/issues/161) |
+| **GridCraft** | Spreadsheets & Financial Models| Workbook reporting, data sheet exports, print-ready PDF reports | [storytold/gridcraft#3154](https://github.com/storytold/gridcraft/issues/3154) |
+| **LightCraft** | Camera RAW Photo Developing | Batch RAW development (DNG, CR2/3, ARW, NEF) to sRGB/P3 | [storytold/lightcraft#3609](https://github.com/storytold/lightcraft/issues/3609) |
+
