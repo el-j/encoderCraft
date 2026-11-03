@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "eframe",
  "egui",
@@ -834,7 +834,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-audio-dsp"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-core",
  "filmcraft-aac",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-cli"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-core",
  "encodercraft-demux",
@@ -865,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-color"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-geom",
  "serde",
@@ -874,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "bytemuck",
  "chrono",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-demux"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "bytemuck",
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs)",
@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-dispatch"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-core",
  "serde",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-engine"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-color",
  "encodercraft-core",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-geom"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-image-codecs"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-color",
  "encodercraft-core",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-ipc"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-core",
  "encodercraft-dispatch",
@@ -968,7 +968,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-mcp"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-core",
  "encodercraft-demux",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-muxers"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs)",
  "encodercraft-color",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-pipeline"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "chrono",
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs)",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-platform"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-color",
  "encodercraft-core",
@@ -1038,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-presets"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-color",
  "encodercraft-core",
@@ -1053,7 +1053,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-spatial-io"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-core",
  "proptest",
@@ -1064,7 +1064,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-ui-egui"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "egui",
  "encodercraft-color",
@@ -1083,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-video-codecs"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "effectcraft-av1enc",
  "effectcraft-hevcenc",
@@ -1102,7 +1102,7 @@ dependencies = [
 
 [[package]]
 name = "encodercraft-watch"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-core",
  "encodercraft-demux",
@@ -4807,7 +4807,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-audio-dsp",
  "encodercraft-color",
