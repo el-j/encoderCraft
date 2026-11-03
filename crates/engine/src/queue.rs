@@ -1,7 +1,8 @@
 //! Multi-job execution scheduler and queue controller.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use encodercraft_core::{CraftJobSpec, EncoderError, JobPriority, JobStatus};
@@ -9,11 +10,16 @@ use encodercraft_pipeline::{JobProgress, TranscodePipeline};
 
 use crate::state::{LogEntry, QueueJournal, QueuedJob, load_journal, save_journal_atomic};
 
+/// Upper bound for concurrently running jobs.
+const MAX_PARALLELISM: usize = 16;
+
 /// Central queue manager orchestrating job submission, priority scheduling, and persistence.
 pub struct QueueManager {
     journal_path: Option<PathBuf>,
     state: Mutex<QueueJournal>,
-    active_progress: Mutex<Option<(String, Arc<JobProgress>)>>,
+    active_progress: Mutex<HashMap<String, Arc<JobProgress>>>,
+    parallelism: AtomicUsize,
+    running_jobs: AtomicUsize,
     is_worker_running: Arc<AtomicBool>,
     stop_worker_signal: Arc<AtomicBool>,
     paused: AtomicBool,
@@ -25,7 +31,9 @@ impl QueueManager {
         Self {
             journal_path: None,
             state: Mutex::new(QueueJournal::default()),
-            active_progress: Mutex::new(None),
+            active_progress: Mutex::new(HashMap::new()),
+            parallelism: AtomicUsize::new(MAX_PARALLELISM.min(2)),
+            running_jobs: AtomicUsize::new(0),
             is_worker_running: Arc::new(AtomicBool::new(false)),
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
             paused: AtomicBool::new(false),
@@ -42,14 +50,30 @@ impl QueueManager {
                 job.progress_percent = 0.0;
             }
         }
+        let parallelism = journal.active_parallelism.clamp(1, MAX_PARALLELISM);
         Ok(Self {
             journal_path: Some(journal_path),
             state: Mutex::new(journal),
-            active_progress: Mutex::new(None),
+            active_progress: Mutex::new(HashMap::new()),
+            parallelism: AtomicUsize::new(parallelism),
+            running_jobs: AtomicUsize::new(0),
             is_worker_running: Arc::new(AtomicBool::new(false)),
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
             paused: AtomicBool::new(false),
         })
+    }
+
+    /// Number of jobs that may be encoded concurrently.
+    pub fn parallelism(&self) -> usize {
+        self.parallelism.load(Ordering::Acquire)
+    }
+
+    /// Changes the number of concurrent jobs (clamped to 1..=16); takes effect for the next claim.
+    pub fn set_parallelism(&self, workers: usize) -> Result<(), EncoderError> {
+        let workers = workers.clamp(1, MAX_PARALLELISM);
+        self.parallelism.store(workers, Ordering::Release);
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).active_parallelism = workers;
+        self.persist_state()
     }
 
     /// Adds a new job to the queue, ordering by priority.
@@ -215,14 +239,12 @@ impl QueueManager {
 
     fn is_active(&self, job_id: &str) -> bool {
         let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-        matches!(&*p_lock, Some((id, _)) if id == job_id)
+        p_lock.contains_key(job_id)
     }
 
     fn with_active(&self, job_id: &str, f: impl FnOnce(&JobProgress)) {
         let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((id, prog)) = &*p_lock
-            && id == job_id
-        {
+        if let Some(prog) = p_lock.get(job_id) {
             f(prog);
         }
     }
@@ -259,14 +281,19 @@ impl QueueManager {
         let progress = pipeline.progress();
         {
             let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-            *p_lock = Some((job_id.to_string(), Arc::clone(&progress)));
+            p_lock.insert(job_id.to_string(), Arc::clone(&progress));
         }
 
         let stop_monitor = AtomicBool::new(false);
         let result = std::thread::scope(|scope| {
             scope.spawn(|| {
+                let mut last_persist = std::time::Instant::now();
                 while !stop_monitor.load(Ordering::Acquire) {
                     std::thread::sleep(std::time::Duration::from_millis(50));
+                    if last_persist.elapsed() >= std::time::Duration::from_secs(2) {
+                        last_persist = std::time::Instant::now();
+                        let _ = self.persist_state();
+                    }
                     let pct = progress.percent_complete();
                     let fps = progress.current_fps();
                     let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -285,7 +312,7 @@ impl QueueManager {
 
         {
             let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-            *p_lock = None;
+            p_lock.remove(job_id);
         }
 
         let outcome = if progress.is_cancelled() && result.is_err() { Err(EncoderError::Cancelled) } else { result };
@@ -399,7 +426,7 @@ impl QueueManager {
         self.stop_worker_signal.store(true, Ordering::Release);
         self.paused.store(false, Ordering::Release);
         let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((_, ref prog)) = *p_lock {
+        for prog in p_lock.values() {
             prog.cancel();
         }
     }
@@ -408,7 +435,7 @@ impl QueueManager {
     pub fn pause_worker(&self) {
         self.paused.store(true, Ordering::Release);
         let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((_, ref prog)) = *p_lock {
+        for prog in p_lock.values() {
             prog.set_paused(true);
         }
     }
@@ -417,7 +444,7 @@ impl QueueManager {
     pub fn resume_worker(&self) {
         self.paused.store(false, Ordering::Release);
         let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((_, ref prog)) = *p_lock {
+        for prog in p_lock.values() {
             prog.set_paused(false);
         }
     }
@@ -427,17 +454,23 @@ impl QueueManager {
         lock.jobs.iter().any(|j| matches!(j.status, JobStatus::Queued))
     }
 
-    fn run_worker_loop(&self) {
+    /// Scheduler: keeps up to `parallelism()` jobs running until the queue is drained, stopped or paused.
+    fn run_worker_loop(self: &Arc<Self>) {
         loop {
             if self.stop_worker_signal.load(Ordering::Acquire) {
                 break;
             }
-            if self.paused.load(Ordering::Acquire) {
-                std::thread::sleep(std::time::Duration::from_millis(50));
+            let running = self.running_jobs.load(Ordering::Acquire);
+            if self.paused.load(Ordering::Acquire) || running >= self.parallelism() {
+                std::thread::sleep(std::time::Duration::from_millis(25));
                 continue;
             }
 
             let Some((job_id, spec)) = self.claim_next() else {
+                if running > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                    continue;
+                }
                 // Close the race with a job submitted while the worker was about to exit.
                 self.is_worker_running.store(false, Ordering::Release);
                 if self.has_queued_jobs() && !self.stop_worker_signal.load(Ordering::Acquire) && !self.is_worker_running.swap(true, Ordering::AcqRel)
@@ -448,10 +481,33 @@ impl QueueManager {
             };
 
             let _ = self.persist_state();
-            // A failed job is recorded by `finish_job`; the batch continues with the next item.
-            let _ = self.run_job(&job_id, &spec);
+            self.running_jobs.fetch_add(1, Ordering::AcqRel);
+            let this = Arc::clone(self);
+            let id = job_id.clone();
+            let builder = std::thread::Builder::new().name(format!("encodercraft-job-{job_id}"));
+            let spawned = builder.spawn(move || {
+                // A failed job is recorded by `finish_job`; the batch continues with the next item.
+                let _ = this.run_job(&id, &spec);
+                this.running_jobs.fetch_sub(1, Ordering::AcqRel);
+            });
+            if spawned.is_err() {
+                self.running_jobs.fetch_sub(1, Ordering::AcqRel);
+                let err = Err(EncoderError::Io("failed to spawn encode thread".into()));
+                if let Some((_, spec)) = self.job_spec(&job_id).map(|s| (job_id.clone(), s)) {
+                    let _ = self.finish_job(&job_id, &spec, &err, 0);
+                }
+            }
+        }
+        // Wait for in-flight jobs (cancelled by stop) so the worker flag reflects reality.
+        while self.running_jobs.load(Ordering::Acquire) > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         self.is_worker_running.store(false, Ordering::Release);
+    }
+
+    fn job_spec(&self, job_id: &str) -> Option<CraftJobSpec> {
+        let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        lock.jobs.iter().find(|j| j.spec.job_id == job_id).map(|j| j.spec.clone())
     }
 
     /// Resets a completed, failed, or cancelled job back to Queued state.
@@ -818,6 +874,35 @@ mod tests {
         let jobs = queue.list_jobs();
         assert_eq!(jobs.len(), 4);
         assert!(jobs.iter().all(|j| is_terminal(&j.status)), "all jobs must be finished after a single start");
+    }
+
+    #[test]
+    fn test_parallel_pool_drains_and_journal_stays_consistent() {
+        let dir = tempdir().unwrap();
+        let journal = dir.path().join("queue.json");
+        let queue = Arc::new(QueueManager::new_persisted(journal.clone()).unwrap());
+        queue.set_parallelism(4).unwrap();
+        for i in 0..8 {
+            queue.submit_job(spec_in(dir.path(), &format!("par-{i}"))).unwrap();
+        }
+        assert!(queue.start_queue());
+        wait_until_idle(&queue);
+        assert!(queue.list_jobs().iter().all(|j| matches!(j.status, JobStatus::Completed)));
+
+        let reloaded = QueueManager::new_persisted(journal).unwrap();
+        assert_eq!(reloaded.parallelism(), 4);
+        let jobs = reloaded.list_jobs();
+        assert_eq!(jobs.len(), 8);
+        assert!(jobs.iter().all(|j| matches!(j.status, JobStatus::Completed)));
+    }
+
+    #[test]
+    fn test_set_parallelism_is_clamped() {
+        let queue = QueueManager::new_in_memory();
+        queue.set_parallelism(0).unwrap();
+        assert_eq!(queue.parallelism(), 1);
+        queue.set_parallelism(1000).unwrap();
+        assert_eq!(queue.parallelism(), MAX_PARALLELISM);
     }
 
     #[test]

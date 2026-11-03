@@ -454,6 +454,9 @@ impl EncoderCraftApp {
         // 6. Preferences Dialog
         let mut theme_change = None;
         render_prefs_dialog(&ctx, &mut self.prefs_state, &self.tokens, &mut theme_change);
+        if self.queue_mgr.parallelism() != self.prefs_state.prefs.max_parallel_jobs {
+            let _ = self.queue_mgr.set_parallelism(self.prefs_state.prefs.max_parallel_jobs);
+        }
         if let Some(theme) = theme_change {
             if theme == "High Contrast" {
                 self.brightness = Brightness::HighContrast;
