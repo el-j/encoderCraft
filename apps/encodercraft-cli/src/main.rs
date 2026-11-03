@@ -6,13 +6,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use encodercraft_core::{ClientInfo, CraftJobSpec, EncoderError, JobPriority, SourceDescriptor, StartPolicy};
+use encodercraft_core::{ClientInfo, CraftJobSpec, EncoderError, JobPriority, JobStatus, SourceDescriptor, StartPolicy};
 use encodercraft_demux::probe_file;
 use encodercraft_dispatch::DispatchClient;
 use encodercraft_engine::{EngineIpcHandler, QueueManager};
 use encodercraft_ipc::IpcServer;
 use encodercraft_mcp::McpServer;
-use encodercraft_pipeline::TranscodePipeline;
 use encodercraft_presets::{PresetRegistry, evaluate_preset};
 use encodercraft_watch::{WatchFolderConfig, WatchFolderService};
 
@@ -146,6 +145,9 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         println!("Starting batch transcode: {total} files using preset '{preset_name}'");
     }
 
+    let queue = Arc::new(QueueManager::new_in_memory());
+    let mut submitted: Vec<(String, PathBuf)> = Vec::new();
+
     for (idx, input_path) in inputs.iter().enumerate() {
         let output_path = if total == 1
             && let Some(ref out) = output
@@ -200,13 +202,59 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
             targets: vec![target],
         };
 
-        println!("Transcoding: preset='{}' ➔ {}", preset_name, output_path.display());
-        let pipeline = TranscodePipeline::new(spec);
-        pipeline.execute()?;
-        println!("Complete: {}", output_path.display());
+        println!("Queued: preset='{}' ➔ {}", preset_name, output_path.display());
+        submitted.push((spec.job_id.clone(), output_path));
+        queue.submit_job(spec)?;
     }
 
-    Ok(())
+    queue.start_queue();
+    wait_for_jobs(&queue, &submitted)
+}
+
+/// Blocks until every submitted job is finished, printing progress; fails if any job failed.
+fn wait_for_jobs(queue: &QueueManager, submitted: &[(String, PathBuf)]) -> Result<(), EncoderError> {
+    let mut reported = vec![false; submitted.len()];
+    let mut failures = Vec::new();
+    loop {
+        let jobs = queue.list_jobs();
+        let mut pending = false;
+        for (idx, (id, out)) in submitted.iter().enumerate() {
+            let Some(job) = jobs.iter().find(|j| &j.spec.job_id == id) else { continue };
+            match &job.status {
+                JobStatus::Completed | JobStatus::Failed(_) | JobStatus::Cancelled => {
+                    if let Some(flag) = reported.get_mut(idx)
+                        && !*flag
+                    {
+                        *flag = true;
+                        match &job.status {
+                            JobStatus::Completed => println!("Complete: {}", out.display()),
+                            JobStatus::Failed(e) => {
+                                eprintln!("Failed: {}: {e}", out.display());
+                                failures.push(e.clone());
+                            }
+                            _ => {
+                                eprintln!("Cancelled: {}", out.display());
+                                failures.push("cancelled".to_string());
+                            }
+                        }
+                    }
+                }
+                JobStatus::Processing => {
+                    pending = true;
+                    eprint!("\r[{}/{}] {:>3.0}%", idx + 1, submitted.len(), job.progress_percent);
+                }
+                _ => pending = true,
+            }
+        }
+        if !pending {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    match failures.first() {
+        Some(first) => Err(EncoderError::Io(format!("{} of {} job(s) failed: {first}", failures.len(), submitted.len()))),
+        None => Ok(()),
+    }
 }
 
 fn cmd_probe(args: &[String]) -> Result<(), EncoderError> {
@@ -313,6 +361,7 @@ fn cmd_watch(args: &[String]) -> Result<(), EncoderError> {
         i += 1;
     }
 
+    let queue = Arc::new(QueueManager::new_in_memory());
     let mut service = WatchFolderService::new(PresetRegistry::default());
     service.add_config(WatchFolderConfig::new("cli-watch", watch_dir.clone(), out_dir, preset));
 
@@ -321,8 +370,12 @@ fn cmd_watch(args: &[String]) -> Result<(), EncoderError> {
         if let Ok(jobs) = service.scan_once() {
             for (wf_id, spec) in jobs {
                 println!("Ingested job from {wf_id}: {}", spec.job_id);
-                let pipeline = TranscodePipeline::new(spec);
-                let _ = pipeline.execute();
+                match queue.submit_job(spec) {
+                    Ok(_) => {
+                        queue.start_queue();
+                    }
+                    Err(e) => eprintln!("Could not queue job from {wf_id}: {e}"),
+                }
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
