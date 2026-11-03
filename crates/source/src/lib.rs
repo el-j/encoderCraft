@@ -121,9 +121,20 @@ fn layout_for(channels: usize) -> ChannelLayout {
     }
 }
 
+/// Converts a panic escaping third-party decoder code into a typed error so a hostile file can
+/// never terminate the application.
+fn guard<T>(what: &str, f: impl FnOnce() -> Result<T, EncoderError>) -> Result<T, EncoderError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .unwrap_or_else(|_| Err(EncoderError::InvalidContainer(format!("media {what} failed: the file is malformed"))))
+}
+
 impl MediaReader {
     /// Opens a media file, probing its container and streams.
     pub fn open(path: &Path) -> Result<Self, EncoderError> {
+        guard("open", || Self::open_unguarded(path))
+    }
+
+    fn open_unguarded(path: &Path) -> Result<Self, EncoderError> {
         if let Some(reader) = Self::open_still(path)? {
             return Ok(reader);
         }
@@ -233,6 +244,10 @@ impl MediaReader {
 
     /// Decodes the frame with the given index as straight-alpha RGBA8.
     pub fn frame_at_index(&self, index: u64) -> Result<VideoFrame, EncoderError> {
+        guard("decode", || self.frame_at_index_unguarded(index))
+    }
+
+    fn frame_at_index_unguarded(&self, index: u64) -> Result<VideoFrame, EncoderError> {
         let video =
             self.probe.video.as_ref().ok_or_else(|| EncoderError::InvalidContainer(format!("{}: source has no video stream", self.probe.name)))?;
         let count = self.frame_count();

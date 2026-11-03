@@ -210,7 +210,7 @@ Alpha 1 shipped with real defects; they are tracked as issues #6–#51 under epi
 - [x] **M26 Preview** – real preview monitor (#55); JKL/drop-frame transport with In/Out and loop, zoom/pan, safe margins, aspect guides, A/B split, rendered output frames, waveform/parade/histogram/vectorscope via `filmcraft-scopes`, and a live Encoding panel (#27–#29). Audio playback in the monitor remains open.
 - [~] **M27 Workspace shell** – glyph fixes (#58); command table driving menus, shortcuts and enabled state with a glyph-coverage test (#32); named, persisted, self-repairing workspaces for the right dock with a Window menu (#31); denser theme spacing (#33). Remaining: drag-to-rearrange/floating docking, user-remappable shortcuts, context menus from the table, font bundling from craft-fonts.
 - [~] **M28 Panels** – done: persistence of preferences/watch folders/favourites (#38, #39), sortable Preset Browser with import/export/delete (#35), Media Browser (#36), honest parity docs (#40). Open: queue table customisation (#34), export settings dialog (#37).
-- [ ] **M29 Hardening and alpha.2** – E2E QA, installer smoke tests, fuzzing, release (#41–#44).
+- [~] **M29 Hardening and alpha.2** – done: panic guard around third-party decode (`MediaReader`), malformed-media corpus and random-byte property tests, nightly robustness workflow (#43 partly). Open: real-media QA matrix (#41), installer smoke tests (#42), per-crate fuzz targets, alpha.2 release (#44).
 
 ## Known Issues (alpha.1, tracked above)
 
