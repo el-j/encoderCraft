@@ -4,12 +4,13 @@
 
 use std::fs::File;
 use std::io::BufWriter;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use encodercraft_audio_dsp::{AacEncoderWrapper, normalize_loudness, remix_channels};
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
-use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor};
+use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor, VideoFrame};
 use encodercraft_geom::{Dimensions, ScaleMode};
 use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
 use encodercraft_muxers::{
@@ -316,14 +317,45 @@ impl TranscodePipeline {
     }
 
     fn execute_image_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if let Some(naming) = FrameNaming::parse(&target.output_path) {
+            return self.execute_frame_export(target, &naming, start_time);
+        }
         let reader = crate::input::open_reader(&self.spec.source)?;
         let frame = reader.frame_at_index(0)?;
+        self.write_still(target, frame, &target.output_path)?;
+        self.progress.set_total_frames(1);
+        self.progress.advance_frame(start_time);
+        Ok(())
+    }
 
+    /// Exports every frame of the (trimmed) source as `name_0001.png`, `name_0002.png`, ... for an
+    /// output path such as `name_%04d.png`. Files written so far are removed if a frame fails.
+    fn execute_frame_export(&self, target: &OutputTarget, naming: &FrameNaming, start_time: Instant) -> Result<(), EncoderError> {
+        let input = crate::input::VideoInput::open(&self.spec.source, target)?;
+        self.progress.set_total_frames(input.len());
+        let mut written: Vec<PathBuf> = Vec::new();
+        let result = (|| {
+            for i in 0..input.len() {
+                self.progress.checkpoint()?;
+                let path = naming.path(i + 1);
+                self.write_still(target, input.frame(i)?, &path)?;
+                written.push(path);
+                self.progress.advance_frame(start_time);
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            for path in &written {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        result
+    }
+
+    fn write_still(&self, target: &OutputTarget, frame: VideoFrame, path: &Path) -> Result<(), EncoderError> {
         let final_frame = if let (Some(w), Some(h)) = (target.custom_width, target.custom_height) {
             if w != frame.dimensions.width || h != frame.dimensions.height {
-                let target_dims = Dimensions::new(w, h)?;
-                let scaler = FrameScaler::new(ScaleMode::Fit);
-                scaler.scale(&frame, target_dims)?
+                FrameScaler::new(ScaleMode::Fit).scale(&frame, Dimensions::new(w, h)?)?
             } else {
                 frame
             }
@@ -344,11 +376,7 @@ impl TranscodePipeline {
             options.quality = q.clamp(1, 100);
         }
         let bytes = encode_still(&final_frame, format, &options)?;
-        std::fs::write(&target.output_path, bytes).map_err(|e| EncoderError::Io(format!("failed to write {}: {e}", target.output_path.display())))?;
-
-        self.progress.set_total_frames(1);
-        self.progress.advance_frame(start_time);
-        Ok(())
+        std::fs::write(path, bytes).map_err(|e| EncoderError::Io(format!("failed to write {}: {e}", path.display())))
     }
 
     fn execute_document_pdf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
@@ -1515,5 +1543,47 @@ mod tests {
         let mp4_info = encodercraft_demux::probe_file(&delivery_mp4).unwrap();
         assert_eq!(mp4_info.video_streams.len(), 1);
         assert_eq!(mp4_info.audio_streams.len(), 0, "a still source has no audio, so no audio track is written");
+    }
+}
+
+/// An output path with a printf-style frame number field, e.g. `out/shot_%04d.png`.
+struct FrameNaming {
+    prefix: PathBuf,
+    suffix: String,
+    width: usize,
+}
+
+impl FrameNaming {
+    fn parse(path: &Path) -> Option<Self> {
+        let name = path.file_name()?.to_str()?;
+        let at = name.find('%')?;
+        let rest = name.get(at + 1..)?;
+        let digits_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let digits = rest.get(..digits_len)?;
+        let suffix = rest.get(digits_len..)?.strip_prefix('d')?;
+        let width = if digits.is_empty() { 0 } else { digits.parse::<usize>().ok()?.min(12) };
+        let dir = path.parent().unwrap_or_else(|| Path::new(""));
+        Some(Self { prefix: dir.join(name.get(..at)?), suffix: suffix.to_string(), width })
+    }
+
+    fn path(&self, number: u64) -> PathBuf {
+        let mut name = self.prefix.clone().into_os_string();
+        name.push(format!("{number:0width$}{}", self.suffix, width = self.width));
+        PathBuf::from(name)
+    }
+}
+
+#[cfg(test)]
+mod frame_naming_tests {
+    use super::FrameNaming;
+    use std::path::Path;
+
+    #[test]
+    fn numbers_frames_with_padding() {
+        let n = FrameNaming::parse(Path::new("out/shot_%04d.png")).unwrap();
+        assert_eq!(n.path(7), Path::new("out/shot_0007.png"));
+        assert_eq!(FrameNaming::parse(Path::new("a_%d.jpg")).unwrap().path(12), Path::new("a_12.jpg"));
+        assert!(FrameNaming::parse(Path::new("plain.png")).is_none());
+        assert!(FrameNaming::parse(Path::new("bad_%s.png")).is_none());
     }
 }

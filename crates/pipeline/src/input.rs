@@ -23,8 +23,13 @@ pub(crate) struct VideoInput {
 
 /// Opens the media file of a job source.
 pub(crate) fn open_reader(source: &SourceDescriptor) -> Result<MediaReader, EncoderError> {
+    open_reader_at(source, None)
+}
+
+/// Like [`open_reader`]; `sequence_rate` is the frame rate numbered image sequences play at.
+pub(crate) fn open_reader_at(source: &SourceDescriptor, sequence_rate: Option<Rational64>) -> Result<MediaReader, EncoderError> {
     match source {
-        SourceDescriptor::File { path, .. } => MediaReader::open(path),
+        SourceDescriptor::File { path, .. } => MediaReader::open_with_rate(path, sequence_rate),
         SourceDescriptor::StitchedClips { .. } => Err(EncoderError::UnsupportedCodec("stitched sources are processed by the clip stitcher".into())),
         SourceDescriptor::Pipe { .. } => Err(EncoderError::UnsupportedCodec("pipe sources are not supported by file transcoding".into())),
         SourceDescriptor::ProjectReference { .. } => {
@@ -59,7 +64,7 @@ fn even(v: u32) -> u32 {
 impl VideoInput {
     /// Opens the source for `target`. Output size and frame rate default to the source's.
     pub(crate) fn open(source: &SourceDescriptor, target: &OutputTarget) -> Result<Self, EncoderError> {
-        let reader = open_reader(source)?;
+        let reader = open_reader_at(source, target.custom_frame_rate)?;
         let probe = reader.probe();
         let video = probe
             .video

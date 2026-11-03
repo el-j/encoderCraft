@@ -10,15 +10,16 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError, Rational64, VideoFrame};
 use encodercraft_geom::Dimensions;
 use filmcraft_media::reader::FileReader;
+use filmcraft_media::sequence::{FrameLoader, ImageSequenceSource, Numbered, sequence_frames};
 use filmcraft_media::{FrameRequest, MediaError, MediaKind, SharedReader, SharedSource};
-use filmcraft_time::Tick;
+use filmcraft_time::{FrameRate, Tick};
 
 /// Largest still image file that is read whole when no streaming reader exists for its format.
 const MAX_WHOLE_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -128,10 +129,87 @@ fn guard<T>(what: &str, f: impl FnOnce() -> Result<T, EncoderError>) -> Result<T
         .unwrap_or_else(|_| Err(EncoderError::InvalidContainer(format!("media {what} failed: the file is malformed"))))
 }
 
+/// Frame rate given to an image sequence when the job does not choose one.
+pub const SEQUENCE_DEFAULT_FPS: Rational64 = Rational64::FPS_24;
+
+/// A numbered-frame path such as `shot_%04d.png`: the file name holds one printf-style `%d` field.
+struct SequencePattern {
+    dir: PathBuf,
+    prefix: String,
+    suffix: String,
+    width: usize,
+}
+
+impl SequencePattern {
+    fn parse(path: &Path) -> Option<Self> {
+        let name = path.file_name()?.to_str()?;
+        let at = name.find('%')?;
+        let rest = name.get(at + 1..)?;
+        let digits_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let digits = rest.get(..digits_len)?;
+        let after = rest.get(digits_len..)?;
+        let suffix = after.strip_prefix('d')?;
+        if suffix.contains('%') {
+            return None;
+        }
+        let width = if digits.is_empty() { 0 } else { digits.parse::<usize>().ok()?.min(12) };
+        let dir = path.parent().map(Path::to_path_buf).filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| PathBuf::from("."));
+        Some(Self { dir, prefix: name.get(..at)?.to_string(), suffix: suffix.to_string(), width })
+    }
+
+    fn number_of(&self, file_name: &str) -> Option<u64> {
+        let middle = file_name.strip_prefix(self.prefix.as_str())?.strip_suffix(self.suffix.as_str())?;
+        if middle.is_empty() || middle.len() > 12 || !middle.bytes().all(|b| b.is_ascii_digit()) || middle.len() < self.width {
+            return None;
+        }
+        middle.parse().ok()
+    }
+}
+
+/// True when `path` is a numbered-frame pattern like `shot_%04d.png` rather than a real file.
+pub fn is_sequence_pattern(path: &Path) -> bool {
+    SequencePattern::parse(path).is_some()
+}
+
 impl MediaReader {
-    /// Opens a media file, probing its container and streams.
+    /// Opens a media file, probing its container and streams. A `%04d`-style path opens the
+    /// numbered image sequence it describes at [`SEQUENCE_DEFAULT_FPS`].
     pub fn open(path: &Path) -> Result<Self, EncoderError> {
+        Self::open_with_rate(path, None)
+    }
+
+    /// Like [`MediaReader::open`], with the frame rate image sequences play at; other media ignore it.
+    pub fn open_with_rate(path: &Path, sequence_rate: Option<Rational64>) -> Result<Self, EncoderError> {
+        if let Some(pattern) = SequencePattern::parse(path) {
+            return guard("open", || Self::open_sequence(&pattern, path, sequence_rate.unwrap_or(SEQUENCE_DEFAULT_FPS)));
+        }
         guard("open", || Self::open_unguarded(path))
+    }
+
+    fn open_sequence(pattern: &SequencePattern, path: &Path, rate: Rational64) -> Result<Self, EncoderError> {
+        let context = path.display().to_string();
+        if rate.num <= 0 || rate.den <= 0 {
+            return Err(EncoderError::InvalidJobSpec(format!("{context}: invalid sequence frame rate {}/{}", rate.num, rate.den)));
+        }
+        let names: Vec<String> = std::fs::read_dir(&pattern.dir)
+            .map_err(|e| EncoderError::Io(format!("{context}: {e}")))?
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .filter(|name| pattern.number_of(name).is_some())
+            .collect();
+        let first_name = names
+            .iter()
+            .filter_map(|name| pattern.number_of(name).map(|n| (n, name)))
+            .min()
+            .map(|(_, name)| name.clone())
+            .ok_or_else(|| EncoderError::Io(format!("{context}: no files match the sequence pattern")))?;
+        let first_path = pattern.dir.join(&first_name);
+        let first = Numbered::parse(&first_path.to_string_lossy())
+            .ok_or_else(|| EncoderError::InvalidContainer(format!("{context}: `{first_name}` is not a numbered still image")))?;
+        let frames = sequence_frames(&first, &names.iter().map(|n| n.to_string()).collect::<Vec<_>>());
+        let loader: FrameLoader = Arc::new(|p: &str| std::fs::read(p));
+        let name = format!("{}[sequence]", pattern.prefix.trim_end_matches(['_', '.', '-', ' ']));
+        let source = ImageSequenceSource::new(&name, frames, FrameRate::new(rate.num, rate.den), loader).map_err(|e| map_media_error(&context, e))?;
+        Ok(Self::from_source(Arc::new(source)))
     }
 
     fn open_unguarded(path: &Path) -> Result<Self, EncoderError> {

@@ -122,6 +122,12 @@ cargo run --release -p encodercraft-cli -- encode input.mov -p "Broadcast MXF OP
 # Video: Transcode to Avid Media Composer MXF OP-Atom
 cargo run --release -p encodercraft-cli -- encode input.mov -p "Avid Media Composer MXF OP-Atom" -o output_atom.mxf
 
+# Image sequence in: numbered files (%04d) become a video; --fps sets the rate (default 24)
+cargo run --release -p encodercraft-cli -- encode "shot_%04d.png" -p "YouTube 1080p" --fps 25 -o shot.mp4
+
+# Stills out: a %04d pattern in the output name exports one image per frame
+# (needs an image preset whose container is PNG/TIFF/etc.)
+
 # Audio: Transcode to 24-bit 48kHz Lossless FLAC Master
 cargo run --release -p encodercraft-cli -- encode mix.wav -p "Lossless FLAC Master (24-bit 48kHz)" -o master.flac
 

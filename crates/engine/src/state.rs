@@ -68,6 +68,9 @@ pub struct AppPreferences {
     pub max_parallel_jobs: usize,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Shut the computer down after the queue has finished, after a cancellable countdown.
+    #[serde(default)]
+    pub auto_shutdown: bool,
 }
 
 fn default_true() -> bool {
@@ -108,6 +111,7 @@ impl Default for AppPreferences {
             default_output_dir: None,
             max_parallel_jobs: 2,
             theme: "Dark".into(),
+            auto_shutdown: false,
         }
     }
 }
