@@ -34,3 +34,60 @@ fn test_cli_version_matches_manifest() {
         assert_eq!(stdout.trim(), format!("encodercraft-cli {}", env!("CARGO_PKG_VERSION")));
     }
 }
+
+fn write_bmp(path: &std::path::Path, shade: u8) {
+    let (w, h) = (16u32, 16u32);
+    let row = (w * 3).div_ceil(4) * 4;
+    let data = row * h;
+    let mut b = Vec::new();
+    b.extend_from_slice(b"BM");
+    b.extend_from_slice(&(54 + data).to_le_bytes());
+    b.extend_from_slice(&[0; 4]);
+    b.extend_from_slice(&54u32.to_le_bytes());
+    b.extend_from_slice(&40u32.to_le_bytes());
+    b.extend_from_slice(&w.to_le_bytes());
+    b.extend_from_slice(&h.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&24u16.to_le_bytes());
+    b.extend_from_slice(&[0; 4]);
+    b.extend_from_slice(&data.to_le_bytes());
+    b.extend_from_slice(&[0; 16]);
+    for y in 0..h {
+        for x in 0..row {
+            b.push(shade.wrapping_add((x + y) as u8));
+        }
+    }
+    std::fs::write(path, b).expect("write bmp");
+}
+
+#[test]
+fn test_cli_encode_batch_runs_every_input_through_the_queue() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = std::env::temp_dir().join(format!("encodercraft-cli-batch-{}", std::process::id()));
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).expect("mkdir");
+    let inputs: Vec<_> = (0..3u8)
+        .map(|i| {
+            let p = dir.join(format!("clip{i}.bmp"));
+            write_bmp(&p, i * 40);
+            p
+        })
+        .collect();
+
+    let output = Command::new(bin).arg("encode").args(&inputs).arg("-o").arg(&out).output().expect("failed to run encode");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "encode failed: {stderr}");
+    for i in 0..3 {
+        let f = out.join(format!("clip{i}_encoded.mp4"));
+        let len = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
+        assert!(len > 0, "missing output {}", f.display());
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_cli_encode_reports_failure_with_nonzero_exit() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let output = Command::new(bin).args(["encode", "/nonexistent/in.mov"]).output().expect("failed to run encode");
+    assert!(!output.status.success());
+}

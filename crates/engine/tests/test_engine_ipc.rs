@@ -82,3 +82,81 @@ fn test_ipc_handler_queue_workflow() {
     assert_eq!(cancel_res.id, 14);
     assert!(cancel_res.error.is_none());
 }
+
+fn write_wav(path: &std::path::Path) {
+    let samples: Vec<u8> = (0..1600i32).flat_map(|i| ((((i as f32) * 0.2).sin() * 6000.0) as i16).to_le_bytes()).collect();
+    let mut b = Vec::new();
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36u32 + samples.len() as u32).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&8000u32.to_le_bytes());
+    b.extend_from_slice(&16_000u32.to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+    b.extend_from_slice(&samples);
+    std::fs::write(path, b).unwrap();
+}
+
+fn wav_spec(dir: &std::path::Path, id: &str) -> CraftJobSpec {
+    let src = dir.join(format!("{id}.wav"));
+    write_wav(&src);
+    CraftJobSpec {
+        version: "1.0".into(),
+        job_id: id.into(),
+        client_info: ClientInfo { app_name: "test".into(), app_version: "0".into(), pid: 1, user_notes: None },
+        priority: JobPriority::Normal,
+        start_policy: StartPolicy::Paused,
+        source: SourceDescriptor::File { path: src, start_tick: None, duration_ticks: None, timebase: None },
+        targets: vec![OutputTarget {
+            target_id: "t".into(),
+            output_path: dir.join(format!("{id}_out.wav")),
+            preset_name: "WAV".into(),
+            container: ContainerType::Wave,
+            ..Default::default()
+        }],
+    }
+}
+
+fn wait_idle(handler: &EngineIpcHandler) -> Vec<serde_json::Value> {
+    for _ in 0..600 {
+        let res = handler.handle(&IpcRequest::new(90, "queue.list", json!({}))).result.unwrap();
+        let jobs = res.as_array().unwrap().clone();
+        let busy = jobs.iter().any(|j| matches!(j["status"].as_str(), Some("Queued" | "Processing")));
+        let running = handler.handle(&IpcRequest::new(91, "queue.is_running", json!({}))).result.unwrap();
+        if !busy && running.as_bool() != Some(true) {
+            return jobs;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("queue did not drain");
+}
+
+#[test]
+fn test_ipc_start_once_drains_all_jobs_and_cancel_is_honoured() {
+    let dir = tempfile::tempdir().unwrap();
+    let handler = EngineIpcHandler::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+
+    for id in ["a", "b", "c", "d"] {
+        let res = handler.handle(&IpcRequest::new(1, "queue.submit", serde_json::to_value(wav_spec(dir.path(), id)).unwrap()));
+        assert!(res.error.is_none(), "{:?}", res.error);
+    }
+    assert!(handler.handle(&IpcRequest::new(2, "queue.cancel", json!({ "jobId": "d" }))).error.is_none());
+    for id in ["a", "b", "c"] {
+        handler.handle(&IpcRequest::new(3, "queue.reset", json!({ "jobId": id })));
+    }
+
+    assert!(handler.handle(&IpcRequest::new(4, "queue.start", json!({}))).error.is_none());
+    let jobs = wait_idle(&handler);
+    let status = |id: &str| jobs.iter().find(|j| j["spec"]["jobId"] == id).and_then(|j| j["status"].as_str().map(str::to_owned));
+    for id in ["a", "b", "c"] {
+        assert_eq!(status(id).as_deref(), Some("Completed"), "job {id}");
+        assert!(dir.path().join(format!("{id}_out.wav")).exists());
+    }
+    assert_eq!(status("d").as_deref(), Some("Cancelled"));
+    assert!(!dir.path().join("d_out.wav").exists());
+}
