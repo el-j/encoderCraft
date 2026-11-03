@@ -329,6 +329,15 @@ Every application across the entire ArtCraft creative suite has a dedicated comp
 | **DeckCraft** | Presentation & Slide Design | PDF decks, animated video presentations (MP4/ProRes), HTML5 | [storytold/deckcraft#1688](https://github.com/storytold/deckcraft/issues/1688) |
 | **WordCraft** | Word Processing & Publishing | Batch book publishing, DOCX to PDF/EPUB, clean web outputs | [storytold/wordcraft#5285](https://github.com/storytold/wordcraft/issues/5285) |
 | **TextureCraft** | 3D Texturing & PBR Baking | PBR texture map baking (Albedo, Normal, ORM, BC7 DDS, EXR) | [storytold/texturecraft#161](https://github.com/storytold/texturecraft/issues/161) |
+| **MaterialCraft** | Node-Based Procedural Material Design | Procedural PBR texture maps (16-bit TIFF, EXR, PNG) & 3D previews | [storytold/materialcraft#27](https://github.com/storytold/materialcraft/issues/27) |
+| **AniCraft** | 2D Animation & Motion Authoring | 2D animation timelines, ProRes 4444 alpha, WebM, GIF, sprite sheets | [storytold/AniCraft#6](https://github.com/storytold/AniCraft/issues/6) |
 | **GridCraft** | Spreadsheets & Financial Models| Workbook reporting, data sheet exports, print-ready PDF reports | [storytold/gridcraft#3154](https://github.com/storytold/gridcraft/issues/3154) |
 | **LightCraft** | Camera RAW Photo Developing | Batch RAW development (DNG, CR2/3, ARW, NEF) to sRGB/P3 | [storytold/lightcraft#3609](https://github.com/storytold/lightcraft/issues/3609) |
+| **Craft Launcher** | Official ArtCraft App Suite Launcher | App catalog registration, installation, and daemon auto-discovery | [storytold/craft-launcher#1199](https://github.com/storytold/craft-launcher/issues/1199) |
+
+### Upstream `craft-libs` & Codec Migration Links
+- **`craft-dispatch` Shared IPC Crate:** [storytold/craft-libs#505](https://github.com/storytold/craft-libs/issues/505)
+- **Video Codecs Centralization:** [storytold/craft-libs#503](https://github.com/storytold/craft-libs/issues/503) / [storytold/craft-libs#504](https://github.com/storytold/craft-libs/pull/504)
+- **Sibling Codec Migration PRs:** [storytold/filmcraft#3941](https://github.com/storytold/filmcraft/pull/3941), [storytold/effectcraft#2814](https://github.com/storytold/effectcraft/pull/2814), [storytold/soundcraft#1275](https://github.com/storytold/soundcraft/pull/1275)
+- **Master `encoderCraft` Issue:** [el-j/encoderCraft#1](https://github.com/el-j/encoderCraft/issues/1)
 

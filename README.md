@@ -37,9 +37,10 @@ Adobe Media Encoder has long been the default render tool for video editors. How
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                 ArtCraft Creative Suite (14 Sibling Apps)                              │
+│                                 ArtCraft Creative Suite (16 Sibling Apps)                              │
 │   FilmCraft · EffectCraft · SoundCraft · PhotoCraft · VectorCraft · DesignCraft · PdfCraft · FigCraft  │
-│        CadCraft · DeckCraft · SolidCraft · WordCraft · TextureCraft · GridCraft · LightCraft           │
+│  CadCraft · DeckCraft · SolidCraft · WordCraft · TextureCraft · MaterialCraft · AniCraft · GridCraft   │
+│                                      LightCraft · Craft Launcher                                       │
 └───────────────────────────────────────────────────┬────────────────────────────────────────────────────┘
                                                     │ "Queue in encoderCraft"
                                                     │ (craft-dispatch IPC & Shared Memory)

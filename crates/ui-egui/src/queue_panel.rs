@@ -489,6 +489,8 @@ fn render_job_row(
                     s if s.contains("solid") => egui::Color32::from_rgb(14, 165, 233), // SolidCraft (Sky Blue)
                     s if s.contains("word") => egui::Color32::from_rgb(37, 99, 235),  // WordCraft (Royal Blue)
                     s if s.contains("texture") => egui::Color32::from_rgb(217, 119, 6), // TextureCraft (Warm Ochre)
+                    s if s.contains("material") => egui::Color32::from_rgb(180, 83, 9), // MaterialCraft (Copper Bronze)
+                    s if s.contains("ani") => egui::Color32::from_rgb(244, 63, 94),   // AniCraft (Coral Rose)
                     s if s.contains("grid") => egui::Color32::from_rgb(16, 185, 129), // GridCraft (Mint Green)
                     s if s.contains("light") => egui::Color32::from_rgb(139, 92, 246), // LightCraft (Violet)
                     _ => tokens.text_dim,
