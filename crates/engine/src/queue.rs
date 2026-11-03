@@ -600,6 +600,42 @@ impl QueueManager {
         Ok(())
     }
 
+    /// Updates an existing output target at `target_idx` on `job_id`.
+    pub fn update_output_target(&self, job_id: &str, target_idx: usize, target: encodercraft_core::OutputTarget) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock
+            .jobs
+            .iter_mut()
+            .find(|j| j.spec.job_id == job_id)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
+
+        if let Some(existing) = job.spec.targets.get_mut(target_idx) {
+            *existing = target;
+        } else {
+            return Err(EncoderError::InvalidJobSpec(format!("target index {target_idx} out of range")));
+        }
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(())
+    }
+
+    /// Updates the job specification in-place for `job_id`.
+    pub fn update_job_spec(&self, job_id: &str, spec: CraftJobSpec) -> Result<(), EncoderError> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock
+            .jobs
+            .iter_mut()
+            .find(|j| j.spec.job_id == job_id)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
+
+        job.spec = spec;
+        drop(lock);
+
+        self.persist_state()?;
+        Ok(())
+    }
+
     /// Clears all completed jobs from the queue, returning the count of removed jobs.
     pub fn clear_completed_jobs(&self) -> Result<usize, EncoderError> {
         let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
