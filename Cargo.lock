@@ -1107,9 +1107,12 @@ dependencies = [
  "encodercraft-demux",
  "encodercraft-engine",
  "encodercraft-geom",
+ "encodercraft-image-codecs",
+ "encodercraft-pipeline",
  "encodercraft-presets",
  "encodercraft-source",
  "encodercraft-watch",
+ "filmcraft-scopes",
  "log",
  "rfd",
  "serde",
@@ -1575,6 +1578,15 @@ dependencies = [
  "filmcraft-bitstream",
  "rayon",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-scopes"
+version = "0.17.0"
+source = "git+https://github.com/storytold/filmcraft#57dc82ea2046c2ec479ab4d4d8167d90e5500b49"
+dependencies = [
+ "filmcraft-color",
+ "serde",
 ]
 
 [[package]]

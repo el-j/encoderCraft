@@ -36,6 +36,7 @@ pub struct EncoderCraftApp {
     pub watch_state: WatchPanelState,
     pub preset_state: PresetBrowserState,
     pub preview_state: PreviewState,
+    pub encoding_state: crate::encoding_panel::EncodingPanelState,
     pub inspector_state: InspectorState,
     pub log_state: LogDialogState,
     pub prefs_state: PrefsDialogState,
@@ -62,6 +63,7 @@ impl EncoderCraftApp {
             watch_state: WatchPanelState::default(),
             preset_state: PresetBrowserState::default(),
             preview_state: PreviewState::default(),
+            encoding_state: crate::encoding_panel::EncodingPanelState::default(),
             inspector_state: InspectorState::default(),
             log_state: LogDialogState::default(),
             prefs_state: PrefsDialogState::default(),
@@ -312,26 +314,37 @@ impl EncoderCraftApp {
             .as_ref()
             .and_then(|id| self.queue_mgr.list_jobs().into_iter().find(|j| &j.spec.job_id == id).map(|j| j.spec));
 
+        let output_ready =
+            self.queue_state.selected_job_id.as_ref().is_some_and(|id| {
+                self.queue_mgr.list_jobs().iter().any(|j| &j.spec.job_id == id && j.status == encodercraft_core::JobStatus::Completed)
+            });
+
         egui::Panel::right("right_side_dock").resizable(true).default_size(360.0).min_size(260.0).max_size(480.0).show(ui, |ui| {
             let prev_job_id = self.preview_state.active_job_id.clone();
-            let prev_in = self.preview_state.in_point;
-            let prev_out = self.preview_state.out_point;
+            let prev_in = self.preview_state.transport.in_point;
+            let prev_out = self.preview_state.transport.out_point;
 
-            render_preview_panel(ui, &mut self.preview_state, selected_job_spec.as_ref(), &self.tokens);
+            render_preview_panel(ui, &mut self.preview_state, selected_job_spec.as_ref(), output_ready, &self.tokens);
 
             // Persist In/Out trim changes back to the selected job in QueueManager
             if let Some(ref spec) = selected_job_spec
                 && prev_job_id.as_deref() == Some(spec.job_id.as_str())
-                && (self.preview_state.in_point != prev_in || self.preview_state.out_point != prev_out)
+                && (self.preview_state.transport.in_point != prev_in || self.preview_state.transport.out_point != prev_out)
             {
                 let _ = self.queue_mgr.set_job_trim_range(
                     &spec.job_id,
-                    self.preview_state.in_point,
-                    self.preview_state.out_point,
-                    self.preview_state.fps.round().max(1.0) as u64,
+                    self.preview_state.transport.in_point,
+                    self.preview_state.transport.out_point,
+                    self.preview_state.transport.fps().round().max(1.0) as u64,
                 );
             }
 
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
+            if let Some(job_id) = crate::encoding_panel::render_encoding_panel(ui, &mut self.encoding_state, &self.queue_mgr, &self.tokens) {
+                let _ = self.queue_mgr.cancel_job(&job_id);
+            }
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(4.0);

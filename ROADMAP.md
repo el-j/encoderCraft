@@ -207,7 +207,7 @@ Alpha 1 shipped with real defects; they are tracked as issues #6–#51 under epi
 - [x] **M23 Queue that drains** – worker pool honouring `max_parallel_jobs` (#53); CLI `encode`/`watch` use the shared queue (#54). Remaining: weighted overall progress, per-target results (#8).
 - [~] **M24 Real video transcode** – decode via filmcraft (`encodercraft-source`), real avcC/hvcC/av1C and timing, conformance suite (#52). Remaining: streaming audio (#17), ProRes/DNx/VP9 config and rate control (#18).
 - [~] **M25 Real image pipeline** – photocraft decode (EXIF orientation, 16-bit/float/CMYK) and encode for PNG, JPEG, TIFF, WebP, GIF, BMP, EXR (#56, #57). Remaining: ICC conversion, image sequences, 16-bit output, full fixture matrix (#22–#24).
-- [~] **M26 Preview** – real preview monitor decoded through the source crate (#55). Remaining: JKL transport, in/out, A/B, scopes, Encoding panel (#27–#29).
+- [x] **M26 Preview** – real preview monitor (#55); JKL/drop-frame transport with In/Out and loop, zoom/pan, safe margins, aspect guides, A/B split, rendered output frames, waveform/parade/histogram/vectorscope via `filmcraft-scopes`, and a live Encoding panel (#27–#29). Audio playback in the monitor remains open.
 - [~] **M27 Workspace shell** – glyph fixes and font fallbacks (#58). Remaining: bundled UI font, dock, command registry, theme (#30–#33).
 - [ ] **M28 Panels** – queue table, Preset Browser, Media Browser, Export Settings, Watch Folders, Preferences (#34–#40).
 - [ ] **M29 Hardening and alpha.2** – E2E QA, installer smoke tests, fuzzing, release (#41–#44).
