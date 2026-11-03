@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="EncoderCraft" Manufacturer="Learning Machines LLC" Version="$(var.Version)" UpgradeCode="20DB848B-A8E2-430E-9E97-BF102C136790" Scope="perUserOrMachine" Compressed="yes" Language="1033">
+    <SummaryInformation Description="EncoderCraft media transcoder" Manufacturer="Learning Machines LLC" />
+    <?include $(sys.SOURCEFILEDIR)install-policy.wxi?>
+    <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other
+         (MSI versions are numeric, so 1.2.3-rc.1 and 1.2.3-rc.2 are both 1.2.3). -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of EncoderCraft is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="EncodercraftIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="EncodercraftIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://getartcraft.com/apps/encodercraft" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://getartcraft.com/apps/encodercraft" />
+    <Property Id="ARPHELPLINK" Value="https://discord.gg/artcraft" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="CraftSuiteFolder" Name="ArtCraft">
+        <Directory Id="INSTALLFOLDER" Name="EncoderCraft" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="EncoderCraft" Level="1">
+      <ComponentGroupRef Id="EncodercraftFiles" />
+    </Feature>
+  <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="NOT Installed" />
+    </UI>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="EncodercraftFiles" Directory="INSTALLFOLDER">
+      <Component Id="EncodercraftNotice">
+        <File Id="EncodercraftNoticeFile" Source="$(var.BinDir)\NOTICE" KeyPath="yes" />
+      </Component>
+      <Component Id="EncodercraftApp" Guid="F16FC42D-969E-4A7F-9B84-506CDAAB8264">
+        <File Id="EncodercraftExe" Source="$(var.BinDir)\encodercraft.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="EncoderCraft" Description="EncoderCraft media transcoder" WorkingDirectory="INSTALLFOLDER" Advertise="yes" Icon="EncodercraftIcon.ico" IconIndex="0" />
+        </File>
+
+        <!-- "Open with" app list and the Run dialog (Win+R "encodercraft"). -->
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe" Name="FriendlyAppName" Value="EncoderCraft" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\shell\open\command" Value="&quot;[#EncodercraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".mp4" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".m4v" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".mov" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".mkv" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".webm" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".avi" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".mxf" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".mpg" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".ts" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".wav" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".aif" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".aiff" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".flac" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".mp3" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\encodercraft.exe\SupportedTypes" Name=".m4a" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\encodercraft.exe" Value="[#EncodercraftExe]" Type="string" />
+      <RegistryValue Root="HKMU" Key="Software\EncoderCraft" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" />
+      </Component>
+
+      <Component Id="EncodercraftCli" Guid="09D582FB-6C7F-47F7-B001-5F0E5B90BBF9">
+        <File Id="EncodercraftCliExe" Source="$(var.BinDir)\encodercraft-cli.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

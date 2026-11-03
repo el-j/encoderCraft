@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="660" height="400" viewBox="0 0 660 400">
+<rect width="660" height="400" fill="#efe9dc"/>
+<g clip-path="url(#panel)"><rect width="232" height="400" fill="#5b3df5"/><g transform="translate(-140,60) scale(0.78)"><image href="../../../assets/app-icon/icon.svg" width="512" height="512"/></g></g>
+<defs><clipPath id="panel"><rect width="232" height="400"/></clipPath></defs>
+<line x1="232.5" y1="0" x2="232.5" y2="400" stroke="#0b0b0c" stroke-width="1.2"/>
+<line x1="236.5" y1="0" x2="236.5" y2="400" stroke="#0b0b0c" stroke-width="0.5"/>
+<line x1="267" y1="88.5" x2="624" y2="88.5" stroke="#0b0b0c" stroke-width="0.6"/>
+<path d="M271.5,81.5 L276,88.5 L271.5,95.5 L267,88.5 Z" fill="#5b3df5"/>
+<path d="M420,205 L476,205 M462,189 L480,205 L462,221" fill="none" stroke="#5b3df5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

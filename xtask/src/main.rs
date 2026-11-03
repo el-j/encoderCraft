@@ -3,7 +3,9 @@
 //! Pure Rust. External tools (`cargo`) are invoked through `std::process::Command`.
 
 mod bench;
+mod ico;
 mod layers;
+mod version;
 
 use std::process::{Command, ExitCode};
 
@@ -14,6 +16,8 @@ commands:
   layers          enforce the crate dependency layering (docs/architecture.md §2)
   test            run workspace tests
   bench           run automated transcoding performance benchmark suite
+  version         print the workspace version; `version set <X.Y.Z[-pre]>` changes it
+  ico             write a Windows .ico from PNGs (used by packaging/icons.sh)
   ci              fmt --check, clippy -D warnings, test, layers (stops at first failure)
 ";
 
@@ -24,6 +28,8 @@ fn main() -> ExitCode {
         Some("test") => cmd_test(),
         Some("bench") => bench::run_benchmarks(),
         Some("ci") => cmd_ci(),
+        Some("version") => version::run(args.get(1..).unwrap_or(&[])),
+        Some("ico") => ico::run(args.get(1..).unwrap_or(&[])),
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");
             Ok(())

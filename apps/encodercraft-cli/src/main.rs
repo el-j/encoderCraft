@@ -33,6 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("watch") => cmd_watch(&args[2..])?,
         Some("daemon") => cmd_daemon(&args[2..])?,
         Some("mcp") => cmd_mcp()?,
+        Some("--version") | Some("-V") => println!("encodercraft-cli {}", env!("CARGO_PKG_VERSION")),
         Some("--help") | Some("-h") | Some("help") => print_usage(),
         Some(cmd) => {
             eprintln!("Unknown command: {cmd}\n");

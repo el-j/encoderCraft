@@ -2,6 +2,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+// Release builds on Windows are GUI programs: no console window behind the app.
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -25,6 +27,10 @@ impl eframe::App for DesktopApp {
 }
 
 fn main() -> Result<(), eframe::Error> {
+    if std::env::args().skip(1).any(|a| a == "--version" || a == "-V") {
+        println!("encodercraft {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     env_logger::init();
 
     let app_dir = get_app_data_dir();
@@ -81,6 +87,10 @@ fn main() -> Result<(), eframe::Error> {
 }
 
 fn get_app_data_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        return PathBuf::from(appdata).join("EncoderCraft");
+    }
     if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(config_home).join("encodercraft")
     } else if let Ok(home) = std::env::var("HOME") {

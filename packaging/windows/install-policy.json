@@ -1,0 +1,129 @@
+{
+  "id": "encodercraft",
+  "name": "EncoderCraft",
+  "upgradeCode": "20DB848B-A8E2-430E-9E97-BF102C136790",
+  "sources": [
+    "encodercraft.wxs"
+  ],
+  "icon": "assets/app-icon/encodercraft.ico",
+  "localization": [],
+  "extensions": [
+    "UI"
+  ],
+  "payloads": [
+    "NOTICE",
+    "encodercraft-cli.exe",
+    "encodercraft.exe"
+  ],
+  "registry": [
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe",
+      "FriendlyAppName",
+      "EncoderCraft"
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\shell\\open\\command",
+      "",
+      "\"[#EncodercraftExe]\" \"%1\""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".mp4",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".m4v",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".mov",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".mkv",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".webm",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".avi",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".mxf",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".mpg",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".ts",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".wav",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".aif",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".aiff",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".flac",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".mp3",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Classes\\Applications\\encodercraft.exe\\SupportedTypes",
+      ".m4a",
+      ""
+    ],
+    [
+      "-1",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\encodercraft.exe",
+      "",
+      "[#EncodercraftExe]"
+    ]
+  ],
+  "mode": "dualScope"
+}

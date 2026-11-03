@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=EncoderCraft
+GenericName=Media Encoder
+Comment=Transcode media and manage batch encoding queues
+Exec=encodercraft %F
+TryExec=encodercraft
+Icon=ai.storyteller.encodercraft
+Terminal=false
+StartupNotify=true
+StartupWMClass=ai.storyteller.encodercraft
+Categories=AudioVideo;Video;Audio;
+MimeType=video/mp4;video/quicktime;video/x-matroska;video/webm;video/x-msvideo;video/mpeg;audio/x-wav;audio/wav;audio/x-aiff;audio/aiff;audio/flac;audio/x-flac;audio/mpeg;audio/mp4;
+Keywords=encoder;transcode;video;audio;convert;queue;batch;

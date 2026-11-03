@@ -23,3 +23,14 @@ fn test_cli_help_and_presets() {
     assert!(p_stdout.contains("YouTube"));
     assert!(p_stdout.contains("Match Source"));
 }
+
+#[test]
+fn test_cli_version_matches_manifest() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    for flag in ["--version", "-V"] {
+        let output = Command::new(bin).arg(flag).output().expect("failed to run cli");
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.trim(), format!("encodercraft-cli {}", env!("CARGO_PKG_VERSION")));
+    }
+}

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flathub). Template: package.sh and the Flatpak
+     manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
+<component type="desktop-application">
+  <id>ai.storyteller.encodercraft</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>EncoderCraft</name>
+  <summary>Transcode media with presets and a batch queue</summary>
+  <developer id="ai.storyteller">
+    <name>Learning Machines LLC</name>
+  </developer>
+  <description>
+    <p>
+      EncoderCraft is an open-source, native media transcoder and batch queue application, written
+      in Rust. Drop in media, pick a preset and let the queue work through it.
+    </p>
+    <ul>
+      <li>Factory presets for common delivery targets, and your own</li>
+      <li>A persistent batch queue with priorities, pause and resume</li>
+      <li>Watch folders that encode new files automatically</li>
+      <li>A headless command line, a background daemon and an MCP server for scripting and agents</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">ai.storyteller.encodercraft.desktop</launchable>
+  <icon type="stock">ai.storyteller.encodercraft</icon>
+  <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
+  <url type="homepage">https://getartcraft.com/apps/encodercraft</url>
+  <url type="bugtracker">https://github.com/el-j/encoderCraft/issues</url>
+  <url type="help">https://github.com/el-j/encoderCraft</url>
+  <url type="contact">https://discord.gg/artcraft</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+  <keywords>
+    <keyword>encoder</keyword>
+    <keyword>transcode</keyword>
+    <keyword>video</keyword>
+    <keyword>audio</keyword>
+    <keyword>queue</keyword>
+  </keywords>
+  <branding>
+    <color type="primary" scheme_preference="light">#cdbfff</color>
+    <color type="primary" scheme_preference="dark">#3a22b8</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <provides>
+    <binary>encodercraft</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

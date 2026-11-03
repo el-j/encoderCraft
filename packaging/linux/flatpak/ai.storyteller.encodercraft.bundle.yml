@@ -1,0 +1,46 @@
+# Flatpak manifest for the single-file bundle attached to every GitHub release
+# (encodercraft-<version>-linux-<arch>.flatpak). Build it with packaging/linux/flatpak-bundle.sh.
+#
+# It repackages the release's own Linux tarball (encodercraft-<version>-linux-<arch>.tar.gz,
+# built on Ubuntu 22.04 by package.sh) instead of compiling Rust inside flatpak-builder: no
+# network and no vendored crate sources during the build, a few seconds instead of 20+ minutes,
+# and byte-for-byte the same binaries as the AppImage/deb/rpm. The script unpacks the tarball
+# into `stage/` next to a copy of this file. The binaries need glibc >= 2.35 and load X11,
+# Wayland, xkbcommon and Vulkan at runtime; the freedesktop runtime has all of them, and the
+# GPU driver comes from its org.freedesktop.Platform.GL extension.
+#
+# ai.storyteller.encodercraft.yml (same directory) is the from-source manifest for Flathub. Keep
+# runtime-version, finish-args identical in both (packaging-lint checks this).
+id: ai.storyteller.encodercraft
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: encodercraft
+finish-args:
+  - --filesystem=xdg-data/ArtCraft/versions:ro
+  # Display: Wayland first; X11 only when no Wayland compositor is running.
+  - --socket=wayland
+  - --socket=fallback-x11
+  # X11 shared memory (MIT-SHM). Without it the X11 fallback is slow or fails.
+  - --share=ipc
+  # Update checks reach GitHub (Help > Check for Updates and the startup check).
+  - --share=network
+  # GPU access for the wgpu UI (Vulkan, or GL as a fallback).
+  - --device=dri
+  # Open/Save dialogs use the file-chooser portal (rfd) and drag-and-drop the document portal,
+  # so broad filesystem access isn't needed. Videos is granted for media opened by path from the
+  # command line and for watch folders there.
+  - --filesystem=xdg-videos
+modules:
+  - name: encodercraft
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 bin/encodercraft /app/bin/encodercraft
+      - install -Dm755 bin/encodercraft-cli /app/bin/encodercraft-cli
+      - install -Dm644 share/applications/ai.storyteller.encodercraft.desktop /app/share/applications/ai.storyteller.encodercraft.desktop
+      # Already has the release's version and date substituted by package.sh.
+      - install -Dm644 share/metainfo/ai.storyteller.encodercraft.metainfo.xml /app/share/metainfo/ai.storyteller.encodercraft.metainfo.xml
+      - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/encodercraft /app/share/doc/
+    sources:
+      - type: dir
+        path: stage
