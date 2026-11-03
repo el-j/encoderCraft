@@ -1,0 +1,4 @@
+[alias]
+# `cargo xtask <command>` runs the workspace tooling in `xtask/` (fmt, clippy, tests, layers, bench).
+# CI (`storytold/craft-common-actions` gate.yml) calls `cargo xtask ci`, so this alias must exist.
+xtask = "run --package xtask --"
