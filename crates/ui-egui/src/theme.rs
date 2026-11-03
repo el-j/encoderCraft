@@ -176,7 +176,9 @@ pub fn apply_theme(ctx: &egui::Context, tokens: &Tokens) {
 
     ctx.global_style_mut(|s| {
         s.text_styles = text_styles;
-        s.spacing.item_spacing = egui::vec2(6.0, 6.0);
-        s.spacing.button_padding = egui::vec2(8.0, 4.0);
+        s.spacing.item_spacing = egui::vec2(6.0, 4.0);
+        s.spacing.button_padding = egui::vec2(8.0, 3.0);
+        s.spacing.interact_size.y = 20.0;
+        s.spacing.menu_margin = egui::Margin::symmetric(6, 4);
     });
 }

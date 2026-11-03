@@ -208,7 +208,7 @@ Alpha 1 shipped with real defects; they are tracked as issues #6–#51 under epi
 - [~] **M24 Real video transcode** – decode via filmcraft (`encodercraft-source`), real avcC/hvcC/av1C and timing, conformance suite (#52). Remaining: streaming audio (#17), ProRes/DNx/VP9 config and rate control (#18).
 - [~] **M25 Real image pipeline** – photocraft decode (EXIF orientation, 16-bit/float/CMYK) and encode for PNG, JPEG, TIFF, WebP, GIF, BMP, EXR (#56, #57). Remaining: ICC conversion, image sequences, 16-bit output, full fixture matrix (#22–#24).
 - [x] **M26 Preview** – real preview monitor (#55); JKL/drop-frame transport with In/Out and loop, zoom/pan, safe margins, aspect guides, A/B split, rendered output frames, waveform/parade/histogram/vectorscope via `filmcraft-scopes`, and a live Encoding panel (#27–#29). Audio playback in the monitor remains open.
-- [~] **M27 Workspace shell** – glyph fixes and font fallbacks (#58). Remaining: bundled UI font, dock, command registry, theme (#30–#33).
+- [~] **M27 Workspace shell** – glyph fixes (#58); command table driving menus, shortcuts and enabled state with a glyph-coverage test (#32); named, persisted, self-repairing workspaces for the right dock with a Window menu (#31); denser theme spacing (#33). Remaining: drag-to-rearrange/floating docking, user-remappable shortcuts, context menus from the table, font bundling from craft-fonts.
 - [ ] **M28 Panels** – queue table, Preset Browser, Media Browser, Export Settings, Watch Folders, Preferences (#34–#40).
 - [ ] **M29 Hardening and alpha.2** – E2E QA, installer smoke tests, fuzzing, release (#41–#44).
 

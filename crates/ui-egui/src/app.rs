@@ -44,6 +44,10 @@ pub struct EncoderCraftApp {
     pub last_watch_tick: Option<std::time::Instant>,
     pub was_worker_running: bool,
     pub completion_banner_timer: Option<std::time::Instant>,
+    pub workspaces: crate::workspace::WorkspaceSet,
+    workspace_path: Option<std::path::PathBuf>,
+    workspace_name_input: String,
+    last_saved_workspaces: Option<crate::workspace::WorkspaceSet>,
     fonts_installed: bool,
 }
 
@@ -71,7 +75,192 @@ impl EncoderCraftApp {
             last_watch_tick: None,
             was_worker_running: false,
             completion_banner_timer: None,
+            workspaces: crate::workspace::WorkspaceSet::default(),
+            workspace_path: None,
+            workspace_name_input: String::new(),
+            last_saved_workspaces: None,
             fonts_installed: false,
+        }
+    }
+
+    /// Loads saved workspaces from `path` and keeps saving changes back to it.
+    pub fn with_workspace_file(mut self, path: std::path::PathBuf) -> Self {
+        self.workspaces = crate::workspace::WorkspaceSet::load(&path);
+        self.last_saved_workspaces = Some(self.workspaces.clone());
+        self.workspace_path = Some(path);
+        self
+    }
+
+    fn command_state(&self) -> crate::commands::CommandState {
+        let jobs = self.queue_mgr.list_jobs();
+        crate::commands::CommandState {
+            selected: self.queue_state.selected_job_ids.len(),
+            jobs: jobs.len(),
+            finished: jobs.iter().filter(|j| j.status == encodercraft_core::JobStatus::Completed).count(),
+            worker_running: self.queue_mgr.is_worker_running(),
+        }
+    }
+
+    fn pick_media(&self) {
+        if let Some(files) = rfd::FileDialog::new()
+            .set_title("Select Media Files")
+            .add_filter(
+                "Media Files",
+                &[
+                    "mov", "mp4", "mkv", "avi", "webm", "mxf", "wav", "aiff", "flac", "mp3", "ogg", "opus", "png", "jpg", "jpeg", "webp", "exr",
+                    "tiff", "bmp", "gif", "svg", "pdf", "docx", "idml", "gltf", "glb", "usdz", "obj", "stl", "ply",
+                ],
+            )
+            .pick_files()
+        {
+            for path in files {
+                self.add_file_job(path);
+            }
+        }
+    }
+
+    /// Runs a command from a menu, shortcut or context menu. All entry points share this.
+    pub fn run_command(&mut self, cmd: crate::commands::AppCommand) {
+        use crate::commands::AppCommand as C;
+        if !cmd.enabled(&self.command_state()) {
+            return;
+        }
+        let ids = self.queue_state.selected_ids_list();
+        match cmd {
+            C::AddMedia => self.pick_media(),
+            C::AddStitched => {
+                if let Some(files) = rfd::FileDialog::new().set_title("Select Clips to Stitch Together").pick_files()
+                    && files.len() > 1
+                    && let Some(first) = files.first()
+                {
+                    let out = first.with_file_name("stitched_sequence.mp4");
+                    let _ = self.queue_mgr.stitch_sources_into_job(files, out, "Match Source - High Bitrate".into());
+                }
+            }
+            C::AddWatchFolder => {
+                if let Some(watch_dir) = rfd::FileDialog::new().set_title("Select Directory to Watch").pick_folder() {
+                    let out_dir = watch_dir.join("_encoded");
+                    let id = format!("watch-{}", self.watch_state.configs.len() + 1);
+                    let cfg = encodercraft_watch::WatchFolderConfig::new(id, watch_dir, out_dir, "Match Source - High Bitrate");
+                    self.watch_state.configs.push(cfg);
+                    self.active_tab = MainViewTab::WatchFolders;
+                }
+            }
+            C::AddDemoClip => self.quick_add_demo_job(),
+            C::ShowLog => self.log_state.is_open = !self.log_state.is_open,
+            C::Preferences => self.prefs_state.is_open = !self.prefs_state.is_open,
+            C::ThemeDark => self.set_brightness(Brightness::Dark),
+            C::ThemeHighContrast => self.set_brightness(Brightness::HighContrast),
+            C::StartQueue => {
+                self.queue_mgr.start_queue();
+            }
+            C::PauseQueue => self.queue_mgr.pause_worker(),
+            C::StopQueue => self.queue_mgr.stop_worker(),
+            C::ResetSelected => {
+                for id in &ids {
+                    let _ = self.queue_mgr.reset_job_status(id);
+                }
+            }
+            C::DuplicateSelected => {
+                for id in &ids {
+                    let _ = self.queue_mgr.duplicate_job(id);
+                }
+            }
+            C::RemoveSelected => {
+                for id in &ids {
+                    let _ = self.queue_mgr.remove_job(id);
+                }
+            }
+            C::StitchSelected => {
+                let out = std::env::temp_dir().join("stitched_batch.mp4");
+                let _ = self.queue_mgr.stitch_selected_jobs(&ids, out, "Match Source - High Bitrate".into());
+            }
+            C::SetDestination => {
+                if let Some(folder) = rfd::FileDialog::new().set_title("Select Output Directory").pick_folder() {
+                    let _ = self.queue_mgr.set_jobs_output_dir(&ids, folder);
+                }
+            }
+            C::ClearFinished => {
+                let _ = self.queue_mgr.clear_completed_jobs();
+            }
+            C::CreatePreset => self.preset_state.editor.open_new(),
+            C::About => self.show_about_dialog = true,
+        }
+    }
+
+    fn set_brightness(&mut self, brightness: Brightness) {
+        self.brightness = brightness;
+        self.tokens = Tokens::for_brightness(brightness);
+    }
+
+    fn window_menu(&mut self, ui: &mut Ui) {
+        ui.separator();
+        ui.label(RichText::new("Workspace").small().color(self.tokens.text_dim));
+        for name in self.workspaces.names() {
+            let active = name == self.workspaces.active;
+            if ui.radio(active, &name).clicked() {
+                self.workspaces.activate(&name);
+            }
+        }
+        ui.separator();
+        ui.label(RichText::new("Panels").small().color(self.tokens.text_dim));
+        for panel in crate::workspace::PanelId::ALL {
+            if let Some(ws) = self.workspaces.current_mut() {
+                let mut shown = ws.is_visible(panel);
+                if ui.checkbox(&mut shown, panel.label()).changed() {
+                    ws.toggle(panel);
+                }
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.workspace_name_input).hint_text("Workspace name").desired_width(120.0));
+            if ui.button("Save As").clicked() && self.workspaces.save_as(&self.workspace_name_input).is_ok() {
+                self.workspace_name_input.clear();
+            }
+        });
+        if ui.button("Rename Active").clicked() && self.workspaces.rename_active(&self.workspace_name_input).is_ok() {
+            self.workspace_name_input.clear();
+        }
+        if ui.button("Reset Active").clicked() {
+            self.workspaces.reset_active();
+        }
+        if ui.button("Delete Active").clicked() {
+            let _ = self.workspaces.delete_active();
+        }
+    }
+
+    fn save_workspaces_if_changed(&mut self) {
+        let Some(path) = &self.workspace_path else { return };
+        if self.last_saved_workspaces.as_ref() != Some(&self.workspaces) {
+            match self.workspaces.save(path) {
+                Ok(()) => self.last_saved_workspaces = Some(self.workspaces.clone()),
+                Err(e) => {
+                    log::warn!("could not save workspaces: {e}");
+                    self.last_saved_workspaces = Some(self.workspaces.clone());
+                }
+            }
+        }
+    }
+
+    fn preview_section(&mut self, ui: &mut Ui, job: Option<&CraftJobSpec>, output_ready: bool) {
+        let prev_job_id = self.preview_state.active_job_id.clone();
+        let prev_in = self.preview_state.transport.in_point;
+        let prev_out = self.preview_state.transport.out_point;
+
+        render_preview_panel(ui, &mut self.preview_state, job, output_ready, &self.tokens);
+
+        // Persist In/Out trim changes back to the selected job in QueueManager
+        if let Some(spec) = job
+            && prev_job_id.as_deref() == Some(spec.job_id.as_str())
+            && (self.preview_state.transport.in_point != prev_in || self.preview_state.transport.out_point != prev_out)
+        {
+            let _ = self.queue_mgr.set_job_trim_range(
+                &spec.job_id,
+                self.preview_state.transport.in_point,
+                self.preview_state.transport.out_point,
+                self.preview_state.transport.fps().round().max(1.0) as u64,
+            );
         }
     }
 
@@ -83,159 +272,38 @@ impl EncoderCraftApp {
         }
         apply_theme(ui.ctx(), &self.tokens);
 
-        // Global keyboard shortcut: Cmd+I to Add Media Files
-        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::I))
-            && let Some(files) = rfd::FileDialog::new()
-                .set_title("Select Media Files")
-                .add_filter(
-                    "Media Files",
-                    &[
-                        "mov", "mp4", "mkv", "avi", "webm", "mxf", "wav", "aiff", "flac", "mp3", "ogg", "opus", "png", "jpg", "jpeg", "webp", "exr",
-                        "tiff", "bmp", "gif", "svg", "pdf", "docx", "idml", "gltf", "glb", "usdz", "obj", "stl", "ply",
-                    ],
-                )
-                .pick_files()
-        {
-            for path in files {
-                self.add_file_job(path);
-            }
-        }
-
-        // Global keyboard shortcut: Cmd+L for Encoding Log
-        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::L)) {
-            self.log_state.is_open = !self.log_state.is_open;
-        }
-
-        // Global keyboard shortcut: Cmd+, for Preferences
-        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) {
-            self.prefs_state.is_open = !self.prefs_state.is_open;
+        for cmd in crate::commands::triggered(ui.ctx()) {
+            self.run_command(cmd);
         }
 
         // 1. Top Application Menu Bar
         egui::Panel::top("top_menu_bar").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Add Media Files... (Cmd+I)").clicked() {
-                        if let Some(files) = rfd::FileDialog::new()
-                            .set_title("Select Media Files")
-                            .add_filter(
-                                "Media Files",
-                                &[
-                                    "mov", "mp4", "mkv", "avi", "webm", "mxf", "wav", "aiff", "flac", "mp3", "ogg", "opus", "png", "jpg", "jpeg",
-                                    "webp", "exr", "tiff", "bmp", "gif", "svg", "pdf", "docx", "idml", "gltf", "glb", "usdz", "obj", "stl", "ply",
-                                ],
-                            )
-                            .pick_files()
-                        {
-                            for path in files {
-                                self.add_file_job(path);
+                let state = self.command_state();
+                let mut chosen = None;
+                for menu in crate::commands::Menu::ALL {
+                    ui.menu_button(menu.label(), |ui| {
+                        for info in crate::commands::menu_commands(menu) {
+                            if info.separator_before {
+                                ui.separator();
+                            }
+                            let mut button = egui::Button::new(info.label);
+                            if let Some(sc) = info.shortcut {
+                                button = button.shortcut_text(sc.display());
+                            }
+                            if ui.add_enabled(info.command.enabled(&state), button).clicked() {
+                                chosen = Some(info.command);
+                                ui.close();
                             }
                         }
-                        ui.close();
-                    }
-
-                    if ui.button("Add Stitched Sequence...").clicked()
-                        && let Some(files) = rfd::FileDialog::new().set_title("Select Clips to Stitch Together").pick_files()
-                        && files.len() > 1
-                        && let Some(first) = files.first()
-                    {
-                        let out = first.with_file_name("stitched_sequence.mp4");
-                        let _ = self.queue_mgr.stitch_sources_into_job(files, out, "Match Source - High Bitrate".into());
-                        ui.close();
-                    }
-
-                    if ui.button("Add Watch Folder...").clicked() {
-                        if let Some(watch_dir) = rfd::FileDialog::new().set_title("Select Directory to Watch").pick_folder() {
-                            let out_dir = watch_dir.join("_encoded");
-                            let id = format!("watch-{}", self.watch_state.configs.len() + 1);
-                            let cfg = encodercraft_watch::WatchFolderConfig::new(id, watch_dir, out_dir, "Match Source - High Bitrate");
-                            self.watch_state.configs.push(cfg);
-                            self.active_tab = MainViewTab::WatchFolders;
-                        }
-                        ui.close();
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Show Encoding Log... (Cmd+L)").clicked() {
-                        self.log_state.is_open = true;
-                        ui.close();
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Quick Add Demo Clip").clicked() {
-                        self.quick_add_demo_job();
-                        ui.close();
-                    }
-                });
-
-                ui.menu_button("Edit", |ui| {
-                    if ui.button("Preferences... (Cmd+,)").clicked() {
-                        self.prefs_state.is_open = true;
-                        ui.close();
-                    }
-                    ui.separator();
-                    ui.menu_button("Theme", |ui| {
-                        if ui.button("Dark").clicked() {
-                            self.brightness = Brightness::Dark;
-                            self.tokens = Tokens::for_brightness(self.brightness);
-                        }
-                        if ui.button("High Contrast").clicked() {
-                            self.brightness = Brightness::HighContrast;
-                            self.tokens = Tokens::for_brightness(self.brightness);
+                        if menu == crate::commands::Menu::Window {
+                            self.window_menu(ui);
                         }
                     });
-                });
-
-                ui.menu_button("Queue", |ui| {
-                    if ui.button("Start Queue (Enter)").clicked() {
-                        self.queue_mgr.start_queue();
-                        ui.close();
-                    }
-                    if ui.button("Pause Queue (Esc)").clicked() {
-                        self.queue_mgr.pause_worker();
-                        ui.close();
-                    }
-                    if ui.button("Stop Queue").clicked() {
-                        self.queue_mgr.stop_worker();
-                        ui.close();
-                    }
-                    ui.separator();
-                    let sel_count = self.queue_state.selected_job_ids.len();
-                    if ui.add_enabled(sel_count > 1, egui::Button::new("Stitch Selected Clips...")).clicked() {
-                        let ids = self.queue_state.selected_ids_list();
-                        let out = std::env::temp_dir().join("stitched_batch.mp4");
-                        let _ = self.queue_mgr.stitch_selected_jobs(&ids, out, "Match Source - High Bitrate".into());
-                        ui.close();
-                    }
-                    if ui.add_enabled(sel_count > 0, egui::Button::new("Set Destination Directory...")).clicked() {
-                        if let Some(folder) = rfd::FileDialog::new().set_title("Select Output Directory").pick_folder() {
-                            let ids = self.queue_state.selected_ids_list();
-                            let _ = self.queue_mgr.set_jobs_output_dir(&ids, folder);
-                        }
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button("Clear Finished Jobs").clicked() {
-                        let _ = self.queue_mgr.clear_completed_jobs();
-                        ui.close();
-                    }
-                });
-
-                ui.menu_button("Preset", |ui| {
-                    if ui.button("Create Encoding Preset...").clicked() {
-                        self.preset_state.editor.open_new();
-                        ui.close();
-                    }
-                });
-
-                ui.menu_button("Help", |ui| {
-                    if ui.button("About encoderCraft").clicked() {
-                        self.show_about_dialog = true;
-                        ui.close();
-                    }
-                });
+                }
+                if let Some(cmd) = chosen {
+                    self.run_command(cmd);
+                }
             });
         });
 
@@ -319,44 +387,42 @@ impl EncoderCraftApp {
                 self.queue_mgr.list_jobs().iter().any(|j| &j.spec.job_id == id && j.status == encodercraft_core::JobStatus::Completed)
             });
 
-        egui::Panel::right("right_side_dock").resizable(true).default_size(360.0).min_size(260.0).max_size(480.0).show(ui, |ui| {
-            let prev_job_id = self.preview_state.active_job_id.clone();
-            let prev_in = self.preview_state.transport.in_point;
-            let prev_out = self.preview_state.transport.out_point;
-
-            render_preview_panel(ui, &mut self.preview_state, selected_job_spec.as_ref(), output_ready, &self.tokens);
-
-            // Persist In/Out trim changes back to the selected job in QueueManager
-            if let Some(ref spec) = selected_job_spec
-                && prev_job_id.as_deref() == Some(spec.job_id.as_str())
-                && (self.preview_state.transport.in_point != prev_in || self.preview_state.transport.out_point != prev_out)
-            {
-                let _ = self.queue_mgr.set_job_trim_range(
-                    &spec.job_id,
-                    self.preview_state.transport.in_point,
-                    self.preview_state.transport.out_point,
-                    self.preview_state.transport.fps().round().max(1.0) as u64,
-                );
-            }
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
-            if let Some(job_id) = crate::encoding_panel::render_encoding_panel(ui, &mut self.encoding_state, &self.queue_mgr, &self.tokens) {
-                let _ = self.queue_mgr.cancel_job(&job_id);
-            }
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
-            render_preset_browser(
-                ui,
-                &mut self.preset_state,
-                &self.preset_registry,
-                &self.queue_mgr,
-                &self.queue_state.selected_ids_list(),
-                &self.tokens,
-            );
-        });
+        let (dock_width, dock_panels, dock_name) =
+            self.workspaces.current().map(|w| (w.dock_width, w.panels.clone(), w.name.clone())).unwrap_or((360.0, Vec::new(), String::new()));
+        if !dock_panels.is_empty() {
+            egui::Panel::right(format!("right_side_dock_{dock_name}"))
+                .resizable(true)
+                .default_size(dock_width)
+                .min_size(crate::workspace::MIN_DOCK_WIDTH)
+                .max_size(crate::workspace::MAX_DOCK_WIDTH)
+                .show(ui, |ui| {
+                    for (i, panel) in dock_panels.iter().enumerate() {
+                        if i > 0 {
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.add_space(4.0);
+                        }
+                        match panel {
+                            crate::workspace::PanelId::Preview => self.preview_section(ui, selected_job_spec.as_ref(), output_ready),
+                            crate::workspace::PanelId::Encoding => {
+                                if let Some(job_id) =
+                                    crate::encoding_panel::render_encoding_panel(ui, &mut self.encoding_state, &self.queue_mgr, &self.tokens)
+                                {
+                                    let _ = self.queue_mgr.cancel_job(&job_id);
+                                }
+                            }
+                            crate::workspace::PanelId::Presets => render_preset_browser(
+                                ui,
+                                &mut self.preset_state,
+                                &self.preset_registry,
+                                &self.queue_mgr,
+                                &self.queue_state.selected_ids_list(),
+                                &self.tokens,
+                            ),
+                        }
+                    }
+                });
+        }
 
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(t) = self.completion_banner_timer {
@@ -489,6 +555,8 @@ impl EncoderCraftApp {
             }
             self.tokens = Tokens::for_brightness(self.brightness);
         }
+
+        self.save_workspaces_if_changed();
 
         // 7. About Dialog
         if self.show_about_dialog {
