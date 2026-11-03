@@ -946,7 +946,7 @@ dependencies = [
  "encodercraft-color",
  "encodercraft-core",
  "encodercraft-geom",
- "miniz_oxide 0.8.9",
+ "miniz_oxide 0.9.1",
  "proptest",
  "serde",
  "thiserror 2.0.21",
