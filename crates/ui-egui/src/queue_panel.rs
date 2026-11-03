@@ -365,15 +365,7 @@ pub fn render_queue_panel(
             let completed_count = jobs.iter().filter(|j| matches!(j.status, JobStatus::Completed)).count();
             let failed_count = jobs.iter().filter(|j| matches!(j.status, JobStatus::Failed(_))).count();
 
-            let sum_pct: f64 = jobs
-                .iter()
-                .map(|j| match j.status {
-                    JobStatus::Completed => 100.0,
-                    JobStatus::Processing => j.progress_percent,
-                    _ => 0.0,
-                })
-                .sum();
-            let overall_progress = (sum_pct / (total_jobs as f64 * 100.0)).clamp(0.0, 1.0) as f32;
+            let overall_progress = overall_fraction(&jobs);
 
             egui::Frame::new().fill(tokens.bg_panel_darker).corner_radius(4).inner_margin(egui::vec2(8.0, 4.0)).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -773,5 +765,53 @@ fn render_client_origin_chip(ui: &mut Ui, client_app: &str, tokens: &Tokens) {
             _ => tokens.text_dim,
         };
         ui.label(RichText::new(format!("[{client_app}]")).small().color(chip_color));
+    }
+}
+
+/// Overall batch progress weighted by output targets; cancelled jobs are excluded and failed jobs
+/// count as finished so a drained queue reads 100 %.
+pub(crate) fn overall_fraction(jobs: &[QueuedJob]) -> f32 {
+    let mut weight = 0.0;
+    let mut done = 0.0;
+    for j in jobs {
+        let w = j.spec.targets.len().max(1) as f64;
+        match j.status {
+            JobStatus::Cancelled => continue,
+            JobStatus::Completed | JobStatus::Failed(_) => done += w,
+            JobStatus::Processing | JobStatus::Paused => done += w * (j.progress_percent / 100.0).clamp(0.0, 1.0),
+            _ => {}
+        }
+        weight += w;
+    }
+    if weight <= 0.0 { 0.0 } else { (done / weight).clamp(0.0, 1.0) as f32 }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use encodercraft_core::{ClientInfo, CraftJobSpec, JobPriority, OutputTarget, SourceDescriptor, StartPolicy};
+
+    fn job(targets: usize, status: JobStatus, pct: f64) -> QueuedJob {
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "j".into(),
+            client_info: ClientInfo { app_name: "t".into(), app_version: "1".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "a.mov".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: (0..targets).map(|_| OutputTarget::default()).collect(),
+        };
+        let mut j = QueuedJob::new(spec);
+        j.status = status;
+        j.progress_percent = pct;
+        j
+    }
+
+    #[test]
+    fn overall_progress_weights_by_targets_and_skips_cancelled() {
+        let jobs = [job(3, JobStatus::Completed, 100.0), job(1, JobStatus::Processing, 50.0), job(5, JobStatus::Cancelled, 0.0)];
+        assert!((overall_fraction(&jobs) - 0.875).abs() < 1e-6);
+        assert_eq!(overall_fraction(&[]), 0.0);
+        assert_eq!(overall_fraction(&[job(1, JobStatus::Failed("x".into()), 0.0)]), 1.0);
     }
 }

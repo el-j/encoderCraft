@@ -283,3 +283,17 @@ fn truncated_still_is_an_error_and_leaves_no_output() {
     assert!(result.is_err());
     assert!(!out.exists());
 }
+
+#[test]
+fn failure_names_the_target_that_failed() {
+    let dir = tempdir().unwrap();
+    let png = dir.path().join("source.png");
+    std::fs::write(&png, encodercraft_image_codecs::encode_png(&test_frame(1)).unwrap()).unwrap();
+    let mut spec = job(&png, target(&dir.path().join("ok.png"), ContainerType::Png, "Good"));
+    spec.targets.push(target(&dir.path().join("ok.png").join("bad.png"), ContainerType::Png, "Bad"));
+    let pipeline = TranscodePipeline::new(spec);
+    let err = pipeline.execute().unwrap_err().to_string();
+    assert!(err.contains("target 2 of 2") && err.contains("Bad"), "{err}");
+    assert_eq!(pipeline.progress().target_index(), 1);
+    assert!(dir.path().join("ok.png").exists());
+}
