@@ -17,7 +17,7 @@ encodercraft-engine = { workspace = true }
 encodercraft-ipc = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-ui-egui = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu"] }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 egui = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
