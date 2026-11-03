@@ -302,6 +302,7 @@ fn failure_names_the_target_that_failed() {
 fn tolerance(container: ContainerType) -> f64 {
     match container {
         ContainerType::Jpeg | ContainerType::WebP => 12.0,
+        ContainerType::AnimatedGif => 25.0,
         ContainerType::OpenExr => 2.0,
         _ => 0.0,
     }
@@ -323,6 +324,7 @@ fn every_still_input_converts_to_every_still_output_with_matching_pixels() {
         ("jpg", ContainerType::Jpeg),
         ("webp", ContainerType::WebP),
         ("exr", ContainerType::OpenExr),
+        ("gif", ContainerType::AnimatedGif),
     ];
 
     for (in_ext, in_container) in formats {
@@ -358,6 +360,7 @@ fn truncated_stills_of_every_format_fail_cleanly() {
         ("jpg", ContainerType::Jpeg),
         ("webp", ContainerType::WebP),
         ("exr", ContainerType::OpenExr),
+        ("gif", ContainerType::AnimatedGif),
     ] {
         let good = run(dir.path(), &format!("good.{ext}"), container, "Image", &base);
         let bytes = std::fs::read(&good).unwrap();

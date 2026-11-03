@@ -100,36 +100,20 @@ fn frame_pixels(frame: &VideoFrame, drop_alpha: bool, background: [u8; 3]) -> Re
     if w == 0 || h == 0 {
         return Err(EncoderError::InvalidJobSpec("cannot encode an image with zero dimensions".into()));
     }
-    let channels = match frame.format {
-        PixelFormat::Rgba8 => 4usize,
-        PixelFormat::Rgb8 => 3usize,
-        other => return Err(EncoderError::UnsupportedCodec(format!("still encoders need Rgb8 or Rgba8 frames, got {other:?}"))),
-    };
-    let (plane, stride) = frame.plane(0)?;
-    let row_len = (w as usize).checked_mul(channels).ok_or_else(|| EncoderError::Internal("image row size overflow".into()))?;
-    let mut out = Vec::with_capacity((w as usize).saturating_mul(h as usize).saturating_mul(if drop_alpha { 3 } else { 4 }));
-    for y in 0..h as usize {
-        let start = y.checked_mul(stride).ok_or_else(|| EncoderError::Internal("image offset overflow".into()))?;
-        let row = plane.get(start..start + row_len).ok_or_else(|| EncoderError::Internal(format!("scanline {y} is out of bounds")))?;
-        for px in row.chunks(channels) {
-            let (r, g, b) = (px.first().copied().unwrap_or(0), px.get(1).copied().unwrap_or(0), px.get(2).copied().unwrap_or(0));
-            let a = if channels == 4 { px.get(3).copied().unwrap_or(255) } else { 255 };
-            if drop_alpha {
-                let blend = |c: u8, bg: u8| ((u32::from(c) * u32::from(a) + u32::from(bg) * (255 - u32::from(a)) + 127) / 255) as u8;
-                out.extend_from_slice(&[blend(r, background[0]), blend(g, background[1]), blend(b, background[2])]);
-            } else {
-                out.extend_from_slice(&[r, g, b, a]);
-            }
-        }
-    }
-    Ok((w, h, out, !drop_alpha))
+    let target_format = if drop_alpha { PixelFormat::Rgb8 } else { PixelFormat::Rgba8 };
+    let data = frame.data();
+    let opts = encodercraft_color::ConvertOptions { background, ..Default::default() };
+    let pixels = encodercraft_color::convert_pixels_with_options(data, frame.format, target_format, w, h, &opts)
+        .map_err(|e| EncoderError::Internal(format!("pixel conversion failed: {e}")))?;
+    Ok((w, h, pixels, !drop_alpha))
 }
 
 /// Encodes `frame` in `format`.
 pub fn encode_still(frame: &VideoFrame, format: StillFormat, options: &StillOptions) -> Result<Vec<u8>, EncoderError> {
-    let (w, h, pixels, has_alpha) = frame_pixels(frame, !format.has_alpha(), options.background)?;
-    let layout = if has_alpha { ChannelLayout::Rgba } else { ChannelLayout::Rgb };
-    let image = Image::from_u8(w, h, layout, pixels).map_err(codec_err)?;
+    let (w, h) = (frame.dimensions.width, frame.dimensions.height);
+    if w == 0 || h == 0 {
+        return Err(EncoderError::InvalidJobSpec("cannot encode an image with zero dimensions".into()));
+    }
 
     let opts = EncodeOptions {
         jpeg_quality: options.quality.clamp(1, 100),
@@ -144,6 +128,23 @@ pub fn encode_still(frame: &VideoFrame, format: StillFormat, options: &StillOpti
         embed_metadata: !options.strip_metadata,
         ..EncodeOptions::default()
     };
+
+    if frame.format == PixelFormat::Rgba16 && format == StillFormat::Tiff {
+        let (plane, _) = frame.plane(0)?;
+        let mut u16_samples = Vec::with_capacity((w as usize).saturating_mul(h as usize).saturating_mul(4));
+        for px in plane.as_chunks::<8>().0 {
+            u16_samples.push(u16::from_le_bytes([px[0], px[1]]));
+            u16_samples.push(u16::from_le_bytes([px[2], px[3]]));
+            u16_samples.push(u16::from_le_bytes([px[4], px[5]]));
+            u16_samples.push(u16::from_le_bytes([px[6], px[7]]));
+        }
+        let image = Image::from_u16(w, h, ChannelLayout::Rgba, &u16_samples).map_err(codec_err)?;
+        return photocraft_codecs::encode(&image, format.codec_format(), &opts).map_err(codec_err);
+    }
+
+    let (w, h, pixels, has_alpha) = frame_pixels(frame, !format.has_alpha(), options.background)?;
+    let layout = if has_alpha { ChannelLayout::Rgba } else { ChannelLayout::Rgb };
+    let image = Image::from_u8(w, h, layout, pixels).map_err(codec_err)?;
     photocraft_codecs::encode(&image, format.codec_format(), &opts).map_err(codec_err)
 }
 
@@ -256,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_pixel_formats() {
+    fn accepts_canonical_pixel_formats() {
         let frame = VideoFrame::new_allocated(
             Dimensions { width: 2, height: 2 },
             PixelFormat::Yuv420p,
@@ -264,7 +265,19 @@ mod tests {
             0,
             1,
             Rational64 { num: 1, den: 1 },
-        );
-        assert!(encode_still(&frame.unwrap(), StillFormat::Png, &StillOptions::default()).is_err());
+        )
+        .unwrap();
+        assert!(encode_still(&frame, StillFormat::Png, &StillOptions::default()).is_ok());
+
+        let frame16 = VideoFrame::new_allocated(
+            Dimensions { width: 2, height: 2 },
+            PixelFormat::Rgba16,
+            ColorSpaceTag::SRGB,
+            0,
+            1,
+            Rational64 { num: 1, den: 1 },
+        )
+        .unwrap();
+        assert!(encode_still(&frame16, StillFormat::Tiff, &StillOptions::default()).is_ok());
     }
 }

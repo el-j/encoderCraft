@@ -1039,6 +1039,7 @@ dependencies = [
  "filmcraft-mxf",
  "filmcraft-time",
  "log",
+ "photocraft-codecs",
  "proptest",
  "rayon",
  "serde",

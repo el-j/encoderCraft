@@ -16,15 +16,30 @@ pub fn encode_png(frame: &VideoFrame) -> Result<Vec<u8>, EncoderError> {
         return Err(EncoderError::InvalidJobSpec("cannot encode PNG with zero dimensions".into()));
     }
 
-    let (color_type, bytes_per_pixel) = match frame.format {
-        PixelFormat::Rgba8 => (6u8, 4usize),
-        PixelFormat::Rgb8 => (2u8, 3usize),
+    let converted;
+    let target_format = if frame.format.has_alpha() { PixelFormat::Rgba8 } else { PixelFormat::Rgb8 };
+    let (actual_frame, color_type, bytes_per_pixel) = match frame.format {
+        PixelFormat::Rgba8 => (frame, 6u8, 4usize),
+        PixelFormat::Rgb8 => (frame, 2u8, 3usize),
         _ => {
-            return Err(EncoderError::UnsupportedCodec(format!("PNG encoder requires RGB8 or RGBA8 pixel format, got {:?}", frame.format)));
+            let converted_bytes = encodercraft_color::convert_pixels(frame.data(), frame.format, target_format, width, height)
+                .map_err(|e| EncoderError::Internal(format!("color conversion failed: {e}")))?;
+            converted = VideoFrame::from_raw_bytes(
+                frame.dimensions,
+                target_format,
+                frame.color_space,
+                frame.pts,
+                frame.duration,
+                frame.timebase,
+                converted_bytes,
+            )?;
+            let ct = if target_format == PixelFormat::Rgba8 { 6u8 } else { 2u8 };
+            let bpp = if target_format == PixelFormat::Rgba8 { 4usize } else { 3usize };
+            (&converted, ct, bpp)
         }
     };
 
-    let (plane_data, stride) = frame.plane(0)?;
+    let (plane_data, stride) = actual_frame.plane(0)?;
 
     let scanline_bytes = (width as usize)
         .checked_mul(bytes_per_pixel)
