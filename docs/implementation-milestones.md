@@ -519,6 +519,33 @@ flowchart LR
 
 ---
 
+### Milestone 30: Universal Format Expansion & ArtCraft Bidirectional Conversion
+**Objective:** Expand `encoderCraft` into the centralized universal media conversion and transcoding nexus across all ArtCraft creative applications and standard/proprietary commercial formats without greenfield codec reinvention. Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Milestone 8](https://github.com/el-j/encoderCraft/milestone/8).
+
+#### Deliverables & Sub-Tasks:
+1. **Core & Demux Sniffer ([#70](https://github.com/el-j/encoderCraft/issues/70)):**
+   - Universal `ContainerType` and `MediaStreamKind` variants for all Adobe formats (`INDD`, `PSD`, `PSB`, `AEP`, `AI`, `PRPROJ`, `SESX`), CAD formats (`DXF`, `DWG`, `HPGL`), and native ArtCraft formats (`.designcraft`, `.photocraft`, `.vectorcraft`, `.effectcraft`, `.filmcraft`, `.soundcraft`, `.cadcraft`, `.anicraft`).
+   - Magic-byte container sniffing and `ContainerType::valid_conversion_targets` smart matrix.
+2. **CAD & Technical Drafting Pipeline ([#71](https://github.com/el-j/encoderCraft/issues/71)):**
+   - Ingest & convert AutoCAD DXF/DWG and HPGL plotter files via `cadcraft-dxf`, `cadcraft-dwg`, `cadcraft-io` into `CadDrawing` IR, `.cadcraft`, SVG, and blueprint PDF.
+3. **Prepress & Publication Pipeline ([#72](https://github.com/el-j/encoderCraft/issues/72)):**
+   - Ingest InDesign `.indd` via `storytold/indd-utils` into `DocumentCanvas` IR; bidirectional `.designcraft` <-> `IDML` / `PDF/X-4` / `EPUB 3` via `designcraft-idml` and `designcraft-pdf`.
+4. **Layered Graphics & Photography Pipeline ([#73](https://github.com/el-j/encoderCraft/issues/73)):**
+   - Ingest & write Photoshop `.psd` / `.psb` with full layer trees via `photocraft-psd`; bidirectional conversion with `.photocraft`, multi-channel OpenEXR, BigTIFF, and DDS GPU texture maps.
+5. **Vector Graphics & Illustration Pipeline ([#74](https://github.com/el-j/encoderCraft/issues/74)):**
+   - Ingest Illustrator `.ai` (PDF stream + PGF/AI5 layers) via `vectorcraft-ai`; bidirectional conversion with `.vectorcraft`, W3C SVG 2.0, and EPS.
+6. **Motion Graphics & NLE Timeline Pipeline ([#75](https://github.com/el-j/encoderCraft/issues/75)):**
+   - Ingest After Effects `.aep` RIFX chunk trees via `effectcraft-aep` (render to ProRes/H.264 or convert to `.effectcraft` / Lottie JSON).
+   - Ingest Premiere Pro `.prproj` gzipped XML via `filmcraft-prproj` (batch render sequences or convert to `.filmcraft` / FCPXML / OTIO).
+7. **Audio DAW & Multitrack Pipeline ([#76](https://github.com/el-j/encoderCraft/issues/76)):**
+   - Ingest Audition `.sesx` sessions via `soundcraft-audio-io` and `soundcraft-dsp`; bidirectional conversion with `.soundcraft` and discrete BWF stems with EBU R128 loudness.
+8. **UI Inspector & Headless CLI Integration ([#77](https://github.com/el-j/encoderCraft/issues/77)):**
+   - Dynamic tab visibility and smart destination filtering in Export Settings Inspector.
+   - Sequence/composition selection picker for multi-timeline project files.
+   - CLI `encodercraft convert <input> --to <format> -o <output>` subcommand.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |
