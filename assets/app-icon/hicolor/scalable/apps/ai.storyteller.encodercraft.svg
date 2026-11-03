@@ -7,6 +7,6 @@
       <rect x="84" y="236" width="118" height="40" rx="20"/>
       <rect x="84" y="322" width="86" height="40" rx="20"/>
     </g>
-    <path d="M276 130 L440 256 L276 382 Z" fill="#efe9dc" stroke="#0b0b0c" stroke-width="14" stroke-linejoin="round"/>
+    <path d="M276 130 L440 256 L276 382 Z" fill="#efe9dc" stroke="#efe9dc" stroke-width="14" stroke-linejoin="round"/>
   </g>
 </svg>
