@@ -378,5 +378,23 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
             video: None,
             audio: None,
         },
+        // 21. Still Image JPEG
+        EncodingPreset {
+            name: "Still Image JPEG".into(),
+            description: "Baseline JPEG 8-bit still image; transparency is flattened onto white".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::Jpeg,
+            video: None,
+            audio: None,
+        },
+        // 22. Still Image WebP (Lossless)
+        EncodingPreset {
+            name: "Still Image WebP (Lossless)".into(),
+            description: "Lossless WebP still image with alpha channel".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::WebP,
+            video: None,
+            audio: None,
+        },
     ]
 }
