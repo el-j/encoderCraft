@@ -355,5 +355,74 @@ impl MediaReader {
     }
 }
 
+/// Probes `path` for preset evaluation. The lightweight header probe classifies the file, and the
+/// real decoder's view of a moving picture (frame rate, size, length, audio) takes precedence,
+/// because container timescales are not frame rates. Containers the header probe does not know
+/// are accepted when the decoder can open them.
+pub fn probe_media_info(path: &Path) -> Result<encodercraft_demux::MediaInfo, EncoderError> {
+    use encodercraft_demux::{AudioStreamInfo, ContainerKind, MediaInfo, VideoStreamInfo};
+
+    let header = encodercraft_demux::probe_file(path);
+    let moving = match &header {
+        Ok(info) => info.container.is_video() || !info.video_streams.is_empty(),
+        Err(_) => true,
+    };
+    let reader = if moving { MediaReader::open(path).ok().filter(|r| !matches!(r.probe().kind, SourceKind::Still)) } else { None };
+    let (mut info, reader) = match (header, reader) {
+        (Ok(info), reader) => (info, reader),
+        (Err(_), Some(reader)) => (
+            MediaInfo {
+                container: ContainerKind::MpegTs,
+                file_size_bytes: reader.probe().file_size.unwrap_or(0),
+                duration_seconds: None,
+                video_streams: Vec::new(),
+                audio_streams: Vec::new(),
+                metadata: Default::default(),
+            },
+            Some(reader),
+        ),
+        (Err(e), None) => return Err(e),
+    };
+    let Some(reader) = reader else {
+        return Ok(info);
+    };
+    let probe = reader.probe();
+    info.duration_seconds = Some(probe.duration_seconds);
+    if let Some(v) = &probe.video {
+        let dimensions = Dimensions::new(v.width, v.height)?;
+        match info.video_streams.first_mut() {
+            Some(stream) => {
+                stream.dimensions = dimensions;
+                stream.frame_rate = v.frame_rate;
+                stream.duration_seconds = Some(probe.duration_seconds);
+            }
+            None => info.video_streams.push(VideoStreamInfo {
+                stream_index: 0,
+                codec_name: v.codec.clone(),
+                dimensions,
+                pixel_format: PixelFormat::Yuv420p,
+                color_space: ColorSpaceTag::REC709,
+                frame_rate: v.frame_rate,
+                bit_depth: 8,
+                duration_seconds: Some(probe.duration_seconds),
+            }),
+        }
+    }
+    if info.audio_streams.is_empty() {
+        for (i, a) in probe.audio.iter().enumerate() {
+            info.audio_streams.push(AudioStreamInfo {
+                stream_index: i + 1,
+                codec_name: a.codec.clone(),
+                sample_rate: a.sample_rate,
+                channels: u16::try_from(a.channels).unwrap_or(u16::MAX),
+                layout: layout_for(a.channels as usize),
+                bits_per_sample: a.bits_per_sample.and_then(|b| u16::try_from(b).ok()).unwrap_or(16),
+                duration_seconds: Some(probe.duration_seconds),
+            });
+        }
+    }
+    Ok(info)
+}
+
 #[cfg(test)]
 mod tests;

@@ -15,6 +15,7 @@ photocraft-codecs = { workspace = true }
 encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
+encodercraft-demux = { workspace = true }
 filmcraft-media = { workspace = true }
 filmcraft-codecs = { workspace = true }
 filmcraft-frame = { workspace = true }

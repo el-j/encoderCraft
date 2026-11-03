@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 encodercraft-core = { workspace = true }
 encodercraft-demux = { workspace = true }
+encodercraft-source = { workspace = true }
 encodercraft-presets = { workspace = true }
 notify = { workspace = true }
 serde = { workspace = true }

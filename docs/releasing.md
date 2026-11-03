@@ -23,7 +23,12 @@ User-facing names say **EncoderCraft**. Files, binaries and ids stay lowercase
 2. **Merge `main` into `release`** (or fast-forward it) and push. The workflow starts by itself.
 3. **Wait for the draft.** The Releases page gets a draft with every artifact and
    `SHA256SUMS.txt`. Notes are generated from the merged pull requests.
-4. **Check it.** Download an installer or two and read the job summaries.
+4. **Check it.** The `release-smoke` workflow unpacks the Linux tarball, the Windows portable
+   zip and the macOS CLI zip on clean runners (`packaging/smoke/smoke-release.sh`: version,
+   PNG and MP4 conversion, bundled licences, desktop entry, metainfo, icons). Run it by hand with
+   *Actions > release-smoke > Run workflow*. Then download an installer or two and read the job
+   summaries. The workflow reads the draft by its tag, so if it cannot find it, run the script
+   locally against the downloaded archive.
 5. **Publish** the draft in the GitHub UI. Publishing creates the tag. A version with a suffix
    (`-alpha.1`, `-rc.1`) is marked as a pre-release.
 
@@ -61,3 +66,23 @@ environment and no draft is created.
 `packaging/` holds the per-platform scripts the shared workflow calls (`macos/`, `windows/`,
 `linux/`, `freebsd/`), `env.sh` and `icons.sh`. The app icon sources live in `assets/app-icon/`;
 regenerate the derived formats with `packaging/icons.sh`.
+
+## Unsigned alpha releases
+
+Signing secrets are required on the `release` branch. To ship an unsigned pre-release without
+forking the shared workflow, run *Actions > Release > Run workflow* from a non-`release` branch
+with a `version` override: it builds every artifact unsigned and creates no draft. Download the
+artifacts from the run, smoke-test them with `packaging/smoke/smoke-release.sh`, and attach them to
+a pre-release created by hand. Proposing an `allow-unsigned` input to
+`storytold/craft-common-actions` would remove the manual step.
+
+## Release notes: known issues
+
+Every pre-release body ends with this section; copy it forward and edit it:
+
+```md
+## Known issues
+- <what does not work yet, with the tracking issue number>
+
+Newer builds fix problems listed in earlier notes; see the latest release.
+```

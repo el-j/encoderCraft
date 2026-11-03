@@ -16,6 +16,7 @@ encodercraft-pipeline = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-watch = { workspace = true }
 encodercraft-engine = { workspace = true }
+encodercraft-source = { workspace = true }
 encodercraft-ipc = { workspace = true }
 encodercraft-dispatch = { workspace = true }
 encodercraft-mcp = { workspace = true }
@@ -25,4 +26,4 @@ log = { workspace = true }
 env_logger = { workspace = true }
 
 [dev-dependencies]
-encodercraft-source = { workspace = true }
+tempfile = { workspace = true }
