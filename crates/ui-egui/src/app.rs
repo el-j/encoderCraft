@@ -318,7 +318,12 @@ impl EncoderCraftApp {
                 && prev_job_id.as_deref() == Some(spec.job_id.as_str())
                 && (self.preview_state.in_point != prev_in || self.preview_state.out_point != prev_out)
             {
-                let _ = self.queue_mgr.set_job_trim_range(&spec.job_id, self.preview_state.in_point, self.preview_state.out_point, 30);
+                let _ = self.queue_mgr.set_job_trim_range(
+                    &spec.job_id,
+                    self.preview_state.in_point,
+                    self.preview_state.out_point,
+                    self.preview_state.fps.round().max(1.0) as u64,
+                );
             }
 
             ui.add_space(8.0);
