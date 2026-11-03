@@ -873,6 +873,7 @@ dependencies = [
  "encodercraft-mcp",
  "encodercraft-pipeline",
  "encodercraft-presets",
+ "encodercraft-source",
  "encodercraft-watch",
  "env_logger",
  "log",

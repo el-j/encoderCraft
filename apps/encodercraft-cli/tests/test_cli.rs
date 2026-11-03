@@ -91,3 +91,35 @@ fn test_cli_encode_reports_failure_with_nonzero_exit() {
     let output = Command::new(bin).args(["encode", "/nonexistent/in.mov"]).output().expect("failed to run encode");
     assert!(!output.status.success());
 }
+
+/// Converts a known picture to every still preset through the CLI and checks the result by
+/// decoding it again: the guard against grey or empty output.
+#[test]
+fn test_cli_still_presets_roundtrip_real_pixels() {
+    use encodercraft_source::MediaReader;
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = std::env::temp_dir().join(format!("encodercraft-cli-stills-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let src = dir.join("src.bmp");
+    write_bmp(&src, 10);
+    let source = MediaReader::open(&src).expect("open source").frame_at_index(0).expect("decode source");
+    let source_px = source.data().to_vec();
+
+    for (preset, ext, lossless) in [
+        ("Still Image PNG (Lossless)", "png", true),
+        ("Windows Bitmap BMP (Uncompressed)", "bmp", true),
+        ("Still Image WebP (Lossless)", "webp", true),
+        ("Still Image JPEG", "jpg", false),
+    ] {
+        let produced = [dir.join(format!("out.{ext}"))];
+        let output = Command::new(bin).args(["encode"]).arg(&src).args(["-p", preset, "-o"]).arg(&produced[0]).output().expect("run encode");
+        assert!(output.status.success(), "{preset}: {}", String::from_utf8_lossy(&output.stderr));
+        let decoded = MediaReader::open(&produced[0]).expect("decode output").frame_at_index(0).expect("decode frame");
+        assert_eq!(decoded.data().len(), source_px.len(), "{preset}: frame size");
+        let total: u64 = decoded.data().iter().zip(&source_px).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
+        let mean = total as f64 / source_px.len() as f64;
+        let limit = if lossless { 0.5 } else { 12.0 };
+        assert!(mean <= limit, "{preset}: mean pixel error {mean} exceeds {limit}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
