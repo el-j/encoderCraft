@@ -573,14 +573,14 @@ fn render_job_row(
 
             // Preset Name
             if let Some(target) = job.spec.targets.first() {
-                ui.label(RichText::new(format!("➔ {}", target.preset_name)).color(tokens.text_secondary));
+                ui.label(RichText::new(format!("-> {}", target.preset_name)).color(tokens.text_secondary));
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Actions menu with boundary clamping and upward flipping
                 let menu_id = ui.make_persistent_id(format!("job_row_actions_menu_{job_id}"));
                 let is_menu_open = state.active_action_menu.as_deref() == Some(&job_id);
-                let btn = ui.add(egui::Button::new(RichText::new("•••").size(14.0)).frame(true));
+                let btn = ui.add(egui::Button::new(RichText::new("...").size(14.0)).frame(true));
                 if btn.clicked() {
                     state.active_action_menu = if is_menu_open { None } else { Some(job_id.clone()) };
                 }
@@ -703,7 +703,7 @@ fn render_job_row(
                         } else {
                             path_display.to_string()
                         };
-                        ui.label(RichText::new(format!("➔ {display_out_name}")).small().color(tokens.text_secondary))
+                        ui.label(RichText::new(format!("-> {display_out_name}")).small().color(tokens.text_secondary))
                             .on_hover_text(target.output_path.display().to_string());
 
                         // Actions per target

@@ -150,7 +150,7 @@ pub fn render_watch_panel(
                             state.selected_config_idx = Some(idx);
                         }
 
-                        ui.label(RichText::new("➔").color(tokens.text_dim));
+                        ui.label(RichText::new("->").color(tokens.text_dim));
 
                         // Output Directory Display
                         let out_name = cfg.output_dir.display().to_string();

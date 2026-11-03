@@ -113,7 +113,7 @@ pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_
                                 ui.label(RichText::new(&entry.source_name).strong());
 
                                 // Preset
-                                ui.label(RichText::new(format!("➔ {}", entry.preset_name)).color(tokens.text_secondary));
+                                ui.label(RichText::new(format!("-> {}", entry.preset_name)).color(tokens.text_secondary));
 
                                 // Duration
                                 let duration_sec = entry.duration_ms as f64 / 1000.0;
