@@ -70,8 +70,8 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(|_cc| {
             let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
-            if let Some(path) = encodercraft_ui_egui::workspace::default_layout_path() {
-                app = app.with_workspace_file(path);
+            if let Some(path) = encodercraft_ui_egui::settings::default_config_dir() {
+                app = app.with_config_dir(path);
             }
             if prefs.theme == "High Contrast" {
                 app.brightness = encodercraft_ui_egui::Brightness::HighContrast;

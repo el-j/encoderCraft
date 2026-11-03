@@ -23,6 +23,7 @@ pub enum MainViewTab {
     #[default]
     Queue,
     WatchFolders,
+    MediaBrowser,
 }
 
 /// The root egui application for encoderCraft.
@@ -34,6 +35,7 @@ pub struct EncoderCraftApp {
     pub active_tab: MainViewTab,
     pub queue_state: QueuePanelState,
     pub watch_state: WatchPanelState,
+    pub media_state: crate::media_browser::MediaBrowserState,
     pub preset_state: PresetBrowserState,
     pub preview_state: PreviewState,
     pub encoding_state: crate::encoding_panel::EncodingPanelState,
@@ -45,7 +47,10 @@ pub struct EncoderCraftApp {
     pub was_worker_running: bool,
     pub completion_banner_timer: Option<std::time::Instant>,
     pub workspaces: crate::workspace::WorkspaceSet,
-    workspace_path: Option<std::path::PathBuf>,
+    config_dir: Option<std::path::PathBuf>,
+    last_saved_prefs: Option<encodercraft_engine::AppPreferences>,
+    last_saved_watch: Option<Vec<encodercraft_watch::WatchFolderConfig>>,
+    last_saved_favorites: Option<Vec<std::path::PathBuf>>,
     workspace_name_input: String,
     last_saved_workspaces: Option<crate::workspace::WorkspaceSet>,
     fonts_installed: bool,
@@ -65,6 +70,7 @@ impl EncoderCraftApp {
             active_tab: MainViewTab::Queue,
             queue_state: QueuePanelState::default(),
             watch_state: WatchPanelState::default(),
+            media_state: crate::media_browser::MediaBrowserState::default(),
             preset_state: PresetBrowserState::default(),
             preview_state: PreviewState::default(),
             encoding_state: crate::encoding_panel::EncodingPanelState::default(),
@@ -76,18 +82,33 @@ impl EncoderCraftApp {
             was_worker_running: false,
             completion_banner_timer: None,
             workspaces: crate::workspace::WorkspaceSet::default(),
-            workspace_path: None,
+            config_dir: None,
+            last_saved_prefs: None,
+            last_saved_watch: None,
+            last_saved_favorites: None,
             workspace_name_input: String::new(),
             last_saved_workspaces: None,
             fonts_installed: false,
         }
     }
 
-    /// Loads saved workspaces from `path` and keeps saving changes back to it.
-    pub fn with_workspace_file(mut self, path: std::path::PathBuf) -> Self {
-        self.workspaces = crate::workspace::WorkspaceSet::load(&path);
+    /// Loads preferences, watch folders and workspaces from `dir` and keeps saving changes back.
+    pub fn with_config_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.workspaces = crate::workspace::WorkspaceSet::load(&crate::settings::workspaces_path(&dir));
         self.last_saved_workspaces = Some(self.workspaces.clone());
-        self.workspace_path = Some(path);
+        match encodercraft_engine::load_preferences(&crate::settings::preferences_path(&dir)) {
+            Ok(prefs) => self.prefs_state.prefs = prefs,
+            Err(e) => log::warn!("using default preferences: {e}"),
+        }
+        self.last_saved_prefs = Some(self.prefs_state.prefs.clone());
+        let brightness = if self.prefs_state.prefs.theme == "High Contrast" { Brightness::HighContrast } else { Brightness::Dark };
+        self.set_brightness(brightness);
+        self.watch_state.configs = crate::settings::load_watch_folders(&crate::settings::watch_folders_path(&dir));
+        self.last_saved_watch = Some(self.watch_state.configs.clone());
+        self.media_state.model.favorites = crate::settings::load_favorites(&crate::settings::favorites_path(&dir));
+        self.last_saved_favorites = Some(self.media_state.model.favorites.clone());
+        let _ = self.queue_mgr.set_parallelism(self.prefs_state.prefs.max_parallel_jobs);
+        self.config_dir = Some(dir);
         self
     }
 
@@ -189,6 +210,7 @@ impl EncoderCraftApp {
     }
 
     fn set_brightness(&mut self, brightness: Brightness) {
+        self.prefs_state.prefs.theme = if brightness == Brightness::HighContrast { "High Contrast".into() } else { "Dark".into() };
         self.brightness = brightness;
         self.tokens = Tokens::for_brightness(brightness);
     }
@@ -230,16 +252,31 @@ impl EncoderCraftApp {
         }
     }
 
-    fn save_workspaces_if_changed(&mut self) {
-        let Some(path) = &self.workspace_path else { return };
+    fn save_settings_if_changed(&mut self) {
+        let Some(dir) = self.config_dir.clone() else { return };
         if self.last_saved_workspaces.as_ref() != Some(&self.workspaces) {
-            match self.workspaces.save(path) {
-                Ok(()) => self.last_saved_workspaces = Some(self.workspaces.clone()),
-                Err(e) => {
-                    log::warn!("could not save workspaces: {e}");
-                    self.last_saved_workspaces = Some(self.workspaces.clone());
-                }
+            if let Err(e) = self.workspaces.save(&crate::settings::workspaces_path(&dir)) {
+                log::warn!("could not save workspaces: {e}");
             }
+            self.last_saved_workspaces = Some(self.workspaces.clone());
+        }
+        if self.last_saved_prefs.as_ref() != Some(&self.prefs_state.prefs) {
+            if let Err(e) = encodercraft_engine::save_preferences_atomic(&crate::settings::preferences_path(&dir), &self.prefs_state.prefs) {
+                log::warn!("could not save preferences: {e}");
+            }
+            self.last_saved_prefs = Some(self.prefs_state.prefs.clone());
+        }
+        if self.last_saved_favorites.as_deref() != Some(self.media_state.model.favorites.as_slice()) {
+            if let Err(e) = crate::settings::save_favorites(&crate::settings::favorites_path(&dir), &self.media_state.model.favorites) {
+                log::warn!("could not save favorites: {e}");
+            }
+            self.last_saved_favorites = Some(self.media_state.model.favorites.clone());
+        }
+        if self.last_saved_watch.as_deref() != Some(self.watch_state.configs.as_slice()) {
+            if let Err(e) = crate::settings::save_watch_folders(&crate::settings::watch_folders_path(&dir), &self.watch_state.configs) {
+                log::warn!("could not save watch folders: {e}");
+            }
+            self.last_saved_watch = Some(self.watch_state.configs.clone());
         }
     }
 
@@ -506,6 +543,18 @@ impl EncoderCraftApp {
                 if w_btn.clicked() {
                     self.active_tab = MainViewTab::WatchFolders;
                 }
+
+                let m_btn = icons::button_with_label(
+                    ui,
+                    icons::Icon::Search,
+                    "Media Browser",
+                    self.active_tab == MainViewTab::MediaBrowser,
+                    &self.tokens,
+                    "Browse folders and add media to the queue",
+                );
+                if m_btn.clicked() {
+                    self.active_tab = MainViewTab::MediaBrowser;
+                }
             });
 
             ui.add_space(2.0);
@@ -518,6 +567,11 @@ impl EncoderCraftApp {
                 }
                 MainViewTab::WatchFolders => {
                     render_watch_panel(ui, &mut self.watch_state, &self.queue_mgr, &self.preset_registry, &self.tokens);
+                }
+                MainViewTab::MediaBrowser => {
+                    for path in crate::media_browser::render_media_browser(ui, &mut self.media_state, &self.tokens) {
+                        self.add_file_job(path);
+                    }
                 }
             }
         });
@@ -548,15 +602,10 @@ impl EncoderCraftApp {
             let _ = self.queue_mgr.set_parallelism(self.prefs_state.prefs.max_parallel_jobs);
         }
         if let Some(theme) = theme_change {
-            if theme == "High Contrast" {
-                self.brightness = Brightness::HighContrast;
-            } else {
-                self.brightness = Brightness::Dark;
-            }
-            self.tokens = Tokens::for_brightness(self.brightness);
+            self.set_brightness(if theme == "High Contrast" { Brightness::HighContrast } else { Brightness::Dark });
         }
 
-        self.save_workspaces_if_changed();
+        self.save_settings_if_changed();
 
         // 7. About Dialog
         if self.show_about_dialog {

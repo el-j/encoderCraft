@@ -53,6 +53,9 @@ pub struct LogEntry {
 /// User application preferences and defaults (AME Parity).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppPreferences {
+    /// Schema of the stored file; files written before versioning load as 0 and are migrated.
+    #[serde(default)]
+    pub schema_version: u32,
     #[serde(default = "default_true")]
     pub auto_start_queue: bool,
     #[serde(default = "default_true")]
@@ -79,9 +82,26 @@ fn default_theme() -> String {
     "Dark".into()
 }
 
+/// Current preferences file schema.
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 1;
+
+impl AppPreferences {
+    /// Upgrades older files and clamps values a hand-edited file could set out of range.
+    pub fn migrate(&mut self) {
+        if self.schema_version < PREFERENCES_SCHEMA_VERSION {
+            self.schema_version = PREFERENCES_SCHEMA_VERSION;
+        }
+        self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 8);
+        if self.theme != "Dark" && self.theme != "High Contrast" {
+            self.theme = default_theme();
+        }
+    }
+}
+
 impl Default for AppPreferences {
     fn default() -> Self {
         Self {
+            schema_version: PREFERENCES_SCHEMA_VERSION,
             auto_start_queue: true,
             play_completion_sound: true,
             remove_finished_on_exit: false,
@@ -154,8 +174,9 @@ pub fn load_preferences(prefs_path: &Path) -> Result<AppPreferences, EncoderErro
     }
 
     let file = File::open(prefs_path).map_err(|e| EncoderError::Io(format!("failed to open preferences: {e}")))?;
-    let prefs: AppPreferences =
+    let mut prefs: AppPreferences =
         serde_json::from_reader(file).map_err(|e| EncoderError::Internal(format!("failed to deserialize preferences: {e}")))?;
+    prefs.migrate();
     Ok(prefs)
 }
 
@@ -174,6 +195,34 @@ pub fn save_preferences_atomic(prefs_path: &Path, prefs: &AppPreferences) -> Res
 
     std::fs::rename(&tmp_path, prefs_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit preferences: {e}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod prefs_tests {
+    use super::*;
+
+    #[test]
+    fn unversioned_file_is_migrated_and_clamped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        std::fs::write(&path, r#"{"max_parallel_jobs":99,"theme":"Neon","auto_start_queue":false}"#).unwrap();
+        let p = load_preferences(&path).unwrap();
+        assert_eq!(p.schema_version, PREFERENCES_SCHEMA_VERSION);
+        assert_eq!(p.max_parallel_jobs, 8);
+        assert_eq!(p.theme, "Dark");
+        assert!(!p.auto_start_queue);
+    }
+
+    #[test]
+    fn preferences_round_trip_and_corruption_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        let p = AppPreferences { max_parallel_jobs: 4, ..AppPreferences::default() };
+        save_preferences_atomic(&path, &p).unwrap();
+        assert_eq!(load_preferences(&path).unwrap(), p);
+        std::fs::write(&path, "{broken").unwrap();
+        assert!(load_preferences(&path).is_err());
+    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 > **Target Application:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Clean-Room Reference:** Black-box observation of measured UI and workflow behaviors  
 > **Prepared for:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
-> **Status:** Parity Architecture & Gap Analysis  
+> **Status:** Parity Architecture & Gap Analysis. Percentages and "100% / Superior" claims below are design targets, not measured results; the authoritative state of each area is the **Implementation status** section and `ROADMAP.md`.  
 
 ---
 
@@ -31,16 +31,32 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 ├──────────────────────────┬─────────────┬────────────────────────────────────────────────┤
 │ Audience Profile         │ Parity %    │ Definition & Workflow Gate                     │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Essentials User**      │ **100%**    │ Drag-and-drop video/audio, pick "YouTube 4K",   │
+│ **Essentials User**      │ **target**  │ Drag-and-drop video/audio, pick "YouTube 4K",   │
 │                          │             │ hit Start Queue, produce perfect output.       │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Mainstream Editor**    │ **100%**    │ Multi-target outputs, ProRes/DNxHR masters,    │
+│ **Mainstream Editor**    │ **target**  │ Multi-target outputs, ProRes/DNxHR masters,    │
 │                          │             │ watch folders, EBU R128 loudness, trim In/Out. │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Full Post Facility**   │ **100%**    │ Hardware encode, MXF OP-1a, SMPTE timecodes,   │
+│ **Full Post Facility**   │ **target**  │ Hardware encode, MXF OP-1a, SMPTE timecodes,   │
 │                          │             │ burn-in captions, 3D LUTs, multi-channel stems.│
 └──────────────────────────┴─────────────┴────────────────────────────────────────────────┘
 ```
+
+### Implementation status (alpha)
+
+| Area | Status | Tracking |
+|---|---|---|
+| Queue: batch start, pause, stop, duplicate, remove, reset, multi-target progress | Implemented | M23, #60 |
+| Video/still decode and encode through ArtCraft crates | Implemented | M24, M25, #56, #57 |
+| Preview monitor, transport, scopes, Encoding panel | Implemented (no audio playback yet) | #27–#29 |
+| Command registry, menu bar, shortcuts, workspaces | Implemented; drag/float docking and shortcut remapping missing | #30–#33 |
+| Preferences, watch folders, favourites persistence | Implemented | #38, #39 |
+| Preset Browser table, import/export, delete | Implemented; per-preset editing dialog partial | #35, #37 |
+| Media Browser (browse, thumbnails, add to queue) | Implemented | #36 |
+| Queue table column customisation, in-table context menus | Partial | #34 |
+| ICC, image sequences, 16-bit pipelines | Missing | #22–#24 |
+| Streaming audio, encoder configuration depth | Partial | #17, #18 |
+| Installer smoke tests, fuzzing, E2E QA | Missing | #41–#43 |
 
 ---
 

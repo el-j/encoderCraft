@@ -3,7 +3,7 @@
 //! Layouts are plain data so they can be saved, validated on load and restored without panics.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub const MIN_DOCK_WIDTH: f32 = 260.0;
 pub const MAX_DOCK_WIDTH: f32 = 720.0;
@@ -234,18 +234,6 @@ impl WorkspaceSet {
         std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
         std::fs::rename(&tmp, path).map_err(|e| e.to_string())
     }
-}
-
-/// Per-user location of the saved layouts, if a home or config directory is known.
-pub fn default_layout_path() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-    }?;
-    Some(base.join("encoderCraft").join("workspaces.json"))
 }
 
 #[cfg(test)]
