@@ -774,8 +774,34 @@ mod tests {
         matches!(status, JobStatus::Completed | JobStatus::Failed(_) | JobStatus::Cancelled)
     }
 
+    /// A real 0.1 s mono 16-bit 8 kHz WAV, so jobs decode actual audio.
+    fn write_wav(dir: &std::path::Path) -> PathBuf {
+        let samples: Vec<i16> = (0..800).map(|i| ((i as f32 * 0.3).sin() * 8000.0) as i16).collect();
+        let data_len = (samples.len() * 2) as u32;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&8000u32.to_le_bytes());
+        bytes.extend_from_slice(&16_000u32.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for s in samples {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        let path = dir.join("in.wav");
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
     fn spec_in(dir: &std::path::Path, id: &str) -> CraftJobSpec {
         let mut spec = make_test_spec(id, JobPriority::Normal);
+        spec.source = SourceDescriptor::File { path: write_wav(dir), start_tick: None, duration_ticks: None, timebase: None };
         spec.targets[0].output_path = dir.join(format!("{id}.wav"));
         spec
     }
@@ -917,6 +943,7 @@ mod tests {
         let target_path = dir.path().join("out.wav");
 
         let mut spec = make_test_spec("job-exec", JobPriority::High);
+        spec.source = SourceDescriptor::File { path: write_wav(dir.path()), start_tick: None, duration_ticks: None, timebase: None };
         spec.targets[0].output_path = target_path.clone();
 
         queue.submit_job(spec).unwrap();

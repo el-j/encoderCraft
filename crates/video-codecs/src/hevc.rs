@@ -46,6 +46,10 @@ impl VideoEncoder for HevcEncoderWrapper {
         Ok(vec![EncodedPacket { data: pkt.data, pts: frame.pts, dts: frame.pts, is_keyframe: pkt.keyframe, duration_ticks: 1000 }])
     }
 
+    fn config_record(&self) -> Vec<u8> {
+        self.inner.hvcc()
+    }
+
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, EncoderError> {
         Ok(Vec::new())
     }

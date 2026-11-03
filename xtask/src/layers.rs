@@ -38,6 +38,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("video-codecs", Class::Layer(3)),
     ("audio-dsp", Class::Layer(3)),
     ("image-codecs", Class::Layer(3)),
+    ("source", Class::Layer(3)),
     ("spatial-io", Class::Layer(3)),
     ("muxers", Class::Layer(3)),
     ("platform", Class::Layer(3)),

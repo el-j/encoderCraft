@@ -131,6 +131,8 @@ impl ClipStitcher {
         let dims = self.options.target_dimensions;
         let fps = self.options.target_frame_rate;
 
+        let mut encoder = create_video_encoder(self.options.video_codec, dims.width, dims.height, fps, self.options.target_bitrate_kbps)?;
+        let ticks_per_frame = u32::try_from(fps.den).map_err(|_| EncoderError::InvalidJobSpec("frame rate denominator is too large".into()))?;
         let v_cfg = VideoStreamConfig {
             codec_fourcc: self.options.video_codec.default_fourcc(),
             dimensions: dims,
@@ -138,48 +140,36 @@ impl ClipStitcher {
             pixel_format: PixelFormat::Yuv420p,
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
-            codec_private: vec![0, 0, 0, 1],
+            codec_private: encoder.config_record(),
         };
 
         let track_idx = mp4_muxer.add_video_stream(&v_cfg)?;
-        let mut encoder = create_video_encoder(self.options.video_codec, dims.width, dims.height, fps, self.options.target_bitrate_kbps)?;
 
         let scaler = FrameScaler::new(ScaleMode::Fit);
         let mut continuous_pts = 0i64;
-        let ticks_per_frame = 1000i64;
 
         for clip in clip_sequences {
             for frame in clip {
                 self.progress.checkpoint()?;
 
-                let scaled = if frame.dimensions == dims { frame } else { scaler.scale(&frame, dims)? };
+                let mut scaled = if frame.dimensions == dims { frame } else { scaler.scale(&frame, dims)? };
+                scaled.pts = continuous_pts;
 
                 let packets = encoder.encode_frame(&scaled)?;
                 for pkt in packets {
-                    let sample = VideoSample {
-                        data: &pkt.data,
-                        pts: continuous_pts,
-                        dts: continuous_pts,
-                        duration_ticks: ticks_per_frame as u32,
-                        is_keyframe: pkt.is_keyframe,
-                    };
+                    let sample =
+                        VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: ticks_per_frame, is_keyframe: pkt.is_keyframe };
                     mp4_muxer.write_video_sample(track_idx, sample)?;
                 }
 
-                continuous_pts = continuous_pts.saturating_add(ticks_per_frame);
+                continuous_pts = continuous_pts.saturating_add(i64::from(ticks_per_frame));
                 self.progress.advance_frame(start_time);
             }
         }
 
         let flushed = encoder.flush()?;
         for pkt in flushed {
-            let sample = VideoSample {
-                data: &pkt.data,
-                pts: continuous_pts,
-                dts: continuous_pts,
-                duration_ticks: ticks_per_frame as u32,
-                is_keyframe: pkt.is_keyframe,
-            };
+            let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: ticks_per_frame, is_keyframe: pkt.is_keyframe };
             mp4_muxer.write_video_sample(track_idx, sample)?;
         }
 
