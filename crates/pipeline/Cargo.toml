@@ -19,6 +19,7 @@ encodercraft-muxers = { workspace = true }
 encodercraft-platform = { workspace = true }
 encodercraft-video-codecs = { workspace = true }
 encodercraft-image-codecs = { workspace = true }
+encodercraft-source = { workspace = true }
 encodercraft-spatial-io = { workspace = true }
 craft-media = { workspace = true }
 filmcraft-mxf = { workspace = true }

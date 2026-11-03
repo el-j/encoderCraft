@@ -8,6 +8,7 @@
 
 pub mod captions;
 pub mod channel_buffer;
+pub(crate) mod input;
 pub mod lut;
 pub mod naming;
 pub mod overlay;

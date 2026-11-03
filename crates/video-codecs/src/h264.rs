@@ -40,6 +40,10 @@ impl VideoEncoder for H264EncoderWrapper {
             .collect())
     }
 
+    fn config_record(&self) -> Vec<u8> {
+        self.inner.avcc()
+    }
+
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, EncoderError> {
         let packets = self.inner.flush();
         Ok(packets

@@ -90,8 +90,9 @@ impl<W: Write + Seek> MkvMuxer<W> {
     pub fn write_video_sample(&mut self, track_idx: usize, sample: VideoSample) -> Result<(), EncoderError> {
         let writer = self.writer.as_mut().ok_or_else(|| EncoderError::Internal("mkv writer already finished".into()))?;
 
-        let pts_ns = sample.pts.max(0) * 1_000_000; // Assuming millisecond ticks or timescale
-        let dur_ns = Some((sample.duration_ticks as u64) * 1_000_000);
+        // Sample times are microsecond ticks.
+        let pts_ns = sample.pts.max(0).saturating_mul(1_000);
+        let dur_ns = Some(u64::from(sample.duration_ticks).saturating_mul(1_000));
 
         writer
             .write_frame(track_idx, pts_ns, sample.is_keyframe, sample.data, dur_ns)
@@ -102,8 +103,8 @@ impl<W: Write + Seek> MkvMuxer<W> {
     pub fn write_audio_sample(&mut self, track_idx: usize, sample: AudioSample) -> Result<(), EncoderError> {
         let writer = self.writer.as_mut().ok_or_else(|| EncoderError::Internal("mkv writer already finished".into()))?;
 
-        let pts_ns = sample.pts.max(0) * 1_000_000;
-        let dur_ns = Some((sample.duration_ticks as u64) * 1_000_000);
+        let pts_ns = sample.pts.max(0).saturating_mul(1_000);
+        let dur_ns = Some(u64::from(sample.duration_ticks).saturating_mul(1_000));
 
         writer
             .write_frame(track_idx, pts_ns, true, sample.data, dur_ns)

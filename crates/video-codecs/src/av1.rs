@@ -46,6 +46,10 @@ impl VideoEncoder for Av1EncoderWrapper {
         Ok(vec![EncodedPacket { data: pkt.data, pts: frame.pts, dts: frame.pts, is_keyframe: pkt.keyframe, duration_ticks: 1000 }])
     }
 
+    fn config_record(&self) -> Vec<u8> {
+        self.inner.av1c()
+    }
+
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, EncoderError> {
         Ok(Vec::new())
     }

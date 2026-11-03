@@ -9,6 +9,7 @@ members = [
     "crates/muxers",
     "crates/image-codecs",
     "crates/video-codecs",
+    "crates/source",
     "crates/spatial-io",
     "crates/platform",
     "crates/pipeline",
@@ -32,6 +33,7 @@ default-members = [
     "crates/muxers",
     "crates/image-codecs",
     "crates/video-codecs",
+    "crates/source",
     "crates/spatial-io",
     "crates/platform",
     "crates/pipeline",
@@ -69,6 +71,9 @@ craft-av1enc = { package = "effectcraft-av1enc", git = "https://github.com/story
 craft-vp9enc = { package = "effectcraft-vp9enc", git = "https://github.com/storytold/effectcraft" }
 filmcraft-captions = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-time = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-media = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-codecs = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-frame = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-mxf = { git = "https://github.com/storytold/filmcraft" }
 craft-aac = { package = "filmcraft-aac", git = "https://github.com/storytold/filmcraft" }
 craft-opus = { package = "filmcraft-opus", git = "https://github.com/storytold/filmcraft" }
@@ -86,6 +91,7 @@ encodercraft-spatial-io = { path = "crates/spatial-io" }
 encodercraft-muxers = { path = "crates/muxers" }
 encodercraft-platform = { path = "crates/platform" }
 encodercraft-pipeline = { path = "crates/pipeline" }
+encodercraft-source = { path = "crates/source" }
 encodercraft-presets = { path = "crates/presets" }
 encodercraft-watch = { path = "crates/watch" }
 encodercraft-ipc = { path = "crates/ipc" }

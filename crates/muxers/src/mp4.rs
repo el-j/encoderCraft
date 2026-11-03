@@ -33,23 +33,18 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
 
         let fourcc = FourCc::new(&cfg.codec_fourcc);
         let codec_config = match &cfg.codec_fourcc {
-            b"avc1" | b"avc3" => CodecConfig::Avc(AvcConfig::new(vec![vec![0x67, 0x64, 0x00, 0x1F]], vec![vec![0x68, 0xEB]], 4)),
-            b"hvc1" | b"hev1" => CodecConfig::Hevc(HevcConfig {
-                general_profile_idc: 1,
-                general_level_idc: 93,
-                chroma_format_idc: 1,
-                bit_depth_luma: cfg.bit_depth.max(8),
-                bit_depth_chroma: cfg.bit_depth.max(8),
-                length_size: 4,
-                ..Default::default()
-            }),
-            b"av01" => CodecConfig::Av1(Av1Config {
-                seq_profile: 0,
-                seq_level_idx_0: 8,
-                chroma_subsampling_x: true,
-                chroma_subsampling_y: true,
-                ..Default::default()
-            }),
+            b"avc1" | b"avc3" => CodecConfig::Avc(
+                AvcConfig::parse(&cfg.codec_private)
+                    .map_err(|e| EncoderError::InvalidContainer(format!("invalid avcC decoder configuration: {e}")))?,
+            ),
+            b"hvc1" | b"hev1" => CodecConfig::Hevc(
+                HevcConfig::parse(&cfg.codec_private)
+                    .map_err(|e| EncoderError::InvalidContainer(format!("invalid hvcC decoder configuration: {e}")))?,
+            ),
+            b"av01" => CodecConfig::Av1(
+                Av1Config::parse(&cfg.codec_private)
+                    .map_err(|e| EncoderError::InvalidContainer(format!("invalid av1C decoder configuration: {e}")))?,
+            ),
             b"vp09" => {
                 CodecConfig::Vp9(VpcConfig { profile: 0, level: 31, bit_depth: cfg.bit_depth.max(8), chroma_subsampling: 1, ..Default::default() })
             }
@@ -70,7 +65,11 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
         let entry =
             SampleEntry { format: fourcc, data_reference_index: 1, codec: codec_config, video: Some(video_params), audio: None, bitrate: None };
 
-        let timescale = (cfg.frame_rate.num as u32).max(1000);
+        // One sample lasts `frame_rate.den` ticks of a `frame_rate.num` Hz track clock.
+        let timescale = u32::try_from(cfg.frame_rate.num)
+            .ok()
+            .filter(|t| *t > 0)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("invalid frame rate {}/{}", cfg.frame_rate.num, cfg.frame_rate.den)))?;
         let track_cfg = TrackConfig::new(entry, timescale);
 
         writer.add_track(track_cfg).map_err(|e| EncoderError::Internal(format!("failed to add video track: {e}")))
@@ -169,6 +168,7 @@ mod tests {
     fn test_mp4_muxer_video_and_audio() {
         let cursor = Cursor::new(Vec::new());
         let mut muxer = Mp4Muxer::new(cursor, false).unwrap();
+        let avcc = craft_h264enc::Encoder::new(craft_h264enc::EncoderConfig::new(64, 64, 24, 1)).unwrap().avcc();
 
         let v_cfg = VideoStreamConfig {
             codec_fourcc: *b"avc1",
@@ -177,7 +177,7 @@ mod tests {
             pixel_format: PixelFormat::Yuv420p,
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
-            codec_private: vec![0, 0, 0, 1],
+            codec_private: avcc,
         };
         let v_track = muxer.add_video_stream(&v_cfg).unwrap();
         assert_eq!(v_track, 0);
