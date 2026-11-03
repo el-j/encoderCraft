@@ -23,8 +23,7 @@ User-facing names say **EncoderCraft**. Files, binaries and ids stay lowercase
 2. **Merge `main` into `release`** (or fast-forward it) and push. The workflow starts by itself.
 3. **Wait for the draft.** The Releases page gets a draft with every artifact and
    `SHA256SUMS.txt`. Notes are generated from the merged pull requests.
-4. **Check it.** Download an installer or two and read the job summaries. A `::warning::` means a
-   signing secret was missing and that artifact is unsigned.
+4. **Check it.** Download an installer or two and read the job summaries.
 5. **Publish** the draft in the GitHub UI. Publishing creates the tag. A version with a suffix
    (`-alpha.1`, `-rc.1`) is marked as a pre-release.
 
@@ -49,11 +48,13 @@ environment and no draft is created.
 
 - Create the `release` branch (from `main`).
 - Create a GitHub environment named `release`, restricted to the `release` branch.
-- Optional signing secrets (without them artifacts are unsigned, which is fine for an alpha):
-  `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`, `APPLE_ID`,
-  `APPLE_PASSWORD`, `APPLE_TEAM_ID`, `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`,
-  `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`,
-  `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
+- Signing secrets in the `release` environment. **They are required:** on the `release` branch
+  the shared workflow fails the macOS and Windows jobs when they are empty, and no draft is
+  created. macOS needs `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`,
+  `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`. Windows needs either `WINDOWS_CERTIFICATE` +
+  `WINDOWS_CERTIFICATE_PASSWORD` or the Azure Trusted Signing set (`AZURE_TENANT_ID`,
+  `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`,
+  `AZURE_CERT_PROFILE`). Pushes to other branches never sign and never create a draft.
 
 ## Packaging layout
 
