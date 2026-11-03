@@ -69,6 +69,7 @@ craft-vp8 = { package = "filmcraft-vp8", git = "https://github.com/storytold/fil
 craft-hevcenc = { package = "effectcraft-hevcenc", git = "https://github.com/storytold/effectcraft" }
 craft-av1enc = { package = "effectcraft-av1enc", git = "https://github.com/storytold/effectcraft" }
 craft-vp9enc = { package = "effectcraft-vp9enc", git = "https://github.com/storytold/effectcraft" }
+filmcraft-scopes = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-captions = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-time = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-media = { git = "https://github.com/storytold/filmcraft" }

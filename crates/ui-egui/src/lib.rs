@@ -7,17 +7,22 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod encoding_panel;
 pub mod fonts;
 pub mod icons;
 pub mod inspector;
 pub mod log_dialog;
+pub mod monitor_geom;
+pub mod output_render;
 pub mod prefs_dialog;
 pub mod preset_browser;
 pub mod preset_editor;
 pub mod preview_decoder;
 pub mod preview_panel;
 pub mod queue_panel;
+pub mod scope_view;
 pub mod theme;
+pub mod transport;
 pub mod watch_panel;
 
 pub use app::EncoderCraftApp;

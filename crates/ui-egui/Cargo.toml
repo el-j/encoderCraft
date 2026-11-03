@@ -15,9 +15,11 @@ encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-engine = { workspace = true }
+encodercraft-pipeline = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-source = { workspace = true }
 encodercraft-watch = { workspace = true }
+filmcraft-scopes = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
 rfd = { workspace = true }
 serde = { workspace = true }
@@ -26,3 +28,4 @@ log = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+encodercraft-image-codecs = { workspace = true }
