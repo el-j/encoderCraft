@@ -47,8 +47,19 @@ impl TranscodePipeline {
             return Err(EncoderError::InvalidJobSpec("job contains no output targets".into()));
         }
 
-        for target in &self.spec.targets {
-            self.execute_target(target, start_time)?;
+        let count = self.spec.targets.len();
+        self.progress.set_target_count(count as u64);
+        for (index, target) in self.spec.targets.iter().enumerate() {
+            self.progress.begin_target(index as u64);
+            self.execute_target(target, start_time).map_err(|e| match e {
+                EncoderError::Cancelled => e,
+                other => EncoderError::Internal(format!(
+                    "target {} of {count} ('{}' -> {}) failed: {other}",
+                    index + 1,
+                    target.preset_name,
+                    target.output_path.display()
+                )),
+            })?;
         }
 
         Ok(())

@@ -13,6 +13,8 @@ pub struct JobProgress {
     fps_fixed: AtomicU64, // 16.16 fixed point FPS
     cancelled: AtomicBool,
     paused: AtomicBool,
+    target_index: AtomicU64,
+    target_count: AtomicU64,
 }
 
 impl Default for JobProgress {
@@ -30,7 +32,31 @@ impl JobProgress {
             fps_fixed: AtomicU64::new(0),
             cancelled: AtomicBool::new(false),
             paused: AtomicBool::new(false),
+            target_index: AtomicU64::new(0),
+            target_count: AtomicU64::new(1),
         }
+    }
+
+    /// Declares how many output targets the job has; overall progress is spread evenly over them.
+    pub fn set_target_count(&self, count: u64) {
+        self.target_count.store(count.max(1), Ordering::Release);
+    }
+
+    /// Starts target `index`: its own frame counters restart, overall progress stays monotonic.
+    pub fn begin_target(&self, index: u64) {
+        self.processed_frames.store(0, Ordering::Release);
+        self.total_frames.store(0, Ordering::Release);
+        self.target_index.store(index, Ordering::Release);
+    }
+
+    /// Zero-based index of the target currently encoding.
+    pub fn target_index(&self) -> u64 {
+        self.target_index.load(Ordering::Acquire)
+    }
+
+    /// Number of targets in the job.
+    pub fn target_count(&self) -> u64 {
+        self.target_count.load(Ordering::Acquire)
     }
 
     /// Sets the total expected frame count once known.
@@ -61,12 +87,11 @@ impl JobProgress {
 
     /// Returns completion progress percentage in the range [0.0, 100.0].
     pub fn percent_complete(&self) -> f64 {
+        let count = self.target_count().max(1) as f64;
+        let index = (self.target_index() as f64).min(count);
         let total = self.total_frames();
-        if total == 0 {
-            return 0.0;
-        }
-        let done = self.processed_frames();
-        ((done as f64) / (total as f64) * 100.0).clamp(0.0, 100.0)
+        let within = if total == 0 { 0.0 } else { (self.processed_frames() as f64 / total as f64).clamp(0.0, 1.0) };
+        ((index + within) / count * 100.0).clamp(0.0, 100.0)
     }
 
     /// Current instantaneous encoding speed in frames per second.
@@ -125,6 +150,26 @@ mod tests {
         assert!(!progress.is_cancelled());
         progress.cancel();
         assert!(progress.is_cancelled());
+    }
+
+    #[test]
+    fn overall_progress_is_weighted_across_targets_and_monotonic() {
+        let progress = JobProgress::new(0);
+        progress.set_target_count(2);
+        let start = Instant::now();
+        let mut last = 0.0;
+        for target in 0..2 {
+            progress.begin_target(target);
+            progress.set_total_frames(4);
+            for _ in 0..4 {
+                progress.advance_frame(start);
+                let pct = progress.percent_complete();
+                assert!(pct >= last, "progress went backwards: {last} -> {pct}");
+                last = pct;
+            }
+        }
+        assert_eq!(progress.target_index(), 1);
+        assert_eq!(last, 100.0);
     }
 
     #[test]
