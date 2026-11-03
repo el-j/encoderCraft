@@ -1,0 +1,67 @@
+name: release-smoke
+
+# Unpacks the artifacts of a draft release on clean runners and proves they work, before a
+# maintainer publishes the draft. Runs after the Release workflow, or by hand for any version.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to check, e.g. 0.1.0-alpha.2 (empty: Cargo.toml)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          v="${{ inputs.version }}"
+          [ -n "$v" ] || v="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml | head -n 1)"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            asset: "linux-x86_64.tar.gz"
+          - os: windows-latest
+            asset: "windows-x64-portable.zip"
+          - os: macos-latest
+            asset: "cli-macos-universal.zip"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the release artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          mkdir -p dl
+          if [ "$ASSET" = "cli-macos-universal.zip" ]; then
+            pattern="encodercraft-cli-${VERSION}-macos-universal.zip"
+          else
+            pattern="encodercraft-${VERSION}-${ASSET}"
+          fi
+          gh release download "v${VERSION}" --repo "${{ github.repository }}" --pattern "$pattern" --dir dl
+          ls -l dl
+      - name: Smoke test
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: packaging/smoke/smoke-release.sh dl/* "$VERSION"

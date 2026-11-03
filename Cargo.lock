@@ -879,6 +879,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1078,6 +1079,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "encodercraft-color",
  "encodercraft-core",
+ "encodercraft-demux",
  "encodercraft-geom",
  "filmcraft-codecs",
  "filmcraft-frame",
@@ -1148,6 +1150,7 @@ dependencies = [
  "encodercraft-core",
  "encodercraft-demux",
  "encodercraft-presets",
+ "encodercraft-source",
  "notify",
  "proptest",
  "serde",

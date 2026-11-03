@@ -13,6 +13,7 @@ pub enum ContainerKind {
     Matroska,
     WebM,
     Mxf,
+    MpegTs,
     // Audio containers
     Wav,
     Rf64Wav,
@@ -62,6 +63,7 @@ impl ContainerKind {
             Self::Matroska => "Matroska Video (MKV)",
             Self::WebM => "WebM",
             Self::Mxf => "Material Exchange Format (MXF)",
+            Self::MpegTs => "MPEG Transport Stream",
             Self::Wav => "Waveform Audio (WAV)",
             Self::Rf64Wav => "RF64 Broadcast Wave (>4GB)",
             Self::Aiff => "Audio Interchange (AIFF)",
@@ -101,7 +103,7 @@ impl ContainerKind {
 
     /// Whether this container is fundamentally a moving picture / video format.
     pub fn is_video(&self) -> bool {
-        matches!(self, Self::IsoBmffMp4 | Self::QuickTimeMov | Self::Matroska | Self::WebM | Self::Mxf | Self::Gif)
+        matches!(self, Self::IsoBmffMp4 | Self::QuickTimeMov | Self::Matroska | Self::WebM | Self::Mxf | Self::MpegTs | Self::Gif)
     }
 
     /// Whether this container is purely an audio recording.
@@ -327,6 +329,11 @@ pub fn sniff_container(bytes: &[u8]) -> Option<ContainerKind> {
         }
     }
 
+    // MPEG transport stream: 0x47 sync byte every 188 bytes (three consecutive packets).
+    if bytes.len() >= 377 && bytes.first() == Some(&0x47) && bytes.get(188) == Some(&0x47) && bytes.get(376) == Some(&0x47) {
+        return Some(ContainerKind::MpegTs);
+    }
+
     None
 }
 
@@ -376,6 +383,17 @@ mod tests {
         assert_eq!(sniff_container(b""), None);
         assert_eq!(sniff_container(b"xyz"), None);
         assert_eq!(sniff_container(b"some random junk data that has no header"), None);
+    }
+
+    #[test]
+    fn test_sniff_mpeg_ts_needs_three_sync_bytes() {
+        let mut ts = vec![0u8; 188 * 3];
+        for i in 0..3 {
+            ts[i * 188] = 0x47;
+        }
+        assert_eq!(sniff_container(&ts), Some(ContainerKind::MpegTs));
+        ts[376] = 0;
+        assert_eq!(sniff_container(&ts), None);
     }
 
     #[test]

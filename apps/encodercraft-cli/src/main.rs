@@ -169,7 +169,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
             println!("Probing source: {}", input_path.display());
         }
 
-        let media_info = probe_file(input_path)?;
+        let media_info = encodercraft_source::probe_media_info(input_path)?;
         let mut target = evaluate_preset(preset, &media_info, output_path.clone())?;
 
         if export_stems {

@@ -3,7 +3,6 @@
 use std::path::Path;
 
 use encodercraft_core::{ClientInfo, CraftJobSpec, EncoderError, JobPriority, SourceDescriptor, StartPolicy};
-use encodercraft_demux::probe_file;
 use encodercraft_presets::{PresetRegistry, evaluate_preset};
 
 use crate::config::{PostProcessAction, WatchFolderConfig};
@@ -78,7 +77,7 @@ impl WatchFolderService {
         let target_path = cfg.output_dir.join(output_filename);
 
         // Probe source media
-        let media_info = probe_file(file_path)?;
+        let media_info = encodercraft_source::probe_media_info(file_path)?;
 
         // Evaluate preset against source info
         let target = evaluate_preset(preset, &media_info, target_path)?;
