@@ -98,7 +98,20 @@ impl TranscodePipeline {
             ContainerType::MxfOpAtom => self.execute_video_mxf(target, true, start_time)?,
             ContainerType::MatroskaMkv => self.execute_video_mkv(target, false, start_time)?,
             ContainerType::WebM => self.execute_video_mkv(target, true, start_time)?,
-            ContainerType::AnimatedGif => self.execute_animated_gif(target, start_time)?,
+            ContainerType::AnimatedGif => {
+                let is_still = match &self.spec.source {
+                    SourceDescriptor::File { path, .. } => {
+                        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+                        encodercraft_source::is_still_extension(&ext) && !encodercraft_source::is_sequence_pattern(path)
+                    }
+                    _ => false,
+                };
+                if is_still || FrameNaming::parse(&target.output_path).is_some() {
+                    self.execute_image_transcode(target, start_time)?
+                } else {
+                    self.execute_animated_gif(target, start_time)?
+                }
+            }
             ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
             ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml => self.execute_document_pdf(target, start_time)?,
             ContainerType::Gltf | ContainerType::Usdz | ContainerType::Obj | ContainerType::Stl | ContainerType::Ply => {
@@ -370,6 +383,7 @@ impl TranscodePipeline {
             ContainerType::Bmp => (StillFormat::Bmp, StillOptions::default()),
             ContainerType::Jpeg => (StillFormat::Jpeg, StillOptions::default()),
             ContainerType::WebP => (StillFormat::WebP, StillOptions { webp_lossless: target.image_quality.is_none(), ..StillOptions::default() }),
+            ContainerType::AnimatedGif => (StillFormat::Gif, StillOptions::default()),
             other => return Err(EncoderError::UnsupportedCodec(format!("{other:?} is not a still-image container"))),
         };
         if let Some(q) = target.image_quality {
