@@ -150,9 +150,7 @@ impl ClipStitcher {
 
         for clip in clip_sequences {
             for frame in clip {
-                if self.progress.is_cancelled() {
-                    return Err(EncoderError::Internal("stitch cancelled by user".into()));
-                }
+                self.progress.checkpoint()?;
 
                 let scaled = if frame.dimensions == dims { frame } else { scaler.scale(&frame, dims)? };
 

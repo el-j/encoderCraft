@@ -282,8 +282,8 @@ pub fn call_tool(
 
             match action {
                 "start" => {
-                    let processed = queue_mgr.process_next_job()?;
-                    Ok(json!({ "action": "start", "processed": processed }))
+                    let running = queue_mgr.start_queue();
+                    Ok(json!({ "action": "start", "running": running }))
                 }
                 "pause" => {
                     let id = job_id.ok_or_else(|| EncoderError::InvalidJobSpec("job_id required for pause".into()))?;

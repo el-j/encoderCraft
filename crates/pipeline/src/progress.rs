@@ -1,7 +1,9 @@
 //! Lockless atomic progress counters and cancellation tokens.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use encodercraft_core::EncoderError;
 
 /// Lock-free progress reporter and cancellation token for background encoding jobs.
 #[derive(Debug)]
@@ -92,6 +94,18 @@ impl JobProgress {
     pub fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Acquire)
     }
+
+    /// Cooperative control point for encode loops: blocks while the job is paused and
+    /// returns `EncoderError::Cancelled` as soon as cancellation is requested.
+    pub fn checkpoint(&self) -> Result<(), EncoderError> {
+        while self.is_paused() && !self.is_cancelled() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if self.is_cancelled() {
+            return Err(EncoderError::Cancelled);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -111,5 +125,35 @@ mod tests {
         assert!(!progress.is_cancelled());
         progress.cancel();
         assert!(progress.is_cancelled());
+    }
+
+    #[test]
+    fn test_checkpoint_reports_cancellation() {
+        let progress = JobProgress::new(10);
+        assert!(progress.checkpoint().is_ok());
+        progress.cancel();
+        assert!(matches!(progress.checkpoint(), Err(EncoderError::Cancelled)));
+    }
+
+    #[test]
+    fn test_checkpoint_blocks_while_paused_and_resumes() {
+        let progress = std::sync::Arc::new(JobProgress::new(10));
+        progress.set_paused(true);
+        let worker = std::sync::Arc::clone(&progress);
+        let handle = std::thread::spawn(move || worker.checkpoint());
+        std::thread::sleep(Duration::from_millis(80));
+        assert!(!handle.is_finished());
+        progress.set_paused(false);
+        assert!(matches!(handle.join(), Ok(Ok(()))));
+    }
+
+    #[test]
+    fn test_checkpoint_paused_job_can_still_be_cancelled() {
+        let progress = std::sync::Arc::new(JobProgress::new(10));
+        progress.set_paused(true);
+        let worker = std::sync::Arc::clone(&progress);
+        let handle = std::thread::spawn(move || worker.checkpoint());
+        progress.cancel();
+        assert!(matches!(handle.join(), Ok(Err(EncoderError::Cancelled))));
     }
 }

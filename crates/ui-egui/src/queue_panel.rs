@@ -118,12 +118,12 @@ pub fn render_queue_panel(
     ui.vertical(|ui| {
         // --- Keyboard shortcuts for AME parity ---
         if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            state.is_running = true;
-            let _ = queue_mgr.process_next_job();
+            queue_mgr.start_queue();
         }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            state.is_running = false;
+            queue_mgr.stop_worker();
         }
+        state.is_running = queue_mgr.is_worker_running() && !queue_mgr.is_paused();
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::A)) {
             state.select_all(&jobs);
         }
@@ -172,24 +172,17 @@ pub fn render_queue_panel(
             let start_btn =
                 icons::button_with_label(ui, icons::Icon::Play, "Start Queue", state.is_running, tokens, "Start processing the batch queue (Enter)");
             if start_btn.clicked() {
-                state.is_running = true;
-                let _ = queue_mgr.process_next_job();
+                queue_mgr.start_queue();
             }
 
             let pause_btn = icons::button_with_label(ui, icons::Icon::Pause, "Pause", false, tokens, "Pause active encode");
             if pause_btn.clicked() {
-                state.is_running = false;
-                for id in state.selected_ids_list() {
-                    let _ = queue_mgr.pause_job(&id);
-                }
+                queue_mgr.pause_worker();
             }
 
             let stop_btn = icons::button_with_label(ui, icons::Icon::Stop, "Stop", false, tokens, "Stop batch queue (Esc)");
             if stop_btn.clicked() {
-                state.is_running = false;
-                for id in state.selected_ids_list() {
-                    let _ = queue_mgr.cancel_job(&id);
-                }
+                queue_mgr.stop_worker();
             }
 
             ui.separator();
@@ -633,7 +626,7 @@ fn render_job_row(
                                     }
                                     if ui.button("Start Now").clicked() {
                                         let _ = queue_mgr.start_job(&job_id);
-                                        let _ = queue_mgr.process_next_job();
+                                        queue_mgr.start_queue();
                                         state.active_action_menu = None;
                                     }
                                     if ui.button("Pause").clicked() {

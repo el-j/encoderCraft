@@ -3,6 +3,7 @@
 //! Provides a unified interface reachable by GUI, CLI, loopback IPC, and MCP alike.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use encodercraft_core::EncoderError;
 use serde_json::Value;
@@ -14,18 +15,18 @@ pub struct CommandSpec {
     pub id: &'static str,
     pub label: &'static str,
     pub description: &'static str,
-    handler: Box<dyn Fn(&QueueManager, Value) -> Result<Value, EncoderError> + Send + Sync>,
+    handler: Box<dyn Fn(&Arc<QueueManager>, Value) -> Result<Value, EncoderError> + Send + Sync>,
 }
 
 impl CommandSpec {
     pub fn new<F>(id: &'static str, label: &'static str, description: &'static str, handler: F) -> Self
     where
-        F: Fn(&QueueManager, Value) -> Result<Value, EncoderError> + Send + Sync + 'static,
+        F: Fn(&Arc<QueueManager>, Value) -> Result<Value, EncoderError> + Send + Sync + 'static,
     {
         Self { id, label, description, handler: Box::new(handler) }
     }
 
-    pub fn execute(&self, queue: &QueueManager, params: Value) -> Result<Value, EncoderError> {
+    pub fn execute(&self, queue: &Arc<QueueManager>, params: Value) -> Result<Value, EncoderError> {
         (self.handler)(queue, params)
     }
 }
@@ -55,7 +56,7 @@ impl CommandRegistry {
     }
 
     /// Dispatches a command by ID with JSON parameters.
-    pub fn dispatch(&self, queue: &QueueManager, cmd_id: &str, params: Value) -> Result<Value, EncoderError> {
+    pub fn dispatch(&self, queue: &Arc<QueueManager>, cmd_id: &str, params: Value) -> Result<Value, EncoderError> {
         let cmd = self.commands.get(cmd_id).ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown command '{cmd_id}'")))?;
         cmd.execute(queue, params)
     }
@@ -88,9 +89,8 @@ impl CommandRegistry {
                 q.start_job(job_id)?;
                 Ok(serde_json::json!({ "jobId": job_id, "status": "started" }))
             } else {
-                // Process next job
-                let processed = q.process_next_job()?;
-                Ok(serde_json::json!({ "processed": processed }))
+                let running = q.start_queue();
+                Ok(serde_json::json!({ "running": running }))
             }
         }));
 
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_command_registry_dispatch() {
-        let queue = QueueManager::new_in_memory();
+        let queue = Arc::new(QueueManager::new_in_memory());
         let registry = CommandRegistry::new();
 
         let spec = CraftJobSpec {

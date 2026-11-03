@@ -58,10 +58,7 @@ impl IpcHandler for EngineIpcHandler {
                     Err(e) => IpcResponse::error(req.id, e.to_string()),
                 }
             }
-            "queue.start" => {
-                let _ = self.queue_mgr.process_next_job();
-                IpcResponse::success(req.id, json!(true))
-            }
+            "queue.start" => IpcResponse::success(req.id, json!(self.queue_mgr.start_queue())),
             "queue.pause" => {
                 let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
                 if !job_id.is_empty() {

@@ -16,6 +16,7 @@ pub struct QueueManager {
     active_progress: Mutex<Option<(String, Arc<JobProgress>)>>,
     is_worker_running: Arc<AtomicBool>,
     stop_worker_signal: Arc<AtomicBool>,
+    paused: AtomicBool,
 }
 
 impl QueueManager {
@@ -27,18 +28,27 @@ impl QueueManager {
             active_progress: Mutex::new(None),
             is_worker_running: Arc::new(AtomicBool::new(false)),
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
+            paused: AtomicBool::new(false),
         }
     }
 
     /// Creates a queue manager persisted to disk at the specified journal path.
     pub fn new_persisted(journal_path: PathBuf) -> Result<Self, EncoderError> {
-        let journal = load_journal(&journal_path)?;
+        let mut journal = load_journal(&journal_path)?;
+        // A job left `Processing` by a crash or forced exit is picked up again.
+        for job in &mut journal.jobs {
+            if matches!(job.status, JobStatus::Processing) {
+                job.status = JobStatus::Queued;
+                job.progress_percent = 0.0;
+            }
+        }
         Ok(Self {
             journal_path: Some(journal_path),
             state: Mutex::new(journal),
             active_progress: Mutex::new(None),
             is_worker_running: Arc::new(AtomicBool::new(false)),
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
+            paused: AtomicBool::new(false),
         })
     }
 
@@ -66,6 +76,9 @@ impl QueueManager {
     /// Removes a job from the queue.
     pub fn remove_job(&self, job_id: &str) -> Result<(), EncoderError> {
         let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if lock.jobs.iter().any(|j| j.spec.job_id == job_id && matches!(j.status, JobStatus::Processing)) {
+            return Err(EncoderError::InvalidJobSpec(format!("job '{job_id}' is encoding; cancel it before removing")));
+        }
         let orig_len = lock.jobs.len();
         lock.jobs.retain(|j| j.spec.job_id != job_id);
 
@@ -87,7 +100,10 @@ impl QueueManager {
             .find(|j| j.spec.job_id == job_id)
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
 
-        job.status = JobStatus::Cancelled;
+        if matches!(job.status, JobStatus::Queued | JobStatus::Paused | JobStatus::Processing) {
+            self.with_active(job_id, |p| p.cancel());
+            job.status = JobStatus::Cancelled;
+        }
         drop(lock);
 
         self.persist_state()?;
@@ -103,7 +119,10 @@ impl QueueManager {
             .find(|j| j.spec.job_id == job_id)
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
 
-        job.status = JobStatus::Paused;
+        if matches!(job.status, JobStatus::Queued | JobStatus::Processing) {
+            self.with_active(job_id, |p| p.set_paused(true));
+            job.status = JobStatus::Paused;
+        }
         drop(lock);
 
         self.persist_state()?;
@@ -119,7 +138,14 @@ impl QueueManager {
             .find(|j| j.spec.job_id == job_id)
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
 
-        job.status = JobStatus::Queued;
+        if !matches!(job.status, JobStatus::Processing) {
+            if self.is_active(job_id) {
+                self.with_active(job_id, |p| p.set_paused(false));
+                job.status = JobStatus::Processing;
+            } else {
+                job.status = JobStatus::Queued;
+            }
+        }
         drop(lock);
 
         self.persist_state()?;
@@ -187,81 +213,141 @@ impl QueueManager {
         Ok(())
     }
 
+    fn is_active(&self, job_id: &str) -> bool {
+        let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
+        matches!(&*p_lock, Some((id, _)) if id == job_id)
+    }
+
+    fn with_active(&self, job_id: &str, f: impl FnOnce(&JobProgress)) {
+        let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((id, prog)) = &*p_lock
+            && id == job_id
+        {
+            f(prog);
+        }
+    }
+
+    /// Atomically claims the next `Queued` job and marks it `Processing`.
+    fn claim_next(&self) -> Option<(String, CraftJobSpec)> {
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = lock.jobs.iter_mut().find(|j| matches!(j.status, JobStatus::Queued))?;
+        job.status = JobStatus::Processing;
+        job.progress_percent = 0.0;
+        job.current_fps = 0.0;
+        job.error_message = None;
+        job.completed_at_unix_ms = None;
+        Some((job.spec.job_id.clone(), job.spec.clone()))
+    }
+
     /// Processes the next available `Queued` job to completion synchronously.
     /// Returns true if a job was found and executed.
     pub fn process_next_job(&self) -> Result<bool, EncoderError> {
-        let start_time = std::time::Instant::now();
-        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-
-        let next_idx = lock.jobs.iter().position(|j| matches!(j.status, JobStatus::Queued));
-        let job_idx = match next_idx {
-            Some(idx) => idx,
-            None => return Ok(false), // No jobs ready
-        };
-
-        let job_spec = if let Some(j) = lock.jobs.get_mut(job_idx) {
-            j.status = JobStatus::Processing;
-            j.spec.clone()
-        } else {
+        let Some((job_id, spec)) = self.claim_next() else {
             return Ok(false);
         };
-        drop(lock);
+        self.persist_state()?;
+        match self.run_job(&job_id, &spec) {
+            Ok(()) | Err(EncoderError::Cancelled) => Ok(true),
+            Err(e) => Err(e),
+        }
+    }
 
-        let pipeline = TranscodePipeline::new(job_spec.clone());
-        let result = pipeline.execute();
+    /// Executes a claimed job, mirrors live progress into the journal and records the outcome.
+    fn run_job(&self, job_id: &str, spec: &CraftJobSpec) -> Result<(), EncoderError> {
+        let start_time = std::time::Instant::now();
+        let pipeline = TranscodePipeline::new(spec.clone());
+        let progress = pipeline.progress();
+        {
+            let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
+            *p_lock = Some((job_id.to_string(), Arc::clone(&progress)));
+        }
 
-        let elapsed_ms = start_time.elapsed().as_millis() as u64;
+        let stop_monitor = AtomicBool::new(false);
+        let result = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !stop_monitor.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    let pct = progress.percent_complete();
+                    let fps = progress.current_fps();
+                    let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+                    if let Some(j) = lock.jobs.iter_mut().find(|j| j.spec.job_id == job_id)
+                        && matches!(j.status, JobStatus::Processing | JobStatus::Paused)
+                    {
+                        j.progress_percent = pct;
+                        j.current_fps = fps;
+                    }
+                }
+            });
+            let result = pipeline.execute();
+            stop_monitor.store(true, Ordering::Release);
+            result
+        });
+
+        {
+            let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
+            *p_lock = None;
+        }
+
+        let outcome = if progress.is_cancelled() && result.is_err() { Err(EncoderError::Cancelled) } else { result };
+        self.finish_job(job_id, spec, &outcome, start_time.elapsed().as_millis() as u64)?;
+        outcome
+    }
+
+    /// Writes the final status of a job unless the job vanished or was already cancelled by the user.
+    fn finish_job(&self, job_id: &str, spec: &CraftJobSpec, outcome: &Result<(), EncoderError>, elapsed_ms: u64) -> Result<(), EncoderError> {
         let now_unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
 
-        let (status_str, err_msg) = match &result {
-            Ok(()) => ("Completed".to_string(), None),
-            Err(e) => ("Failed".to_string(), Some(e.to_string())),
-        };
+        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut status_str = "Completed".to_string();
+        let mut err_msg = None;
+        if let Some(j) = lock.jobs.iter_mut().find(|j| j.spec.job_id == job_id) {
+            let already_cancelled = matches!(j.status, JobStatus::Cancelled);
+            match outcome {
+                Ok(()) if !already_cancelled => {
+                    j.status = JobStatus::Completed;
+                    j.progress_percent = 100.0;
+                    j.completed_at_unix_ms = Some(now_unix);
+                }
+                Ok(()) => status_str = "Cancelled".to_string(),
+                Err(EncoderError::Cancelled) => {
+                    j.status = JobStatus::Cancelled;
+                    j.completed_at_unix_ms = Some(now_unix);
+                    status_str = "Cancelled".to_string();
+                }
+                Err(err) if !already_cancelled => {
+                    j.status = JobStatus::Failed(err.to_string());
+                    j.error_message = Some(err.to_string());
+                    j.completed_at_unix_ms = Some(now_unix);
+                    status_str = "Failed".to_string();
+                    err_msg = Some(err.to_string());
+                }
+                Err(_) => status_str = "Cancelled".to_string(),
+            }
+        }
 
-        let source_display = match &job_spec.source {
+        let source_name = match &spec.source {
             encodercraft_core::SourceDescriptor::File { path, .. } => path.file_name().and_then(|s| s.to_str()).unwrap_or("File").to_string(),
             encodercraft_core::SourceDescriptor::StitchedClips { .. } => "Stitched Sequence".to_string(),
             encodercraft_core::SourceDescriptor::Pipe { endpoint, .. } => endpoint.clone(),
             encodercraft_core::SourceDescriptor::ProjectReference { composition_id, .. } => composition_id.clone(),
         };
-
-        let preset_display = job_spec.targets.first().map(|t| t.preset_name.clone()).unwrap_or_else(|| "Unknown".into());
-        let output_display = job_spec.targets.first().map(|t| t.output_path.display().to_string()).unwrap_or_else(|| "output.mp4".into());
-
-        let log_entry = LogEntry {
+        let first = spec.targets.first();
+        lock.log_entries.push(LogEntry {
             timestamp_unix_ms: now_unix,
-            job_id: job_spec.job_id.clone(),
-            source_name: source_display,
-            preset_name: preset_display,
-            output_path: output_display,
+            job_id: job_id.to_string(),
+            source_name,
+            preset_name: first.map(|t| t.preset_name.clone()).unwrap_or_else(|| "Unknown".into()),
+            output_path: first.map(|t| t.output_path.display().to_string()).unwrap_or_else(|| "output.mp4".into()),
             duration_ms: elapsed_ms,
             status: status_str,
             error: err_msg,
-        };
-
-        let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(j) = lock.jobs.get_mut(job_idx) {
-            match result {
-                Ok(()) => {
-                    j.status = JobStatus::Completed;
-                    j.progress_percent = 100.0;
-                    j.completed_at_unix_ms = Some(now_unix);
-                }
-                Err(ref err) => {
-                    j.status = JobStatus::Failed(err.to_string());
-                    j.error_message = Some(err.to_string());
-                    j.completed_at_unix_ms = Some(now_unix);
-                }
-            }
-        }
-        lock.log_entries.push(log_entry);
+        });
         if lock.log_entries.len() > 500 {
             lock.log_entries.remove(0);
         }
         drop(lock);
 
-        self.persist_state()?;
-        result.map(|_| true)
+        self.persist_state()
     }
 
     /// Starts background asynchronous processing of queued jobs in a dedicated worker thread (AME Parity).
@@ -284,152 +370,87 @@ impl QueueManager {
         true
     }
 
+    /// Starts (or resumes) the whole queue: every `Queued` job is processed one after another
+    /// until the queue is drained. Returns true if a worker is running afterwards.
+    pub fn start_queue(self: &Arc<Self>) -> bool {
+        self.stop_worker_signal.store(false, Ordering::Release);
+        self.resume_worker();
+        self.start_background_worker();
+        self.is_worker_running()
+    }
+
     /// Returns true if the background queue worker is currently actively transcoding.
     pub fn is_worker_running(&self) -> bool {
         self.is_worker_running.load(Ordering::Acquire)
     }
 
+    /// Returns true if the last stop request has not been superseded by a start.
+    pub fn is_stop_requested(&self) -> bool {
+        self.stop_worker_signal.load(Ordering::Acquire)
+    }
+
+    /// Returns true if the queue is paused.
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Acquire)
+    }
+
     /// Stops background processing and cancels the currently transcoding job.
     pub fn stop_worker(&self) {
         self.stop_worker_signal.store(true, Ordering::Release);
+        self.paused.store(false, Ordering::Release);
         let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((_, ref prog)) = *p_lock {
             prog.cancel();
         }
     }
 
-    /// Pauses the active worker and current job.
+    /// Pauses the queue: the current job is suspended and no further job is started until resumed.
     pub fn pause_worker(&self) {
-        self.stop_worker_signal.store(true, Ordering::Release);
+        self.paused.store(true, Ordering::Release);
         let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((_, ref prog)) = *p_lock {
             prog.set_paused(true);
         }
     }
 
-    fn run_worker_loop(self: &Arc<Self>) {
+    /// Resumes a paused queue and its suspended job.
+    pub fn resume_worker(&self) {
+        self.paused.store(false, Ordering::Release);
+        let p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, ref prog)) = *p_lock {
+            prog.set_paused(false);
+        }
+    }
+
+    fn has_queued_jobs(&self) -> bool {
+        let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        lock.jobs.iter().any(|j| matches!(j.status, JobStatus::Queued))
+    }
+
+    fn run_worker_loop(&self) {
         loop {
             if self.stop_worker_signal.load(Ordering::Acquire) {
                 break;
             }
+            if self.paused.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                continue;
+            }
 
-            let next_job = {
-                let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-                if let Some(pos) = lock.jobs.iter().position(|j| matches!(j.status, JobStatus::Queued)) {
-                    if let Some(j) = lock.jobs.get_mut(pos) {
-                        j.status = JobStatus::Processing;
-                        j.progress_percent = 0.0;
-                        j.current_fps = 0.0;
-                        Some((j.spec.job_id.clone(), j.spec.clone()))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+            let Some((job_id, spec)) = self.claim_next() else {
+                // Close the race with a job submitted while the worker was about to exit.
+                self.is_worker_running.store(false, Ordering::Release);
+                if self.has_queued_jobs() && !self.stop_worker_signal.load(Ordering::Acquire) && !self.is_worker_running.swap(true, Ordering::AcqRel)
+                {
+                    continue;
                 }
-            };
-
-            let Some((job_id, spec)) = next_job else {
-                break;
+                return;
             };
 
             let _ = self.persist_state();
-
-            let pipeline = TranscodePipeline::new(spec.clone());
-            let progress = pipeline.progress();
-
-            {
-                let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-                *p_lock = Some((job_id.clone(), Arc::clone(&progress)));
-            }
-
-            let start_time = std::time::Instant::now();
-
-            let stop_monitor = Arc::new(AtomicBool::new(false));
-            let m_stop_clone = Arc::clone(&stop_monitor);
-            let p_clone = Arc::clone(&progress);
-            let m_this = Arc::clone(self);
-            let m_job_id = job_id.clone();
-
-            let monitor_handle = std::thread::Builder::new().name("encodercraft-progress".into()).spawn(move || {
-                while !m_stop_clone.load(Ordering::Acquire) {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    let pct = p_clone.percent_complete();
-                    let fps = p_clone.current_fps();
-                    let mut lock = m_this.state.lock().unwrap_or_else(PoisonError::into_inner);
-                    if let Some(j) = lock.jobs.iter_mut().find(|j| j.spec.job_id == m_job_id) {
-                        j.progress_percent = pct;
-                        j.current_fps = fps;
-                    }
-                }
-            });
-
-            let exec_result = pipeline.execute();
-
-            stop_monitor.store(true, Ordering::Release);
-            if let Ok(handle) = monitor_handle {
-                let _ = handle.join();
-            }
-
-            {
-                let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
-                *p_lock = None;
-            }
-
-            let elapsed_ms = start_time.elapsed().as_millis() as u64;
-            let now_unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-
-            let (status_str, err_msg) = match &exec_result {
-                Ok(()) => ("Completed".to_string(), None),
-                Err(e) => ("Failed".to_string(), Some(e.to_string())),
-            };
-
-            let source_display = match &spec.source {
-                encodercraft_core::SourceDescriptor::File { path, .. } => path.file_name().and_then(|s| s.to_str()).unwrap_or("File").to_string(),
-                encodercraft_core::SourceDescriptor::StitchedClips { .. } => "Stitched Sequence".to_string(),
-                encodercraft_core::SourceDescriptor::Pipe { endpoint, .. } => endpoint.clone(),
-                encodercraft_core::SourceDescriptor::ProjectReference { composition_id, .. } => composition_id.clone(),
-            };
-
-            let preset_display = spec.targets.first().map(|t| t.preset_name.clone()).unwrap_or_else(|| "Unknown".into());
-            let output_display = spec.targets.first().map(|t| t.output_path.display().to_string()).unwrap_or_else(|| "output.mp4".into());
-
-            let log_entry = LogEntry {
-                timestamp_unix_ms: now_unix,
-                job_id: job_id.clone(),
-                source_name: source_display,
-                preset_name: preset_display,
-                output_path: output_display,
-                duration_ms: elapsed_ms,
-                status: status_str,
-                error: err_msg.clone(),
-            };
-
-            {
-                let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-                if let Some(j) = lock.jobs.iter_mut().find(|j| j.spec.job_id == job_id) {
-                    match exec_result {
-                        Ok(()) => {
-                            j.status = JobStatus::Completed;
-                            j.progress_percent = 100.0;
-                            j.completed_at_unix_ms = Some(now_unix);
-                        }
-                        Err(err) => {
-                            j.status = JobStatus::Failed(err.to_string());
-                            j.error_message = Some(err.to_string());
-                            j.completed_at_unix_ms = Some(now_unix);
-                        }
-                    }
-                }
-                lock.log_entries.push(log_entry);
-                if lock.log_entries.len() > 500 {
-                    lock.log_entries.remove(0);
-                }
-            }
-
-            let _ = self.persist_state();
+            // A failed job is recorded by `finish_job`; the batch continues with the next item.
+            let _ = self.run_job(&job_id, &spec);
         }
-
         self.is_worker_running.store(false, Ordering::Release);
     }
 
@@ -739,6 +760,139 @@ mod tests {
                 ..Default::default()
             }],
         }
+    }
+
+    fn wait_until_idle(queue: &QueueManager) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while queue.is_worker_running() {
+            assert!(std::time::Instant::now() < deadline, "worker did not drain the queue in time");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    fn is_terminal(status: &JobStatus) -> bool {
+        matches!(status, JobStatus::Completed | JobStatus::Failed(_) | JobStatus::Cancelled)
+    }
+
+    fn spec_in(dir: &std::path::Path, id: &str) -> CraftJobSpec {
+        let mut spec = make_test_spec(id, JobPriority::Normal);
+        spec.targets[0].output_path = dir.join(format!("{id}.wav"));
+        spec
+    }
+
+    #[test]
+    fn test_start_queue_drains_every_queued_job() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(QueueManager::new_in_memory());
+        for i in 0..4 {
+            queue.submit_job(spec_in(dir.path(), &format!("batch-{i}"))).unwrap();
+        }
+        assert!(queue.start_queue());
+        wait_until_idle(&queue);
+        let jobs = queue.list_jobs();
+        assert_eq!(jobs.len(), 4);
+        assert!(jobs.iter().all(|j| is_terminal(&j.status)), "all jobs must be finished after a single start");
+    }
+
+    #[test]
+    fn test_failed_job_does_not_stop_the_batch() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(QueueManager::new_in_memory());
+        let mut bad = spec_in(dir.path(), "bad");
+        bad.targets[0].output_path = dir.path().join("missing-dir").join("nested").join("x").join("bad.wav");
+        queue.submit_job(bad).unwrap();
+        queue.submit_job(spec_in(dir.path(), "good")).unwrap();
+        queue.start_queue();
+        wait_until_idle(&queue);
+        assert!(queue.list_jobs().iter().all(|j| is_terminal(&j.status)));
+    }
+
+    #[test]
+    fn test_paused_queue_holds_jobs_until_resumed() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(QueueManager::new_in_memory());
+        queue.submit_job(spec_in(dir.path(), "p1")).unwrap();
+        queue.submit_job(spec_in(dir.path(), "p2")).unwrap();
+        queue.pause_worker();
+        assert!(queue.start_background_worker());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(queue.list_jobs().iter().all(|j| matches!(j.status, JobStatus::Queued)));
+        assert!(queue.is_worker_running(), "pausing must not kill the worker");
+        queue.resume_worker();
+        wait_until_idle(&queue);
+        assert!(queue.list_jobs().iter().all(|j| is_terminal(&j.status)));
+    }
+
+    #[test]
+    fn test_stop_worker_exits_without_running_jobs() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(QueueManager::new_in_memory());
+        queue.submit_job(spec_in(dir.path(), "s1")).unwrap();
+        queue.pause_worker();
+        assert!(queue.start_background_worker());
+        queue.stop_worker();
+        wait_until_idle(&queue);
+        assert!(queue.is_stop_requested());
+        assert!(queue.list_jobs().iter().all(|j| matches!(j.status, JobStatus::Queued)));
+    }
+
+    #[test]
+    fn test_cancelled_queued_job_is_skipped() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(QueueManager::new_in_memory());
+        queue.submit_job(spec_in(dir.path(), "c1")).unwrap();
+        queue.submit_job(spec_in(dir.path(), "c2")).unwrap();
+        queue.cancel_job("c1").unwrap();
+        queue.start_queue();
+        wait_until_idle(&queue);
+        let jobs = queue.list_jobs();
+        let c1 = jobs.iter().find(|j| j.spec.job_id == "c1").unwrap();
+        assert_eq!(c1.status, JobStatus::Cancelled);
+        assert!(!dir.path().join("c1.wav").exists());
+    }
+
+    #[test]
+    fn test_finished_job_status_is_not_overwritten_by_controls() {
+        let dir = tempdir().unwrap();
+        let queue = QueueManager::new_in_memory();
+        queue.submit_job(spec_in(dir.path(), "done")).unwrap();
+        queue.process_next_job().unwrap();
+        let before = queue.list_jobs()[0].status.clone();
+        queue.cancel_job("done").unwrap();
+        queue.pause_job("done").unwrap();
+        assert_eq!(queue.list_jobs()[0].status, before);
+    }
+
+    #[test]
+    fn test_remove_rejects_processing_job() {
+        let queue = QueueManager::new_in_memory();
+        queue.submit_job(make_test_spec("busy", JobPriority::Normal)).unwrap();
+        queue.claim_next().unwrap();
+        assert!(queue.remove_job("busy").is_err());
+        assert_eq!(queue.list_jobs().len(), 1);
+    }
+
+    #[test]
+    fn test_cancel_active_job_marks_cancelled_via_progress() {
+        let queue = QueueManager::new_in_memory();
+        queue.submit_job(make_test_spec("act", JobPriority::Normal)).unwrap();
+        let (id, spec) = queue.claim_next().unwrap();
+        queue.cancel_job(&id).unwrap();
+        queue.finish_job(&id, &spec, &Ok(()), 1).unwrap();
+        assert_eq!(queue.list_jobs()[0].status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_persisted_processing_job_is_requeued_on_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("journal.json");
+        let queue = QueueManager::new_persisted(path.clone()).unwrap();
+        queue.submit_job(make_test_spec("crash", JobPriority::Normal)).unwrap();
+        queue.claim_next().unwrap();
+        queue.persist_state().unwrap();
+        drop(queue);
+        let reloaded = QueueManager::new_persisted(path).unwrap();
+        assert_eq!(reloaded.list_jobs()[0].status, JobStatus::Queued);
     }
 
     #[test]

@@ -182,17 +182,14 @@ impl EncoderCraftApp {
 
                 ui.menu_button("Queue", |ui| {
                     if ui.button("Start Queue (Enter)").clicked() {
-                        self.queue_state.is_running = true;
-                        self.queue_mgr.start_background_worker();
+                        self.queue_mgr.start_queue();
                         ui.close();
                     }
                     if ui.button("Pause Queue (Esc)").clicked() {
-                        self.queue_state.is_running = false;
                         self.queue_mgr.pause_worker();
                         ui.close();
                     }
                     if ui.button("Stop Queue").clicked() {
-                        self.queue_state.is_running = false;
                         self.queue_mgr.stop_worker();
                         ui.close();
                     }
@@ -296,9 +293,7 @@ impl EncoderCraftApp {
             }
         }
         self.was_worker_running = is_worker_active;
-        if is_worker_active {
-            self.queue_state.is_running = true;
-        }
+        self.queue_state.is_running = is_worker_active && !self.queue_mgr.is_paused();
 
         let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
         if self.queue_state.is_running || is_worker_active || is_hovering || should_poll_watch {

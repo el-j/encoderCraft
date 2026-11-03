@@ -357,9 +357,11 @@ fn cmd_daemon(args: &[String]) -> Result<(), EncoderError> {
 
     println!("Daemon running. Press Ctrl+C to exit.");
     loop {
-        // Run queue processor in background
-        let _ = queue_mgr.process_next_job();
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Drain newly submitted jobs; a running worker is left untouched.
+        if !queue_mgr.is_stop_requested() {
+            queue_mgr.start_background_worker();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
     }
 }
 

@@ -655,9 +655,7 @@ impl TranscodePipeline {
         };
 
         for (f, mut frame) in source_frames.into_iter().enumerate() {
-            if self.progress.is_cancelled() {
-                return Err(EncoderError::Internal("job cancelled by user".into()));
-            }
+            self.progress.checkpoint()?;
 
             frame.pts = f as i64;
             let mut scaled_frame = scaler.scale(&frame, dims)?;
@@ -768,9 +766,7 @@ impl TranscodePipeline {
 
         let scaler = FrameScaler::new(ScaleMode::Fit);
         for (f, mut frame) in source_frames.into_iter().enumerate() {
-            if self.progress.is_cancelled() {
-                return Err(EncoderError::Internal("job cancelled by user".into()));
-            }
+            self.progress.checkpoint()?;
             frame.pts = f as i64;
             let scaled_frame = scaler.scale(&frame, dims)?;
             let packets = encoder.encode_frame(&scaled_frame)?;
@@ -850,9 +846,7 @@ impl TranscodePipeline {
         let frame_dur_ms = (1000.0 / fps.as_f64().max(1.0)).round() as u32;
 
         for (f, mut frame) in source_frames.into_iter().enumerate() {
-            if self.progress.is_cancelled() {
-                return Err(EncoderError::Internal("job cancelled by user".into()));
-            }
+            self.progress.checkpoint()?;
             frame.pts = (f as i64) * i64::from(frame_dur_ms);
             let scaled_frame = scaler.scale(&frame, dims)?;
             let packets = encoder.encode_frame(&scaled_frame)?;
