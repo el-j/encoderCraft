@@ -1092,6 +1092,7 @@ dependencies = [
  "encodercraft-engine",
  "encodercraft-geom",
  "encodercraft-presets",
+ "encodercraft-source",
  "encodercraft-watch",
  "log",
  "rfd",
