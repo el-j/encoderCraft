@@ -160,3 +160,71 @@ fn test_ipc_start_once_drains_all_jobs_and_cancel_is_honoured() {
     assert_eq!(status("d").as_deref(), Some("Cancelled"));
     assert!(!dir.path().join("d_out.wav").exists());
 }
+
+#[test]
+fn test_ipc_auto_start_policy_runs_without_queue_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let handler = EngineIpcHandler::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+
+    let mut spec = wav_spec(dir.path(), "auto");
+    spec.start_policy = StartPolicy::AutoStart;
+    let res = handler.handle(&IpcRequest::new(1, "queue.submit", serde_json::to_value(&spec).unwrap()));
+    assert!(res.error.is_none(), "{:?}", res.error);
+
+    let jobs = wait_idle(&handler);
+    assert_eq!(jobs[0]["status"].as_str(), Some("Completed"));
+    assert!(dir.path().join("auto_out.wav").exists());
+}
+
+#[test]
+fn test_ipc_paused_policy_waits_for_an_explicit_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let handler = EngineIpcHandler::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+
+    let res = handler.handle(&IpcRequest::new(1, "queue.submit", serde_json::to_value(wav_spec(dir.path(), "held")).unwrap()));
+    assert!(res.error.is_none(), "{:?}", res.error);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let jobs = handler.handle(&IpcRequest::new(2, "queue.list", json!({}))).result.unwrap();
+    assert_eq!(jobs[0]["status"].as_str(), Some("Paused"));
+    assert!(!dir.path().join("held_out.wav").exists());
+}
+
+#[test]
+fn test_ipc_subscribe_streams_job_events_until_completion() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let dir = tempfile::tempdir().unwrap();
+    let queue = Arc::new(QueueManager::new_in_memory());
+    let handler = Arc::new(EngineIpcHandler::new(queue, Arc::new(Mutex::new(PresetRegistry::default()))));
+    let mut server = encodercraft_ipc::IpcServer::bind_tcp("127.0.0.1:18998", handler).unwrap();
+
+    let stream = std::net::TcpStream::connect("127.0.0.1:18998").unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(20))).unwrap();
+    let mut writer = stream.try_clone().unwrap();
+    let mut reader = BufReader::new(stream);
+    writer.write_all(b"{\"id\":7,\"method\":\"queue.subscribe\",\"params\":{}}\n").unwrap();
+
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(line.contains("subscribed"), "{line}");
+
+    let mut spec = wav_spec(dir.path(), "evt");
+    spec.start_policy = StartPolicy::AutoStart;
+    let submit = format!("{{\"id\":8,\"method\":\"queue.submit\",\"params\":{}}}\n", serde_json::to_string(&spec).unwrap());
+    let mut other = std::net::TcpStream::connect("127.0.0.1:18998").unwrap();
+    other.write_all(submit.as_bytes()).unwrap();
+
+    let mut saw_completed = false;
+    for _ in 0..50 {
+        line.clear();
+        if reader.read_line(&mut line).unwrap() == 0 {
+            break;
+        }
+        if line.contains("\"jobId\":\"evt\"") && line.contains("Completed") {
+            saw_completed = true;
+            break;
+        }
+    }
+    assert!(saw_completed, "no completion event received");
+    server.stop();
+}

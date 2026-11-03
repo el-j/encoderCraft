@@ -15,6 +15,12 @@ use encodercraft_dispatch::{IpcRequest, IpcResponse};
 /// Trait implemented by command dispatchers and engine hosts to process incoming requests.
 pub trait IpcHandler: Send + Sync + 'static {
     fn handle(&self, req: &IpcRequest) -> IpcResponse;
+
+    /// Streaming methods (such as `queue.subscribe`) push notifications until `emit` returns `false`
+    /// (the client went away). Returns `true` when the request was a streaming one.
+    fn stream(&self, _req: &IpcRequest, _emit: &mut dyn FnMut(IpcResponse) -> bool) -> bool {
+        false
+    }
 }
 
 /// Headless IPC daemon server.
@@ -114,35 +120,25 @@ impl Drop for IpcServer {
 }
 
 fn handle_tcp_client(stream: TcpStream, handler: Arc<dyn IpcHandler>) -> Result<(), EncoderError> {
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?);
-    let mut writer = stream;
-    let mut line = String::new();
-
-    while let Ok(n) = reader.read_line(&mut line) {
-        if n == 0 {
-            break;
-        }
-
-        let resp = match serde_json::from_str::<IpcRequest>(&line) {
-            Ok(req) => handler.handle(&req),
-            Err(e) => IpcResponse::error(0, format!("malformed request: {e}")),
-        };
-
-        if let Ok(mut resp_json) = serde_json::to_string(&resp) {
-            resp_json.push('\n');
-            let _ = writer.write_all(resp_json.as_bytes());
-            let _ = writer.flush();
-        }
-
-        line.clear();
-    }
-    Ok(())
+    let reader = stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?;
+    serve_client(reader, stream, handler.as_ref())
 }
 
 #[cfg(unix)]
 fn handle_unix_client(stream: std::os::unix::net::UnixStream, handler: Arc<dyn IpcHandler>) -> Result<(), EncoderError> {
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?);
-    let mut writer = stream;
+    let reader = stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?;
+    serve_client(reader, stream, handler.as_ref())
+}
+
+fn write_response(writer: &mut impl Write, resp: &IpcResponse) -> bool {
+    let Ok(mut json) = serde_json::to_string(resp) else { return true };
+    json.push('\n');
+    writer.write_all(json.as_bytes()).and_then(|()| writer.flush()).is_ok()
+}
+
+/// Reads JSON lines and answers each one until the peer disconnects.
+fn serve_client(reader: impl std::io::Read, mut writer: impl Write, handler: &dyn IpcHandler) -> Result<(), EncoderError> {
+    let mut reader = BufReader::new(reader);
     let mut line = String::new();
 
     while let Ok(n) = reader.read_line(&mut line) {
@@ -150,15 +146,24 @@ fn handle_unix_client(stream: std::os::unix::net::UnixStream, handler: Arc<dyn I
             break;
         }
 
-        let resp = match serde_json::from_str::<IpcRequest>(&line) {
-            Ok(req) => handler.handle(&req),
-            Err(e) => IpcResponse::error(0, format!("malformed request: {e}")),
-        };
-
-        if let Ok(mut resp_json) = serde_json::to_string(&resp) {
-            resp_json.push('\n');
-            let _ = writer.write_all(resp_json.as_bytes());
-            let _ = writer.flush();
+        match serde_json::from_str::<IpcRequest>(&line) {
+            Ok(req) => {
+                let mut alive = true;
+                if !handler.stream(&req, &mut |resp| {
+                    alive = write_response(&mut writer, &resp);
+                    alive
+                }) {
+                    alive = write_response(&mut writer, &handler.handle(&req));
+                }
+                if !alive {
+                    break;
+                }
+            }
+            Err(e) => {
+                if !write_response(&mut writer, &IpcResponse::error(0, format!("malformed request: {e}"))) {
+                    break;
+                }
+            }
         }
 
         line.clear();

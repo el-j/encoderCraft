@@ -57,6 +57,7 @@ fn print_usage() {
     println!("      --xmp-creator <creator>             Embed XMP Dublin Core author/creator");
     println!("      --sidecar-xmp                       Export external sidecar .xmp file");
     println!("      --caption <file>                    Subtitle/caption file to embed or burn");
+    println!("      --fps <rate>                        Frame rate for image sequences (e.g. 25, 29.97, 30000/1001); input like shot_%04d.png");
     println!("      --burn-captions                     Burn captions directly into video frames");
     println!("  probe <input>                           Inspect containers, codecs, and stream metadata");
     println!("  presets                                 List all factory presets");
@@ -64,6 +65,33 @@ fn print_usage() {
     println!("  watch <dir> -p <preset> -o <out_dir>    Start automated directory monitor");
     println!("  daemon [--port <port>]                  Run background IPC daemon");
     println!("  mcp                                     Run Model Context Protocol server over stdio");
+}
+
+/// Parses `25`, `29.97` or `30000/1001` into an exact frame rate.
+fn parse_fps(text: &str) -> Result<encodercraft_core::Rational64, EncoderError> {
+    let bad = || EncoderError::InvalidJobSpec(format!("invalid frame rate '{text}'"));
+    let (num, den) = if let Some((n, d)) = text.split_once('/') {
+        (n.trim().parse::<i64>().map_err(|_| bad())?, d.trim().parse::<i64>().map_err(|_| bad())?)
+    } else {
+        let value: f64 = text.trim().parse().map_err(|_| bad())?;
+        if !value.is_finite() || value <= 0.0 || value > 1000.0 {
+            return Err(bad());
+        }
+        let ntsc = [(23.976, (24_000, 1_001)), (29.97, (30_000, 1_001)), (59.94, (60_000, 1_001))];
+        match ntsc.iter().find(|(v, _)| (value - v).abs() < 0.005) {
+            Some((_, pair)) => *pair,
+            None => ((value * 1000.0).round() as i64, 1000),
+        }
+    };
+    if num <= 0 || den <= 0 || num > 1_000_000 || den > 1_000_000 {
+        return Err(bad());
+    }
+    let g = gcd(num, den);
+    Ok(encodercraft_core::Rational64 { num: num / g, den: den / g })
+}
+
+fn gcd(a: i64, b: i64) -> i64 {
+    if b == 0 { a.max(1) } else { gcd(b, a % b) }
 }
 
 fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
@@ -77,6 +105,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut sidecar_xmp = false;
     let mut caption_file = None;
     let mut burn_captions = false;
+    let mut fps = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -93,6 +122,11 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                         output = Some(PathBuf::from(val));
                         i += 1;
                     }
+                }
+                "--fps" => {
+                    let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--fps needs a value such as 25 or 30000/1001".into()))?;
+                    fps = Some(parse_fps(val)?);
+                    i += 1;
                 }
                 "--stems" => {
                     export_stems = true;
@@ -172,6 +206,9 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         let media_info = encodercraft_source::probe_media_info(input_path)?;
         let mut target = evaluate_preset(preset, &media_info, output_path.clone())?;
 
+        if let Some(rate) = fps {
+            target.custom_frame_rate = Some(rate);
+        }
         if export_stems {
             target.audio_stems = Some(encodercraft_core::AudioStemMode::DiscreteMono);
         }

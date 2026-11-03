@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use encodercraft_core::CraftJobSpec;
+use encodercraft_core::{CraftJobSpec, JobStatus, StartPolicy};
 use encodercraft_dispatch::{IpcRequest, IpcResponse};
 use encodercraft_ipc::IpcHandler;
 use encodercraft_presets::PresetRegistry;
@@ -24,6 +24,39 @@ impl EngineIpcHandler {
 }
 
 impl IpcHandler for EngineIpcHandler {
+    /// `queue.subscribe` acknowledges, then pushes one `queue.event` per job whenever its status or
+    /// whole-percent progress changes, until the client disconnects.
+    fn stream(&self, req: &IpcRequest, emit: &mut dyn FnMut(IpcResponse) -> bool) -> bool {
+        if req.method != "queue.subscribe" {
+            return false;
+        }
+        if !emit(IpcResponse::success(req.id, json!({ "subscribed": true }))) {
+            return true;
+        }
+        let mut seen: std::collections::HashMap<String, (JobStatus, u32)> = std::collections::HashMap::new();
+        loop {
+            let jobs = self.queue_mgr.list_jobs();
+            for job in &jobs {
+                let key = (job.status.clone(), job.progress_percent.clamp(0.0, 100.0) as u32);
+                if seen.get(&job.spec.job_id) != Some(&key) {
+                    let event = json!({
+                        "event": "queue.event",
+                        "jobId": job.spec.job_id,
+                        "status": job.status,
+                        "progressPercent": job.progress_percent,
+                        "fps": job.current_fps,
+                    });
+                    if !emit(IpcResponse::success(req.id, event)) {
+                        return true;
+                    }
+                    seen.insert(job.spec.job_id.clone(), key);
+                }
+            }
+            seen.retain(|id, _| jobs.iter().any(|j| &j.spec.job_id == id));
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+
     fn handle(&self, req: &IpcRequest) -> IpcResponse {
         match req.method.as_str() {
             "app.ping" => IpcResponse::success(req.id, json!({ "pong": true, "app": "encoderCraft", "version": "0.1.0" })),
@@ -33,8 +66,21 @@ impl IpcHandler for EngineIpcHandler {
                     Ok(s) => s,
                     Err(e) => return IpcResponse::error(req.id, format!("invalid job spec: {e}")),
                 };
+                let policy = spec.start_policy;
                 match self.queue_mgr.submit_job(spec) {
-                    Ok(id) => IpcResponse::success(req.id, json!(id)),
+                    Ok(id) => {
+                        match policy {
+                            StartPolicy::AutoStart => {
+                                self.queue_mgr.start_queue();
+                            }
+                            StartPolicy::Paused => {
+                                if let Err(e) = self.queue_mgr.pause_job(&id) {
+                                    return IpcResponse::error(req.id, format!("job '{id}' queued but could not be paused: {e}"));
+                                }
+                            }
+                        }
+                        IpcResponse::success(req.id, json!(id))
+                    }
                     Err(e) => IpcResponse::error(req.id, e.to_string()),
                 }
             }

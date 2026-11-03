@@ -123,3 +123,36 @@ fn test_cli_still_presets_roundtrip_real_pixels() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_cli_numbered_image_sequence_encodes_to_video_at_the_given_rate() {
+    use encodercraft_source::MediaReader;
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = std::env::temp_dir().join(format!("encodercraft-cli-seq-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    for n in 1..=10u8 {
+        write_bmp(&dir.join(format!("frame_{n:03}.bmp")), n.wrapping_mul(20));
+    }
+    let out = dir.join("seq.mp4");
+    let output = Command::new(bin)
+        .args(["encode"])
+        .arg(dir.join("frame_%03d.bmp"))
+        .args(["-p", "Match Source - High Bitrate", "--fps", "25", "-o"])
+        .arg(&out)
+        .output()
+        .expect("run encode");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let reader = MediaReader::open(&out).expect("decode output");
+    let video = reader.probe().video.clone().expect("video stream");
+    assert_eq!(video.frame_rate.num as f64 / video.frame_rate.den as f64, 25.0);
+    assert_eq!(reader.frame_count(), 10);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_cli_rejects_a_bad_frame_rate() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let output = Command::new(bin).args(["encode", "x.mov", "--fps", "banana"]).output().expect("run encode");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid frame rate"));
+}

@@ -34,6 +34,8 @@ pub struct EncoderCraftApp {
     pub brightness: Brightness,
     pub active_tab: MainViewTab,
     pub queue_state: QueuePanelState,
+    pub shutdown_watch: crate::queue_footer::ShutdownWatch,
+    pub shutdown_error: Option<String>,
     pub watch_state: WatchPanelState,
     pub media_state: crate::media_browser::MediaBrowserState,
     pub preset_state: PresetBrowserState,
@@ -69,6 +71,8 @@ impl EncoderCraftApp {
             brightness,
             active_tab: MainViewTab::Queue,
             queue_state: QueuePanelState::default(),
+            shutdown_watch: crate::queue_footer::ShutdownWatch::default(),
+            shutdown_error: None,
             watch_state: WatchPanelState::default(),
             media_state: crate::media_browser::MediaBrowserState::default(),
             preset_state: PresetBrowserState::default(),
@@ -563,6 +567,22 @@ impl EncoderCraftApp {
 
             match self.active_tab {
                 MainViewTab::Queue => {
+                    egui::Panel::bottom("queue_footer").show(ui, |ui| {
+                        let jobs = self.queue_mgr.list_jobs();
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(crate::queue_footer::processed_counter(&jobs)).small());
+                            ui.separator();
+                            ui.checkbox(&mut self.prefs_state.prefs.auto_shutdown, "Auto Computer Shutdown")
+                                .on_hover_text("Shut the computer down 60 seconds after the queue finishes; you can cancel the countdown");
+                            ui.separator();
+                            ui.label(RichText::new("Renderer:").small());
+                            egui::ComboBox::from_id_salt("queue_renderer").selected_text(crate::queue_footer::RENDERERS[0]).show_ui(ui, |ui| {
+                                for name in crate::queue_footer::RENDERERS {
+                                    let _ = ui.selectable_label(true, *name);
+                                }
+                            });
+                        });
+                    });
                     render_queue_panel(ui, &mut self.queue_state, &self.queue_mgr, &self.tokens, &mut inspect_job, &mut self.log_state.is_open);
                 }
                 MainViewTab::WatchFolders => {
@@ -606,6 +626,7 @@ impl EncoderCraftApp {
         }
 
         self.save_settings_if_changed();
+        self.drive_auto_shutdown(&ctx);
 
         // 7. About Dialog
         if self.show_about_dialog {
@@ -616,6 +637,46 @@ impl EncoderCraftApp {
                 ui.add_space(4.0);
                 ui.label(RichText::new("Clean-Room Adobe Media Encoder Parity").strong());
             });
+        }
+    }
+
+    /// Runs the Auto Computer Shutdown countdown once the whole queue has finished.
+    fn drive_auto_shutdown(&mut self, ctx: &egui::Context) {
+        use crate::queue_footer::{ShutdownAction, queue_finished, shut_down_computer};
+        let finished = queue_finished(&self.queue_mgr.list_jobs());
+        match self.shutdown_watch.update(self.prefs_state.prefs.auto_shutdown, finished, std::time::Instant::now()) {
+            ShutdownAction::Idle => {}
+            ShutdownAction::Countdown { remaining_secs } => {
+                let mut cancel = false;
+                egui::Window::new("Auto Computer Shutdown").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
+                    ctx,
+                    |ui| {
+                        ui.label(format!("The queue has finished. This computer shuts down in {remaining_secs} s."));
+                        if ui.button("Cancel Shutdown").clicked() {
+                            cancel = true;
+                        }
+                    },
+                );
+                if cancel {
+                    self.shutdown_watch.cancel();
+                }
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
+            ShutdownAction::ShutDownNow => {
+                if let Err(e) = shut_down_computer() {
+                    log::error!("automatic shutdown failed: {e}");
+                    self.shutdown_error = Some(e);
+                }
+            }
+        }
+        if let Some(err) = self.shutdown_error.clone() {
+            let mut open = true;
+            egui::Window::new("Shutdown failed").open(&mut open).show(ctx, |ui| {
+                ui.label(err);
+            });
+            if !open {
+                self.shutdown_error = None;
+            }
         }
     }
 

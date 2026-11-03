@@ -297,3 +297,145 @@ fn failure_names_the_target_that_failed() {
     assert_eq!(pipeline.progress().target_index(), 1);
     assert!(dir.path().join("ok.png").exists());
 }
+
+/// Largest per-channel mean error accepted for a round trip through the given format.
+fn tolerance(container: ContainerType) -> f64 {
+    match container {
+        ContainerType::Jpeg | ContainerType::WebP => 12.0,
+        ContainerType::OpenExr => 2.0,
+        _ => 0.0,
+    }
+}
+
+#[test]
+fn every_still_input_converts_to_every_still_output_with_matching_pixels() {
+    let dir = tempdir().unwrap();
+    let base = dir.path().join("base.bmp");
+    std::fs::write(&base, encodercraft_image_codecs::encode_bmp(&test_frame(3)).unwrap()).unwrap();
+    let reference = MediaReader::open(&base).unwrap().frame_at_index(0).unwrap();
+    let (expected, _) = reference.plane(0).unwrap();
+    let expected = expected.to_vec();
+
+    let formats = [
+        ("png", ContainerType::Png),
+        ("tif", ContainerType::Tiff),
+        ("bmp", ContainerType::Bmp),
+        ("jpg", ContainerType::Jpeg),
+        ("webp", ContainerType::WebP),
+        ("exr", ContainerType::OpenExr),
+    ];
+
+    for (in_ext, in_container) in formats {
+        let input = run(dir.path(), &format!("in.{in_ext}"), in_container, "Image", &base);
+        let input_loss = tolerance(in_container);
+        for (out_ext, out_container) in formats {
+            let out = run(dir.path(), &format!("{in_ext}_to.{out_ext}"), out_container, "Image", &input);
+            let decoded = MediaReader::open(&out).unwrap().frame_at_index(0).unwrap();
+            let label = format!("{in_ext} -> {out_ext}");
+            assert_eq!(decoded.dimensions, reference.dimensions, "{label}");
+            let (got, _) = decoded.plane(0).unwrap();
+            assert_eq!(got.len(), expected.len(), "{label}");
+            let total: u64 = got.iter().zip(expected.iter()).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
+            let mean = total as f64 / got.len().max(1) as f64;
+            let allowed = input_loss + tolerance(out_container);
+            assert!(mean <= allowed, "{label}: mean error {mean} exceeds {allowed}");
+            let (lo, hi) = mean_luma_spread(&decoded);
+            assert!(hi - lo > 40, "{label} is flat (grey-image regression)");
+        }
+    }
+}
+
+#[test]
+fn truncated_stills_of_every_format_fail_cleanly() {
+    let dir = tempdir().unwrap();
+    let base = dir.path().join("base.bmp");
+    std::fs::write(&base, encodercraft_image_codecs::encode_bmp(&test_frame(2)).unwrap()).unwrap();
+
+    for (ext, container) in [
+        ("png", ContainerType::Png),
+        ("tif", ContainerType::Tiff),
+        ("bmp", ContainerType::Bmp),
+        ("jpg", ContainerType::Jpeg),
+        ("webp", ContainerType::WebP),
+        ("exr", ContainerType::OpenExr),
+    ] {
+        let good = run(dir.path(), &format!("good.{ext}"), container, "Image", &base);
+        let bytes = std::fs::read(&good).unwrap();
+        let cut = dir.path().join(format!("cut.{ext}"));
+        std::fs::write(&cut, &bytes[..bytes.len() / 4]).unwrap();
+        let out = dir.path().join(format!("cut_out_{ext}.png"));
+        let result = TranscodePipeline::new(job(&cut, target(&out, ContainerType::Png, "Image"))).execute();
+        assert!(result.is_err(), "{ext}: truncated file converted without error");
+        assert!(!out.exists(), "{ext}: left output behind");
+    }
+}
+
+fn write_sequence(dir: &Path, count: u64, skip: Option<u64>) {
+    for i in 1..=count {
+        if skip == Some(i) {
+            continue;
+        }
+        std::fs::write(dir.join(format!("shot_{i:04}.png")), encodercraft_image_codecs::encode_png(&test_frame(i * 5)).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn numbered_image_sequence_becomes_a_video_at_the_requested_rate() {
+    let dir = tempdir().unwrap();
+    write_sequence(dir.path(), 12, None);
+    let pattern = dir.path().join("shot_%04d.png");
+    let out = dir.path().join("seq.mp4");
+    let mut t = target(&out, ContainerType::IsoBmffMp4, "H.264");
+    t.custom_frame_rate = Some(Rational64::FPS_25);
+    TranscodePipeline::new(job(&pattern, t)).execute().unwrap();
+
+    let reader = MediaReader::open(&out).unwrap();
+    let video = reader.probe().video.clone().unwrap();
+    assert_eq!((video.width, video.height), (W, H));
+    assert!((video.frame_rate.num as f64 / video.frame_rate.den as f64 - 25.0).abs() < 0.05);
+    assert_eq!(reader.frame_count(), 12);
+    let first = mean_luma_spread(&reader.frame_at_index(0).unwrap());
+    let last = mean_luma_spread(&reader.frame_at_index(11).unwrap());
+    assert!(first.1 - first.0 > 40 && last.1 - last.0 > 40, "sequence frames are flat");
+}
+
+#[test]
+fn image_sequence_keeps_its_length_across_a_gap_and_rejects_empty_patterns() {
+    let dir = tempdir().unwrap();
+    write_sequence(dir.path(), 8, Some(4));
+    let reader = MediaReader::open(&dir.path().join("shot_%04d.png")).unwrap();
+    assert_eq!(reader.frame_count(), 8, "a missing frame must not shorten the sequence");
+
+    let err = MediaReader::open(&dir.path().join("none_%04d.png"));
+    assert!(err.is_err());
+    assert!(encodercraft_source::is_sequence_pattern(&dir.path().join("a_%03d.exr")));
+    assert!(!encodercraft_source::is_sequence_pattern(&dir.path().join("a_001.exr")));
+}
+
+#[test]
+fn video_exports_a_numbered_still_sequence_for_the_trimmed_range() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("src.mp4");
+    write_av_source(&source);
+    let frames_dir = dir.path().join("frames");
+    std::fs::create_dir(&frames_dir).unwrap();
+    let out = frames_dir.join("f_%04d.png");
+
+    let mut spec = job(&source, target(&out, ContainerType::Png, "Image"));
+    if let SourceDescriptor::File { start_tick, duration_ticks, .. } = &mut spec.source {
+        *start_tick = Some(5);
+        *duration_ticks = Some(10);
+    }
+    TranscodePipeline::new(spec).execute().unwrap();
+
+    let mut names: Vec<String> = std::fs::read_dir(&frames_dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    names.sort();
+    assert_eq!(names.len(), 10, "{names:?}");
+    assert_eq!(names.first().map(String::as_str), Some("f_0001.png"));
+    assert_eq!(names.last().map(String::as_str), Some("f_0010.png"));
+    for name in [&names[0], &names[9]] {
+        let frame = MediaReader::open(&frames_dir.join(name)).unwrap().frame_at_index(0).unwrap();
+        let (lo, hi) = mean_luma_spread(&frame);
+        assert!(hi - lo > 40, "{name} is flat");
+    }
+}

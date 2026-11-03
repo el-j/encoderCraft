@@ -33,6 +33,7 @@ pub fn render_prefs_dialog(ctx: &egui::Context, state: &mut PrefsDialogState, to
             ui.checkbox(&mut state.prefs.play_completion_sound, "Play completion chime when queue finishes");
             ui.checkbox(&mut state.prefs.auto_start_queue, "Auto-start queue when media is added");
             ui.checkbox(&mut state.prefs.remove_finished_on_exit, "Remove finished jobs from queue on exit");
+            ui.checkbox(&mut state.prefs.auto_shutdown, "Shut down the computer when the queue finishes");
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {

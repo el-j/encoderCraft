@@ -22,6 +22,7 @@ pub mod preset_browser;
 pub mod preset_editor;
 pub mod preview_decoder;
 pub mod preview_panel;
+pub mod queue_footer;
 pub mod queue_panel;
 pub mod scope_view;
 pub mod settings;
