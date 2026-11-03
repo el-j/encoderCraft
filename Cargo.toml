@@ -74,6 +74,7 @@ filmcraft-time = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-media = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft" }
+photocraft-codecs = { git = "https://github.com/storytold/photocraft" }
 filmcraft-mxf = { git = "https://github.com/storytold/filmcraft" }
 craft-aac = { package = "filmcraft-aac", git = "https://github.com/storytold/filmcraft" }
 craft-opus = { package = "filmcraft-opus", git = "https://github.com/storytold/filmcraft" }

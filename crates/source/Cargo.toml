@@ -11,6 +11,7 @@ description = "Unified media decoding (video, audio, stills) built on the ArtCra
 workspace = true
 
 [dependencies]
+photocraft-codecs = { workspace = true }
 encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }

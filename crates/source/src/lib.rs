@@ -71,9 +71,21 @@ pub struct MediaProbe {
     pub file_size: Option<u64>,
 }
 
+/// A fully decoded still image, upright and as straight-alpha RGBA8.
+struct StillPixels {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+/// Extensions decoded by the shared photocraft still-image codecs (EXIF orientation applied, 16-bit,
+/// float and CMYK sources converted to RGBA8).
+const STILL_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp", "tga", "exr", "hdr"];
+
 /// An opened media file that can deliver video frames by index and audio by sample position.
 pub struct MediaReader {
-    source: SharedSource,
+    source: Option<SharedSource>,
+    still: Option<StillPixels>,
     probe: MediaProbe,
 }
 
@@ -112,6 +124,9 @@ fn layout_for(channels: usize) -> ChannelLayout {
 impl MediaReader {
     /// Opens a media file, probing its container and streams.
     pub fn open(path: &Path) -> Result<Self, EncoderError> {
+        if let Some(reader) = Self::open_still(path)? {
+            return Ok(reader);
+        }
         let context = path.display().to_string();
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| context.clone());
         let file = FileReader::open(path).map_err(|e| EncoderError::Io(format!("{context}: {e}")))?;
@@ -125,6 +140,48 @@ impl MediaReader {
         )
         .map_err(|e| map_media_error(&context, e))?;
         Ok(Self::from_source(source))
+    }
+
+    /// Decodes a still image with the photocraft codecs; `None` when the file is not one of them
+    /// (or is an animation, which the streaming decoder handles).
+    fn open_still(path: &Path) -> Result<Option<Self>, EncoderError> {
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        if !STILL_EXTENSIONS.contains(&ext.as_str()) {
+            return Ok(None);
+        }
+        let context = path.display().to_string();
+        let meta = std::fs::metadata(path).map_err(|e| EncoderError::Io(format!("{context}: {e}")))?;
+        if meta.len() > MAX_WHOLE_FILE_BYTES {
+            return Err(EncoderError::InvalidJobSpec(format!("{context}: image file is larger than the {} MiB limit", MAX_WHOLE_FILE_BYTES >> 20)));
+        }
+        let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("{context}: {e}")))?;
+        if ext == "webp" && photocraft_codecs::webp_is_animated(&bytes) {
+            return Ok(None);
+        }
+        let image = photocraft_codecs::decode_with(&bytes, &photocraft_codecs::DecodeOptions::default())
+            .map_err(|e| EncoderError::InvalidContainer(format!("{context}: {e}")))?;
+        let (width, height) = image.dimensions();
+        let rgba = image.to_rgba8();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| context.clone());
+        let probe = MediaProbe {
+            name,
+            container: ext.to_ascii_uppercase(),
+            kind: SourceKind::Still,
+            duration_seconds: 0.0,
+            video: Some(VideoProbe {
+                width,
+                height,
+                frame_rate: Rational64 { num: 1, den: 1 },
+                codec: ext.to_ascii_uppercase(),
+                pixel_format: format!("{:?}", image.layout()),
+                has_alpha: matches!(image.layout(), photocraft_codecs::ChannelLayout::Rgba | photocraft_codecs::ChannelLayout::GrayA),
+                bitrate: None,
+            }),
+            audio: Vec::new(),
+            start_timecode_frames: None,
+            file_size: Some(meta.len()),
+        };
+        Ok(Some(Self { source: None, still: Some(StillPixels { width, height, rgba }), probe }))
     }
 
     /// Wraps an already opened filmcraft media source.
@@ -153,7 +210,7 @@ impl MediaReader {
             start_timecode_frames: info.start_timecode,
             file_size: info.file_size,
         };
-        Self { source, probe }
+        Self { source: Some(source), still: None, probe }
     }
 
     /// Probed stream and container facts.
@@ -183,12 +240,25 @@ impl MediaReader {
             return Err(EncoderError::InvalidJobSpec(format!("frame index {index} is outside the {count} frames of {}", self.probe.name)));
         }
         let idx = i64::try_from(index).map_err(|_| EncoderError::Internal("frame index overflow".into()))?;
+        if let Some(still) = &self.still {
+            let dims = Dimensions { width: still.width, height: still.height };
+            return VideoFrame::from_raw_bytes(
+                dims,
+                PixelFormat::Rgba8,
+                ColorSpaceTag::SRGB,
+                idx,
+                1,
+                Rational64 { num: 1, den: 1 },
+                still.rgba.clone(),
+            );
+        }
+        let source = self.source.as_ref().ok_or_else(|| EncoderError::Internal("reader has no source".into()))?;
         let time = if matches!(self.probe.kind, SourceKind::Still) {
             Tick::ZERO
         } else {
             Tick::from_rational(idx, video.frame_rate.den, video.frame_rate.num)
         };
-        let decoded = self.source.video_frame(FrameRequest::full(time)).map_err(|e| map_media_error(&self.probe.name, e))?;
+        let decoded = source.video_frame(FrameRequest::full(time)).map_err(|e| map_media_error(&self.probe.name, e))?;
         let rgba = decoded.to_rgba8();
         let dims = Dimensions { width: decoded.width, height: decoded.height };
         let color = if matches!(self.probe.kind, SourceKind::Still) { ColorSpaceTag::SRGB } else { ColorSpaceTag::REC709 };
@@ -201,7 +271,9 @@ impl MediaReader {
         if self.probe.audio.is_empty() {
             return Err(EncoderError::InvalidContainer(format!("{}: source has no audio stream", self.probe.name)));
         }
-        let buf = self.source.audio(start, frames, sample_rate).map_err(|e| map_media_error(&self.probe.name, e))?;
+        let source =
+            self.source.as_ref().ok_or_else(|| EncoderError::InvalidContainer(format!("{}: source has no audio stream", self.probe.name)))?;
+        let buf = source.audio(start, frames, sample_rate).map_err(|e| map_media_error(&self.probe.name, e))?;
         let layout = layout_for(buf.channels.len());
         let wanted = layout as usize;
         let len = buf.frames();
