@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::{RichText, Ui};
 use encodercraft_engine::QueueManager;
+use encodercraft_presets::catalog::{self, SortColumn};
 use encodercraft_presets::{EncodingPreset, PresetCategory, PresetRegistry};
 
 use crate::icons;
@@ -16,6 +17,9 @@ pub struct PresetBrowserState {
     pub selected_category: Option<PresetCategory>,
     pub selected_preset: Option<EncodingPreset>,
     pub editor: crate::preset_editor::PresetEditorState,
+    pub sort_column: Option<SortColumn>,
+    pub sort_descending: bool,
+    pub status: Option<String>,
 }
 
 /// Renders the preset browser pane.
@@ -70,38 +74,77 @@ pub fn render_preset_browser(
 
         ui.separator();
 
-        // Preset items list
-        let reg = registry.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut matching_presets: Vec<EncodingPreset> = reg.list().to_vec();
-        drop(reg);
-
-        let query = state.search_query.to_lowercase();
-        matching_presets.retain(|p| {
-            let matches_cat = match state.selected_category {
-                Some(cat) => p.category == cat,
-                None => true,
-            };
-            let matches_query = query.is_empty() || p.name.to_lowercase().contains(&query) || p.description.to_lowercase().contains(&query);
-            matches_cat && matches_query
-        });
-
-        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-            for preset in matching_presets {
-                let is_sel = state.selected_preset.as_ref().map(|p| &p.name) == Some(&preset.name);
-                ui.horizontal(|ui| {
-                    icons::icon_label(ui, icons::Icon::Preset, 13.0, tokens.accent_primary);
-                    let label = ui.selectable_label(is_sel, &preset.name);
-                    if label.clicked() {
-                        state.selected_preset = Some(preset.clone());
-                    }
-                    if label.double_clicked() {
-                        state.selected_preset = Some(preset.clone());
-                        for job_id in selected_job_ids {
-                            apply_preset_to_job(job_id, &preset, queue_mgr);
-                        }
-                    }
+        // Import / export / delete
+        ui.horizontal(|ui| {
+            if ui.button("Import...").on_hover_text("Import an encoderCraft preset bundle (.json)").clicked() {
+                state.status = import_presets(registry);
+            }
+            if ui.button("Export...").on_hover_text("Export user presets as an encoderCraft preset bundle").clicked() {
+                state.status = export_presets(registry);
+            }
+            let deletable =
+                state.selected_preset.as_ref().is_some_and(|p| !registry.lock().unwrap_or_else(PoisonError::into_inner).is_factory(&p.name));
+            if ui.add_enabled(deletable, egui::Button::new("Delete")).on_hover_text("Delete the selected user preset").clicked()
+                && let Some(p) = state.selected_preset.take()
+            {
+                let result = registry.lock().unwrap_or_else(PoisonError::into_inner).delete_custom_preset(&p.name);
+                state.status = Some(match result {
+                    Ok(()) => format!("Deleted '{}'", p.name),
+                    Err(e) => e.to_string(),
                 });
             }
+        });
+        if let Some(msg) = &state.status {
+            ui.label(RichText::new(msg).small().color(tokens.text_dim));
+        }
+
+        // Preset table
+        let presets: Vec<EncodingPreset> = registry.lock().unwrap_or_else(PoisonError::into_inner).list().to_vec();
+        let mut table = catalog::filter_rows(catalog::rows(&presets), &state.search_query, state.selected_category);
+        if let Some(col) = state.sort_column {
+            catalog::sort_rows(&mut table, col, state.sort_descending);
+        }
+
+        egui::ScrollArea::both().max_height(240.0).show(ui, |ui| {
+            egui::Grid::new("preset_table").striped(true).num_columns(5).show(ui, |ui| {
+                for (label, col) in [
+                    ("Preset Name", SortColumn::Name),
+                    ("Format", SortColumn::Format),
+                    ("Frame Size", SortColumn::FrameSize),
+                    ("Frame Rate", SortColumn::FrameRate),
+                    ("Target Rate", SortColumn::TargetRate),
+                ] {
+                    let arrow = match (state.sort_column == Some(col), state.sort_descending) {
+                        (true, true) => " v",
+                        (true, false) => " ^",
+                        _ => "",
+                    };
+                    if ui.button(RichText::new(format!("{label}{arrow}")).small().strong()).clicked() {
+                        state.sort_descending = state.sort_column == Some(col) && !state.sort_descending;
+                        state.sort_column = Some(col);
+                    }
+                }
+                ui.end_row();
+
+                for row in &table {
+                    let Some(preset) = presets.iter().find(|p| p.name == row.name) else { continue };
+                    let is_sel = state.selected_preset.as_ref().map(|p| &p.name) == Some(&row.name);
+                    let name = ui.selectable_label(is_sel, &row.name).on_hover_text(&row.comment);
+                    if name.clicked() {
+                        state.selected_preset = Some(preset.clone());
+                    }
+                    if name.double_clicked() {
+                        state.selected_preset = Some(preset.clone());
+                        for job_id in selected_job_ids {
+                            apply_preset_to_job(job_id, preset, queue_mgr);
+                        }
+                    }
+                    for cell in [&row.format, &row.frame_size, &row.frame_rate, &row.target_rate] {
+                        ui.label(RichText::new(cell).small().color(tokens.text_secondary));
+                    }
+                    ui.end_row();
+                }
+            });
         });
 
         // Detail card & Apply button for selected preset
@@ -339,4 +382,32 @@ fn add_preset_target_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &A
         };
         let _ = queue_mgr.add_output_target(job_id, new_target);
     }
+}
+
+fn import_presets(registry: &Arc<Mutex<PresetRegistry>>) -> Option<String> {
+    let path = rfd::FileDialog::new().set_title("Import Presets").add_filter("Preset bundle", &["json"]).pick_file()?;
+    let outcome = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|text| catalog::import_json(&text).map_err(|e| e.to_string()))
+        .and_then(|presets| registry.lock().unwrap_or_else(PoisonError::into_inner).import_presets(presets).map_err(|e| e.to_string()));
+    Some(match outcome {
+        Ok(n) => format!("Imported {n} preset(s)"),
+        Err(e) => format!("Import failed: {e}"),
+    })
+}
+
+fn export_presets(registry: &Arc<Mutex<PresetRegistry>>) -> Option<String> {
+    let path = rfd::FileDialog::new().set_title("Export Presets").set_file_name("encodercraft-presets.json").save_file()?;
+    let user: Vec<EncodingPreset> = {
+        let reg = registry.lock().unwrap_or_else(PoisonError::into_inner);
+        reg.list().iter().filter(|p| !reg.is_factory(&p.name)).cloned().collect()
+    };
+    if user.is_empty() {
+        return Some("No user presets to export".into());
+    }
+    let outcome = catalog::export_json(&user).map_err(|e| e.to_string()).and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()));
+    Some(match outcome {
+        Ok(()) => format!("Exported {} preset(s)", user.len()),
+        Err(e) => format!("Export failed: {e}"),
+    })
 }

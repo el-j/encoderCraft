@@ -58,12 +58,38 @@ fn commands_and_workspaces_drive_the_frame() {
 #[test]
 fn workspace_file_is_written_and_restored() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("w.json");
+    let path = encodercraft_ui_egui::settings::workspaces_path(dir.path());
+    assert!(!path.exists());
     let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
-        .with_workspace_file(path.clone());
+        .with_config_dir(dir.path().to_path_buf());
     app.workspaces.save_as("Mine").unwrap();
     egui::__run_test_ui(|ui| app.render(ui));
-    let again =
-        EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default()))).with_workspace_file(path);
+    let again = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
+        .with_config_dir(dir.path().to_path_buf());
     assert_eq!(again.workspaces.active, "Mine");
+    assert!(path.exists());
+}
+
+#[test]
+fn preferences_watch_folders_and_favorites_persist() {
+    use encodercraft_ui_egui::settings;
+    let dir = tempfile::tempdir().unwrap();
+    let new_app = || {
+        EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
+            .with_config_dir(dir.path().to_path_buf())
+    };
+    let mut app = new_app();
+    app.prefs_state.prefs.max_parallel_jobs = 5;
+    app.prefs_state.prefs.play_completion_sound = false;
+    app.watch_state.configs.push(encodercraft_watch::WatchFolderConfig::new("w1", "/in".into(), "/out".into(), "P"));
+    app.media_state.model.toggle_favorite(dir.path());
+    egui::__run_test_ui(|ui| app.render(ui));
+    assert!(settings::preferences_path(dir.path()).exists());
+
+    let again = new_app();
+    assert_eq!(again.prefs_state.prefs.max_parallel_jobs, 5);
+    assert!(!again.prefs_state.prefs.play_completion_sound);
+    assert_eq!(again.watch_state.configs.len(), 1);
+    assert_eq!(again.media_state.model.favorites, vec![dir.path().to_path_buf()]);
+    assert_eq!(again.queue_mgr.parallelism(), 5);
 }
