@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod fonts;
 pub mod icons;
 pub mod inspector;
 pub mod log_dialog;

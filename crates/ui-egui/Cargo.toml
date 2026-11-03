@@ -18,7 +18,7 @@ encodercraft-engine = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-source = { workspace = true }
 encodercraft-watch = { workspace = true }
-egui = { workspace = true }
+egui = { workspace = true, features = ["default_fonts"] }
 rfd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

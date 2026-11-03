@@ -43,6 +43,7 @@ pub struct EncoderCraftApp {
     pub last_watch_tick: Option<std::time::Instant>,
     pub was_worker_running: bool,
     pub completion_banner_timer: Option<std::time::Instant>,
+    fonts_installed: bool,
 }
 
 impl EncoderCraftApp {
@@ -68,11 +69,16 @@ impl EncoderCraftApp {
             last_watch_tick: None,
             was_worker_running: false,
             completion_banner_timer: None,
+            fonts_installed: false,
         }
     }
 
     /// Renders the complete application frame inside an egui Ui.
     pub fn render(&mut self, ui: &mut Ui) {
+        if !self.fonts_installed {
+            crate::fonts::install(ui.ctx());
+            self.fonts_installed = true;
+        }
         apply_theme(ui.ctx(), &self.tokens);
 
         // Global keyboard shortcut: Cmd+I to Add Media Files
