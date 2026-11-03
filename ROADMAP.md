@@ -24,7 +24,7 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
 | **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
 | **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **135 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Automated Tests** | **>80 tests** | **139 passed** | Unit, fuzz, and integration tests across L0-L7. |
 | **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 

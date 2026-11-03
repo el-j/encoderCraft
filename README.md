@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
 [![Parity Target](https://img.shields.io/badge/parity%20target-Adobe%20Media%20Encoder%202026-purple.svg)](docs/target-app-parity.md)
-[![Tests](https://img.shields.io/badge/tests-135%20passed-brightgreen.svg)](docs/implementation-milestones.md)
+[![Tests](https://img.shields.io/badge/tests-139%20passed-brightgreen.svg)](docs/implementation-milestones.md)
 [![Safety](https://img.shields.io/badge/unsafe_code-forbid-brightgreen.svg)](docs/architecture.md)
 [![ArtCraft Ecosystem](https://img.shields.io/badge/artcraft-storytold-red.svg)](https://github.com/storytold)
 
@@ -19,8 +19,8 @@ Adobe Media Encoder has long been the default render tool for video editors. How
 
 | Media Domain | Legacy Encoders (Adobe Media Encoder) | encoderCraft Universal Powerhouse |
 |---|---|---|
-| **Video & Motion** | MP4, MOV, MXF, AVI. | **Full Parity:** H.264, Apple ProRes (Proxy, LT, Standard, HQ, 4444), Avid DNxHD/HR (HQ, HQX 10-bit), HEVC (H.265), AV1, VP9, VP8, MJPEG, animated GIF. |
-| **Audio & Music** | AAC, MP3, WAV. | **Full Parity + Broadcast DSP:** Lossless FLAC (24-bit 48kHz), Apple Lossless AIFF, Broadcast Wave BWF (-23 LUFS), MP3, OGG Vorbis, AAC-LC, EBU R128 loudness normalization (-23/-14 LUFS), true-peak limiting, channel remixing (mono/stereo/5.1/7.1), polyphase sinc resampling. |
+| **Video & Broadcast** | MP4, MOV, MXF, AVI. | **Full Parity + Broadcast MXF:** H.264, Apple ProRes (Proxy, LT, Standard, HQ, 4444), Avid DNxHD/HR (HQ, HQX 10-bit), HEVC (H.265), AV1, VP9, VP8, MJPEG, animated GIF. Full **SMPTE ST 377-1 MXF OP1a & OP-Atom** muxing/demuxing, simultaneous Audio-Video multiplexing, and frame-accurate In/Out point trimming. |
+| **Audio & Music** | AAC, MP3, WAV. | **Full Parity + Broadcast DSP:** Lossless FLAC (24-bit 48kHz), Apple Lossless AIFF, Broadcast Wave BWF (-23 LUFS), MP3, Ogg Opus/Vorbis, AAC-LC, EBU R128 loudness normalization (-23/-14 LUFS), true-peak limiting, multichannel stem splitting, channel remixing (mono/stereo/5.1/7.1), polyphase sinc resampling. |
 | **3D & Spatial** | ❌ None. | **Universal 3D Pipelines:** Khronos glTF 2.0 / binary GLB, Wavefront OBJ (.obj + .mtl), 3D Print binary STL, Stanford PLY, Apple AR Quick Look USDZ (normative ZIP packaging + USDA schema). |
 | **Raster Images** | Basic JPEG/PNG. | **High Dynamic Range & Studio Still Images:** Lossless PNG (RGBA 8-bit), Broadcast TIFF (16-bit RGB), VFX OpenEXR (half-float 16-bit), Windows Bitmap BMP (uncompressed 24/32-bit), WebP, JPEG with high-fidelity `FrameScaler` resampling (Fit, Fill, Stretch). |
 | **Vector & Print** | ❌ None. | **Prepress & Vector Graphics:** Clean-room SVG optimization, Print-Ready PDF/X-4 (ISO 15930) with XMP metadata, sub-millisecond container sniffing for INDD, IDML, DOCX, PPTX, XLSX, EPUB, AI, EPS, PSD. |
@@ -37,8 +37,9 @@ Adobe Media Encoder has long been the default render tool for video editors. How
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                       ArtCraft Creative Suite                                          │
-│  FilmCraft · EffectCraft · SoundCraft · PhotoCraft · TextureCraft · DesignCraft · VectorCraft · PdfCraft│
+│                                 ArtCraft Creative Suite (14 Sibling Apps)                              │
+│   FilmCraft · EffectCraft · SoundCraft · PhotoCraft · VectorCraft · DesignCraft · PdfCraft · FigCraft  │
+│        CadCraft · DeckCraft · SolidCraft · WordCraft · TextureCraft · GridCraft · LightCraft           │
 └───────────────────────────────────────────────────┬────────────────────────────────────────────────────┘
                                                     │ "Queue in encoderCraft"
                                                     │ (craft-dispatch IPC & Shared Memory)
@@ -114,8 +115,11 @@ cargo run --release -p encodercraft
 # Video: Transcode to Apple ProRes 422 HQ
 cargo run --release -p encodercraft-cli -- encode input.mov -p "Apple ProRes 422 HQ" -o output.mov
 
-# Video: Transcode to Avid DNxHR 1080p
-cargo run --release -p encodercraft-cli -- encode input.mov -p "Avid DNxHR HQ 1080p" -o output.mxf
+# Video: Transcode to Broadcast MXF OP1a (SMPTE ST 377-1) with Avid DNxHR HQ
+cargo run --release -p encodercraft-cli -- encode input.mov -p "Broadcast MXF OP1a DNxHR HQ" -o output.mxf
+
+# Video: Transcode to Avid Media Composer MXF OP-Atom
+cargo run --release -p encodercraft-cli -- encode input.mov -p "Avid Media Composer MXF OP-Atom" -o output_atom.mxf
 
 # Audio: Transcode to 24-bit 48kHz Lossless FLAC Master
 cargo run --release -p encodercraft-cli -- encode mix.wav -p "Lossless FLAC Master (24-bit 48kHz)" -o master.flac
@@ -182,15 +186,15 @@ cargo run -p xtask -- ci
 This runs:
 1. `cargo fmt --check` (Zero formatting errors)
 2. `cargo clippy --workspace --all-targets -- -D warnings` (Zero warnings)
-3. `cargo test --workspace` (All 135 unit, fuzz, and integration tests pass)
+3. `cargo test --workspace` (All 139 unit, fuzz, and integration tests pass)
 4. `cargo xtask layers` (Zero cross-layer dependency violations)
 
 ---
 
 ## 📚 Comprehensive Documentation Suite
 
-- **[Project Roadmap](ROADMAP.md):** Executive metrics, target audience readiness percentages, and progress logs through Milestone 18.
-- **[Implementation Milestones](docs/implementation-milestones.md):** Detailed technical log of all deliverables from M0 to M18.
+- **[Project Roadmap](ROADMAP.md):** Executive metrics, target audience readiness percentages, and progress logs through Milestone 22.
+- **[Implementation Milestones](docs/implementation-milestones.md):** Detailed technical log of all deliverables from M0 to M22.
 - **[Universal File Format Matrix](docs/file-format-matrix.md):** Exhaustive capability matrix across all 6 media dimensions.
 - **[System Architecture](docs/architecture.md):** L0–L7 crate layering, memory ring buffers, backpressure, and panic containment.
 - **[Target App Parity Analysis](docs/target-app-parity.md):** Side-by-side feature comparison against Adobe Media Encoder 2026.

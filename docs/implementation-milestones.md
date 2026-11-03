@@ -2,8 +2,8 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** Implementation Complete & Verified (M0 through M12)  
-> **Verification:** 100% CI compliance via `cargo xtask ci` (125 unit, fuzz, and integration tests passed; strict L0–L7 layers enforced)
+> **Status:** Implementation Complete & Verified (M0 through M22)  
+> **Verification:** 100% CI compliance via `cargo xtask ci` (139 unit, fuzz, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
 
