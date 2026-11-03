@@ -3,11 +3,29 @@
 use std::sync::Arc;
 
 use egui::{RichText, Ui};
-use encodercraft_core::{CraftJobSpec, JobPriority, JobStatus};
+use encodercraft_core::{ContainerType, CraftJobSpec, JobPriority, JobStatus, OutputTarget, SourceDescriptor};
 use encodercraft_engine::{QueueManager, QueuedJob};
 
 use crate::icons;
 use crate::theme::Tokens;
+
+/// Column identifiers for sortable queue table headers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueSortColumn {
+    Source,
+    Format,
+    Preset,
+    Output,
+    Status,
+}
+
+/// Sorting direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortDirection {
+    #[default]
+    Ascending,
+    Descending,
+}
 
 /// State for the queue panel widget supporting full multi-job batch operations (AME Parity).
 #[derive(Default)]
@@ -18,6 +36,9 @@ pub struct QueuePanelState {
     pub is_running: bool,
     pub last_clicked_index: Option<usize>,
     pub active_action_menu: Option<String>,
+    pub active_preset_menu: Option<(String, usize)>, // (job_id, target_idx)
+    pub sort_column: Option<QueueSortColumn>,
+    pub sort_direction: SortDirection,
 }
 
 impl QueuePanelState {
@@ -84,6 +105,31 @@ impl QueuePanelState {
             Vec::new()
         }
     }
+
+    /// Toggles sorting on a given column.
+    pub fn toggle_sort(&mut self, col: QueueSortColumn) {
+        if self.sort_column == Some(col) {
+            self.sort_direction = match self.sort_direction {
+                SortDirection::Ascending => SortDirection::Descending,
+                SortDirection::Descending => SortDirection::Ascending,
+            };
+        } else {
+            self.sort_column = Some(col);
+            self.sort_direction = SortDirection::Ascending;
+        }
+    }
+}
+
+/// Truncates a string in the middle with an ellipsis ('…') if it exceeds `max_len` unicode chars.
+pub fn middle_truncate(text: &str, max_len: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_len || max_len < 5 {
+        return text.to_string();
+    }
+    let keep_side = (max_len.saturating_sub(1)) / 2;
+    let head: String = text.chars().take(keep_side).collect();
+    let tail: String = text.chars().skip(char_count.saturating_sub(keep_side)).collect();
+    format!("{head}…{tail}")
 }
 
 /// Reveals a file or directory in the platform's default file manager (AME Parity).
@@ -104,6 +150,86 @@ pub fn reveal_in_file_manager(path: &std::path::Path) {
     }
 }
 
+/// Available containers for inline dropdown selection.
+pub const INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::IsoBmffMp4, "MP4", "mp4"),
+    (ContainerType::QuickTimeMov, "MOV (QuickTime)", "mov"),
+    (ContainerType::WebM, "WebM", "webm"),
+    (ContainerType::MatroskaMkv, "MKV", "mkv"),
+    (ContainerType::MxfOp1a, "MXF OP1a", "mxf"),
+    (ContainerType::Wave, "WAV (BWF)", "wav"),
+    (ContainerType::Aiff, "AIFF", "aif"),
+    (ContainerType::Flac, "FLAC", "flac"),
+    (ContainerType::Mp3, "MP3", "mp3"),
+    (ContainerType::Png, "PNG", "png"),
+    (ContainerType::Jpeg, "JPEG", "jpg"),
+    (ContainerType::WebP, "WebP", "webp"),
+    (ContainerType::Tiff, "TIFF", "tif"),
+    (ContainerType::OpenExr, "OpenEXR", "exr"),
+    (ContainerType::AnimatedGif, "GIF", "gif"),
+];
+
+/// Returns the default preset name for a given container format.
+pub fn default_preset_for_container(c: ContainerType) -> &'static str {
+    match c {
+        ContainerType::IsoBmffMp4 => "Match Source - High Bitrate",
+        ContainerType::QuickTimeMov => "Apple ProRes 422 HQ",
+        ContainerType::WebM => "YouTube 1080p Full HD",
+        ContainerType::MatroskaMkv => "Match Source - High Bitrate",
+        ContainerType::MxfOp1a | ContainerType::MxfOpAtom => "Broadcast MXF OP1a (DNxHD / PCM)",
+        ContainerType::Wave => "Broadcast Wave BWF (-23 LUFS)",
+        ContainerType::Aiff => "Lossless Audio Master (AIFF 24-bit)",
+        ContainerType::Flac => "Archival Audio FLAC (Lossless 24-bit)",
+        ContainerType::Mp3 => "Podcast MP3 (192 kbps)",
+        ContainerType::Png => "Still Image PNG (Lossless)",
+        ContainerType::Jpeg => "Still Image JPEG",
+        ContainerType::WebP => "Still Image WebP (Lossless)",
+        ContainerType::Tiff => "Broadcast TIFF (16-bit RGB)",
+        ContainerType::OpenExr => "VFX OpenEXR (Half Float)",
+        _ => "Match Source - High Bitrate",
+    }
+}
+
+/// Returns matching preset names for a container.
+pub fn presets_for_container(c: ContainerType) -> Vec<&'static str> {
+    match c {
+        ContainerType::IsoBmffMp4 => vec![
+            "Match Source - High Bitrate",
+            "YouTube 4K Ultra HD",
+            "YouTube 1080p Full HD",
+            "Social Media Square (1080x1080)",
+            "Social Media Vertical 9:16 (1080x1920)",
+        ],
+        ContainerType::QuickTimeMov => vec!["Apple ProRes 422 HQ", "Apple ProRes 422", "Apple ProRes 4444", "Avid DNxHR HQ 1080p"],
+        ContainerType::MxfOp1a | ContainerType::MxfOpAtom => vec!["Broadcast MXF OP1a (DNxHD / PCM)"],
+        ContainerType::Wave | ContainerType::Aiff | ContainerType::Flac | ContainerType::Mp3 | ContainerType::OggAudio => vec![
+            "Broadcast Wave BWF (-23 LUFS)",
+            "Lossless Audio Master (AIFF 24-bit)",
+            "Archival Audio FLAC (Lossless 24-bit)",
+            "Podcast MP3 (192 kbps)",
+        ],
+        ContainerType::Png | ContainerType::Jpeg | ContainerType::WebP | ContainerType::Tiff | ContainerType::OpenExr | ContainerType::Bmp => vec![
+            "Still Image PNG (Lossless)",
+            "Still Image JPEG",
+            "Still Image WebP (Lossless)",
+            "Broadcast TIFF (16-bit RGB)",
+            "VFX OpenEXR (Half Float)",
+            "Windows Bitmap BMP (Uncompressed)",
+        ],
+        _ => vec!["Match Source - High Bitrate"],
+    }
+}
+
+/// Helper to get the display name of a job source.
+pub fn job_source_name(job: &QueuedJob) -> String {
+    match &job.spec.source {
+        SourceDescriptor::File { path, .. } => path.file_name().and_then(|s| s.to_str()).unwrap_or("File").to_string(),
+        SourceDescriptor::StitchedClips { .. } => "Stitched Sequence".to_string(),
+        SourceDescriptor::Pipe { endpoint, .. } => endpoint.clone(),
+        SourceDescriptor::ProjectReference { composition_id, .. } => composition_id.clone(),
+    }
+}
+
 /// Renders the queue panel with batch toolbar, global progress, and hierarchical job table.
 pub fn render_queue_panel(
     ui: &mut Ui,
@@ -113,7 +239,69 @@ pub fn render_queue_panel(
     on_inspect_job: &mut Option<CraftJobSpec>,
     on_open_log: &mut bool,
 ) {
-    let jobs = queue_mgr.list_jobs();
+    let mut jobs = queue_mgr.list_jobs();
+
+    // Handle drag and drop files onto the queue table
+    let dropped_files = ui.ctx().input(|i| i.raw.dropped_files.clone());
+    for file in dropped_files {
+        let path = file.path().to_path_buf();
+        if path.is_file() {
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let out_path = parent.join(format!("{stem}_encoded.mp4"));
+
+            let spec = CraftJobSpec {
+                version: "1.0".into(),
+                job_id: format!("job_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)),
+                client_info: encodercraft_core::ClientInfo {
+                    app_name: "encoderCraft GUI".into(),
+                    app_version: "0.1.0-alpha.2".into(),
+                    pid: std::process::id(),
+                    user_notes: None,
+                },
+                priority: JobPriority::Normal,
+                start_policy: encodercraft_core::StartPolicy::AutoStart,
+                source: SourceDescriptor::File { path: path.clone(), start_tick: None, duration_ticks: None, timebase: None },
+                targets: vec![OutputTarget {
+                    target_id: "target-1".into(),
+                    output_path: out_path,
+                    preset_name: "Match Source - High Bitrate".into(),
+                    container: ContainerType::IsoBmffMp4,
+                    ..Default::default()
+                }],
+            };
+            let _ = queue_mgr.submit_job(spec);
+        }
+    }
+
+    // Apply sorting if a sort column is set
+    if let Some(col) = state.sort_column {
+        jobs.sort_by(|a, b| {
+            let ord = match col {
+                QueueSortColumn::Source => job_source_name(a).to_lowercase().cmp(&job_source_name(b).to_lowercase()),
+                QueueSortColumn::Format => {
+                    let fa = a.spec.targets.first().map(|t| format!("{:?}", t.container)).unwrap_or_default();
+                    let fb = b.spec.targets.first().map(|t| format!("{:?}", t.container)).unwrap_or_default();
+                    fa.cmp(&fb)
+                }
+                QueueSortColumn::Preset => {
+                    let pa = a.spec.targets.first().map(|t| &t.preset_name).unwrap_or(&a.spec.job_id);
+                    let pb = b.spec.targets.first().map(|t| &t.preset_name).unwrap_or(&b.spec.job_id);
+                    pa.cmp(pb)
+                }
+                QueueSortColumn::Output => {
+                    let oa = a.spec.targets.first().map(|t| t.output_path.to_string_lossy()).unwrap_or_default();
+                    let ob = b.spec.targets.first().map(|t| t.output_path.to_string_lossy()).unwrap_or_default();
+                    oa.cmp(&ob)
+                }
+                QueueSortColumn::Status => format!("{:?}", a.status).cmp(&format!("{:?}", b.status)),
+            };
+            match state.sort_direction {
+                SortDirection::Ascending => ord,
+                SortDirection::Descending => ord.reverse(),
+            }
+        });
+    }
 
     ui.vertical(|ui| {
         // --- Keyboard shortcuts for AME parity ---
@@ -194,54 +382,11 @@ pub fn render_queue_panel(
                     for id in state.selected_ids_list() {
                         if let Some(j) = jobs.iter().find(|j| j.spec.job_id == id) {
                             let count = j.spec.targets.len() + 1;
-                            let stream_kind = match &j.spec.source {
-                                encodercraft_core::SourceDescriptor::File { path, .. } => encodercraft_demux::classify_stream_kind(path),
-                                _ => encodercraft_core::MediaStreamKind::VideoWithAudio,
-                            };
-
-                            let (ext, container, preset_name, cw, ch, br, lufs) = match stream_kind {
-                                encodercraft_core::MediaStreamKind::AudioOnly => (
-                                    "wav",
-                                    encodercraft_core::ContainerType::Wave,
-                                    "Broadcast Wave BWF (-23 LUFS)".to_string(),
-                                    None,
-                                    None,
-                                    None,
-                                    Some(-23.0),
-                                ),
-                                encodercraft_core::MediaStreamKind::Vector2D => {
-                                    ("svg", encodercraft_core::ContainerType::Svg, "Web Vector SVG (Optimized)".to_string(), None, None, None, None)
-                                }
-                                encodercraft_core::MediaStreamKind::Document => {
-                                    ("pdf", encodercraft_core::ContainerType::Pdf, "Print-Ready PDF/X-4".to_string(), None, None, None, None)
-                                }
-                                encodercraft_core::MediaStreamKind::Spatial3D => {
-                                    ("glb", encodercraft_core::ContainerType::Gltf, "glTF 2.0 Binary (.glb)".to_string(), None, None, None, None)
-                                }
-                                encodercraft_core::MediaStreamKind::StillImage => {
-                                    ("png", encodercraft_core::ContainerType::Png, "Still Image PNG (Lossless)".to_string(), None, None, None, None)
-                                }
-                                _ => (
-                                    "mp4",
-                                    encodercraft_core::ContainerType::IsoBmffMp4,
-                                    "Match Source - High Bitrate".to_string(),
-                                    Some(1920),
-                                    Some(1080),
-                                    Some(12000),
-                                    Some(-14.0),
-                                ),
-                            };
-
-                            let new_target = encodercraft_core::OutputTarget {
+                            let new_target = OutputTarget {
                                 target_id: format!("target-{count}"),
-                                output_path: std::path::PathBuf::from(format!("output_{count}.{ext}")),
-                                preset_name,
-                                container,
-                                custom_width: cw,
-                                custom_height: ch,
-                                custom_frame_rate: None,
-                                target_bitrate_kbps: br,
-                                target_lufs: lufs,
+                                output_path: std::path::PathBuf::from(format!("output_{count}.mp4")),
+                                preset_name: "Match Source - High Bitrate".into(),
+                                container: ContainerType::IsoBmffMp4,
                                 ..Default::default()
                             };
                             let _ = queue_mgr.add_output_target(&id, new_target);
@@ -398,7 +543,7 @@ pub fn render_queue_panel(
 
         ui.separator();
 
-        // --- 3. Hierarchical Job Table ---
+        // --- 3. Hierarchical Job Table with Columns ---
         if jobs.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(32.0);
@@ -410,31 +555,92 @@ pub fn render_queue_panel(
             return;
         }
 
+        // Table Header
+        render_table_header(ui, state, tokens);
+
+        ui.separator();
+
+        // Table Rows Scroll Area
         egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             for (idx, job) in jobs.iter().enumerate() {
-                let item = JobRowItem { job, idx, all_jobs: &jobs };
-                render_job_row(ui, item, state, queue_mgr, tokens, on_inspect_job);
+                let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs };
+                render_grouped_job_row(ui, item, state, queue_mgr, tokens, on_inspect_job);
             }
         });
     });
 }
 
-struct JobRowItem<'a> {
-    job: &'a QueuedJob,
-    idx: usize,
-    all_jobs: &'a [QueuedJob],
+fn sort_indicator(state: &QueuePanelState, col: QueueSortColumn) -> &'static str {
+    if state.sort_column == Some(col) {
+        match state.sort_direction {
+            SortDirection::Ascending => " ▲",
+            SortDirection::Descending => " ▼",
+        }
+    } else {
+        ""
+    }
 }
 
-fn render_job_row(
+fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens) {
+    egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(6.0, 4.0)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            // Source Column (expands)
+            let src_label = format!("Source Name{}", sort_indicator(state, QueueSortColumn::Source));
+            let src_resp = ui.add_sized(
+                [ui.available_width() - 650.0_f32.min(ui.available_width() * 0.65), 18.0],
+                egui::Button::new(RichText::new(src_label).strong().small()).frame(false),
+            );
+            if src_resp.clicked() {
+                state.toggle_sort(QueueSortColumn::Source);
+            }
+
+            // Format Column
+            let fmt_label = format!("Format{}", sort_indicator(state, QueueSortColumn::Format));
+            let fmt_resp = ui.add_sized([110.0, 18.0], egui::Button::new(RichText::new(fmt_label).strong().small()).frame(false));
+            if fmt_resp.clicked() {
+                state.toggle_sort(QueueSortColumn::Format);
+            }
+
+            // Preset Column
+            let pre_label = format!("Preset{}", sort_indicator(state, QueueSortColumn::Preset));
+            let pre_resp = ui.add_sized([190.0, 18.0], egui::Button::new(RichText::new(pre_label).strong().small()).frame(false));
+            if pre_resp.clicked() {
+                state.toggle_sort(QueueSortColumn::Preset);
+            }
+
+            // Output File Column
+            let out_label = format!("Output File{}", sort_indicator(state, QueueSortColumn::Output));
+            let out_resp = ui.add_sized([220.0, 18.0], egui::Button::new(RichText::new(out_label).strong().small()).frame(false));
+            if out_resp.clicked() {
+                state.toggle_sort(QueueSortColumn::Output);
+            }
+
+            // Status Column
+            let st_label = format!("Status{}", sort_indicator(state, QueueSortColumn::Status));
+            let st_resp = ui.add_sized([120.0, 18.0], egui::Button::new(RichText::new(st_label).strong().small()).frame(false));
+            if st_resp.clicked() {
+                state.toggle_sort(QueueSortColumn::Status);
+            }
+        });
+    });
+}
+
+struct GroupedJobItem<'a> {
+    pub job: &'a QueuedJob,
+    pub job_idx: usize,
+    pub all_jobs: &'a [QueuedJob],
+}
+
+fn render_grouped_job_row(
     ui: &mut Ui,
-    item: JobRowItem<'_>,
+    item: GroupedJobItem<'_>,
     state: &mut QueuePanelState,
     queue_mgr: &Arc<QueueManager>,
     tokens: &Tokens,
     on_inspect_job: &mut Option<CraftJobSpec>,
 ) {
     let job = item.job;
-    let job_idx = item.idx;
+    let job_idx = item.job_idx;
     let all_jobs = item.all_jobs;
     let job_id = job.spec.job_id.clone();
     let is_selected = state.selected_job_ids.contains(&job_id) || state.selected_job_id.as_deref() == Some(&job_id);
@@ -442,227 +648,211 @@ fn render_job_row(
 
     let row_bg = if is_selected { tokens.bg_surface_active } else { tokens.bg_surface };
 
-    egui::Frame::new().fill(row_bg).corner_radius(4).inner_margin(6.0).show(ui, |ui| {
+    egui::Frame::new().fill(row_bg).corner_radius(4).inner_margin(4.0).show(ui, |ui| {
+        // --- 1. Parent Source Row ---
         ui.horizontal(|ui| {
-            // Expand / Collapse arrow for multi-targets
-            let arrow_icon = if is_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
-            if icons::button(ui, arrow_icon, 16.0, false, tokens, "Toggle output targets").clicked() {
-                if is_expanded {
-                    state.expanded_jobs.remove(&job_id);
-                } else {
-                    state.expanded_jobs.insert(job_id.clone());
-                }
-            }
+            let src_col_width = (ui.available_width() - 650.0_f32.min(ui.available_width() * 0.65)).max(160.0);
 
-            // Status chip
-            render_status_chip(ui, &job.status, tokens);
-
-            // Client Origin Chip (All 14 ArtCraft Sibling Applications — el-j/encoderCraft#1)
-            render_client_origin_chip(ui, &job.spec.client_info.app_name, tokens);
-
-            // Priority Badge
-            if job.spec.priority != JobPriority::Normal {
-                let prio_label = format!("{:?}", job.spec.priority);
-                ui.label(RichText::new(prio_label).small().color(tokens.accent_primary));
-            }
-
-            // Source Name
-            let source_name = match &job.spec.source {
-                encodercraft_core::SourceDescriptor::File { path, .. } => path.file_name().and_then(|s| s.to_str()).unwrap_or("File"),
-                encodercraft_core::SourceDescriptor::StitchedClips { .. } => "Stitched Sequence",
-                encodercraft_core::SourceDescriptor::Pipe { endpoint, .. } => endpoint.as_str(),
-                encodercraft_core::SourceDescriptor::ProjectReference { composition_id, .. } => composition_id.as_str(),
-            };
-
-            let display_source_name = if source_name.chars().count() > 38 {
-                let prefix: String = source_name.chars().take(35).collect();
-                format!("{prefix}…")
-            } else {
-                source_name.to_string()
-            };
-
-            let job_select_btn = ui.selectable_label(is_selected, RichText::new(display_source_name).strong()).on_hover_text(source_name);
-            if job_select_btn.clicked() {
-                let cmd_held = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
-                let shift_held = ui.input(|i| i.modifiers.shift);
-
-                if shift_held {
-                    state.range_select(all_jobs, job_idx);
-                } else if cmd_held {
-                    state.toggle_select(job_id.clone(), job_idx);
-                } else {
-                    state.select_single(job_id.clone(), job_idx);
-                }
-            }
-
-            if job_select_btn.double_clicked() {
-                *on_inspect_job = Some(job.spec.clone());
-            }
-
-            job_select_btn.context_menu(|ui| {
-                let out_path = job.spec.targets.first().map(|t| t.output_path.clone());
-                let src_path = match &job.spec.source {
-                    encodercraft_core::SourceDescriptor::File { path, .. } => Some(path.clone()),
-                    _ => None,
-                };
-
-                if let Some(ref p) = out_path {
-                    if ui.button("Reveal Output in Finder / Explorer").clicked() {
-                        reveal_in_file_manager(p);
-                        ui.close();
-                    }
-                    if ui.button("Copy Output Path").clicked() {
-                        ui.ctx().copy_text(p.display().to_string());
-                        ui.close();
+            ui.allocate_ui_with_layout(egui::vec2(src_col_width, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                // Expand / Collapse Chevron
+                let arrow_icon = if is_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+                if icons::button(ui, arrow_icon, 16.0, false, tokens, "Toggle output targets").clicked() {
+                    if is_expanded {
+                        state.expanded_jobs.remove(&job_id);
+                    } else {
+                        state.expanded_jobs.insert(job_id.clone());
                     }
                 }
 
-                if let Some(ref p) = src_path {
-                    if ui.button("Reveal Source in Finder / Explorer").clicked() {
-                        reveal_in_file_manager(p);
-                        ui.close();
-                    }
-                    if ui.button("Copy Source Path").clicked() {
-                        ui.ctx().copy_text(p.display().to_string());
-                        ui.close();
+                // Origin Chip (ArtCraft siblings)
+                render_client_origin_chip(ui, &job.spec.client_info.app_name, tokens);
+
+                // Priority Badge
+                if job.spec.priority != JobPriority::Normal {
+                    let prio_label = format!("{:?}", job.spec.priority);
+                    ui.label(RichText::new(prio_label).small().color(tokens.accent_primary));
+                }
+
+                // Source Name
+                let source_name = job_source_name(job);
+                let display_source_name = middle_truncate(&source_name, 36);
+
+                let job_select_btn = ui.selectable_label(is_selected, RichText::new(display_source_name).strong()).on_hover_text(&source_name);
+                if job_select_btn.clicked() {
+                    let cmd_held = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                    let shift_held = ui.input(|i| i.modifiers.shift);
+
+                    if shift_held {
+                        state.range_select(all_jobs, job_idx);
+                    } else if cmd_held {
+                        state.toggle_select(job_id.clone(), job_idx);
+                    } else {
+                        state.select_single(job_id.clone(), job_idx);
                     }
                 }
 
-                ui.separator();
-
-                if ui.button("Export Settings...").clicked() {
+                if job_select_btn.double_clicked() {
                     *on_inspect_job = Some(job.spec.clone());
-                    ui.close();
                 }
 
-                if ui.button("Duplicate").clicked() {
-                    let _ = queue_mgr.duplicate_job(&job_id);
-                    ui.close();
-                }
+                job_select_btn.context_menu(|ui| {
+                    render_job_context_menu(ui, job, all_jobs, state, queue_mgr, on_inspect_job);
+                });
+            });
 
-                if ui.button("Reset Status").clicked() {
-                    let _ = queue_mgr.reset_job_status(&job_id);
-                    ui.close();
-                }
-
-                if ui.button("Remove").clicked() {
-                    let _ = queue_mgr.remove_job(&job_id);
-                    ui.close();
-                }
-
-                if state.selected_job_ids.len() > 1 {
-                    ui.separator();
-                    if ui.button(format!("Stitch {} Selected Clips...", state.selected_job_ids.len())).clicked() {
-                        if let Some(ref first_path) = out_path {
-                            let out = first_path.with_file_name("stitched_batch.mp4");
-                            let ids = state.selected_ids_list();
-                            let _ = queue_mgr.stitch_selected_jobs(&ids, out, "Match Source - High Bitrate".into());
-                        }
-                        ui.close();
+            // Format Summary Column
+            ui.allocate_ui_with_layout(egui::vec2(110.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if job.spec.targets.len() == 1 {
+                    if let Some(t) = job.spec.targets.first() {
+                        ui.label(RichText::new(format!("{:?}", t.container)).small().color(tokens.text_dim));
                     }
+                } else {
+                    ui.label(RichText::new(format!("({} outputs)", job.spec.targets.len())).small().color(tokens.text_dim));
                 }
             });
 
-            // Preset Name
-            if let Some(target) = job.spec.targets.first() {
-                ui.label(RichText::new(format!("-> {}", target.preset_name)).color(tokens.text_secondary));
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Actions menu with boundary clamping and upward flipping
-                let menu_id = ui.make_persistent_id(format!("job_row_actions_menu_{job_id}"));
-                let is_menu_open = state.active_action_menu.as_deref() == Some(&job_id);
-                let btn = ui.add(egui::Button::new(RichText::new("...").size(14.0)).frame(true));
-                if btn.clicked() {
-                    state.active_action_menu = if is_menu_open { None } else { Some(job_id.clone()) };
-                }
-
-                if is_menu_open {
-                    let screen_rect = ui.ctx().input(|i| i.raw.screen_rect).unwrap_or_else(|| ui.max_rect());
-                    let menu_width = 180.0;
-                    let menu_height = 170.0;
-
-                    let x = (btn.rect.max.x - menu_width).clamp(screen_rect.min.x + 8.0, screen_rect.max.x - menu_width - 8.0);
-
-                    let y = if btn.rect.max.y + menu_height > screen_rect.max.y - 12.0 {
-                        (btn.rect.min.y - menu_height).max(screen_rect.min.y + 8.0)
-                    } else {
-                        btn.rect.max.y + 2.0
-                    };
-
-                    let popup_rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(menu_width, menu_height));
-
-                    let close_menu = ui.input(|i| {
-                        (i.pointer.any_click() && i.pointer.interact_pos().map(|p| !popup_rect.contains(p) && !btn.rect.contains(p)).unwrap_or(false))
-                            || i.key_pressed(egui::Key::Escape)
-                    });
-
-                    if close_menu {
-                        state.active_action_menu = None;
-                    } else {
-                        egui::Area::new(menu_id).order(egui::Order::Foreground).fixed_pos(egui::pos2(x, y)).show(ui.ctx(), |ui| {
-                            egui::Frame::menu(ui.style())
-                                .fill(tokens.bg_panel_darker)
-                                .stroke(egui::Stroke::new(1.0, tokens.border_subtle))
-                                .corner_radius(6)
-                                .inner_margin(6.0)
-                                .show(ui, |ui| {
-                                    ui.set_width(menu_width - 12.0);
-                                    if ui.button("Inspect Settings...").clicked() {
-                                        *on_inspect_job = Some(job.spec.clone());
-                                        state.active_action_menu = None;
-                                    }
-                                    if ui.button("Duplicate").clicked() {
-                                        let _ = queue_mgr.duplicate_job(&job_id);
-                                        state.active_action_menu = None;
-                                    }
-                                    if ui.button("Start Now").clicked() {
-                                        let _ = queue_mgr.start_job(&job_id);
-                                        queue_mgr.start_queue();
-                                        state.active_action_menu = None;
-                                    }
-                                    if ui.button("Pause").clicked() {
-                                        let _ = queue_mgr.pause_job(&job_id);
-                                        state.active_action_menu = None;
-                                    }
-                                    if ui.button("Remove").clicked() {
-                                        let _ = queue_mgr.remove_job(&job_id);
-                                        state.active_action_menu = None;
-                                    }
-                                });
-                        });
+            // Preset Summary Column
+            ui.allocate_ui_with_layout(egui::vec2(190.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if job.spec.targets.len() == 1 {
+                    if let Some(t) = job.spec.targets.first() {
+                        let link =
+                            ui.link(RichText::new(middle_truncate(&t.preset_name, 24)).color(tokens.accent_primary)).on_hover_text(&t.preset_name);
+                        if link.clicked() {
+                            *on_inspect_job = Some(job.spec.clone());
+                        }
                     }
+                } else {
+                    ui.label(RichText::new("(multiple presets)").small().color(tokens.text_dim));
                 }
+            });
 
-                // FPS & Metrics
+            // Output File Summary Column
+            ui.allocate_ui_with_layout(egui::vec2(220.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if job.spec.targets.len() == 1 {
+                    if let Some(t) = job.spec.targets.first() {
+                        let path_str = t.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
+                        let out_link = ui
+                            .link(RichText::new(middle_truncate(path_str, 26)).color(tokens.accent_primary))
+                            .on_hover_text(t.output_path.display().to_string());
+                        if out_link.clicked()
+                            && let Some(new_path) = rfd::FileDialog::new().set_file_name(path_str).save_file()
+                        {
+                            let mut updated = t.clone();
+                            updated.output_path = new_path;
+                            let _ = queue_mgr.update_output_target(&job_id, 0, updated);
+                        }
+                    }
+                } else {
+                    ui.label(RichText::new(format!("({} destination files)", job.spec.targets.len())).small().color(tokens.text_dim));
+                }
+            });
+
+            // Status Column
+            ui.allocate_ui_with_layout(egui::vec2(120.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                render_status_chip(ui, &job.status, tokens);
                 if job.status == JobStatus::Processing {
-                    ui.label(RichText::new(format!("{:.1} FPS", job.current_fps)).small().color(tokens.text_dim));
+                    let progress = (job.progress_percent / 100.0).clamp(0.0, 1.0) as f32;
+                    let pbar = egui::ProgressBar::new(progress).desired_width(50.0);
+                    ui.add(pbar);
                 }
-
-                // Progress bar
-                let progress = (job.progress_percent / 100.0).clamp(0.0, 1.0) as f32;
-                let pbar = egui::ProgressBar::new(progress).show_percentage().desired_width(120.0);
-                ui.add(pbar);
             });
         });
 
-        // Expanded Child Output Targets
-        if is_expanded {
-            ui.indent(job_id.clone(), |ui| {
-                for (idx, target) in job.spec.targets.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("Target #{}:", idx + 1)).small().color(tokens.text_dim));
+        // --- 2. Indented Target Child Rows ---
+        if is_expanded || job.spec.targets.len() > 1 {
+            for (idx, target) in job.spec.targets.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let src_col_width = (ui.available_width() - 650.0_f32.min(ui.available_width() * 0.65)).max(160.0);
 
-                        // Preset name clickable link
-                        let target_link = ui
-                            .link(RichText::new(&target.preset_name).color(tokens.accent_primary))
-                            .on_hover_text("Inspect settings for this target");
-                        if target_link.clicked() {
+                    // Child Indent / Bullet Column
+                    ui.allocate_ui_with_layout(egui::vec2(src_col_width, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add_space(20.0);
+                        ui.label(RichText::new(format!("↳ Target #{}", idx + 1)).small().color(tokens.text_dim));
+
+                        if job.spec.targets.len() > 1 && icons::button(ui, icons::Icon::Trash, 14.0, false, tokens, "Remove output target").clicked()
+                        {
+                            let _ = queue_mgr.remove_output_target(&job_id, idx);
+                        }
+                        if icons::button(ui, icons::Icon::Duplicate, 14.0, false, tokens, "Duplicate output target").clicked() {
+                            let _ = queue_mgr.duplicate_output_target(&job_id, idx);
+                        }
+                    });
+
+                    // Format Dropdown Column
+                    ui.allocate_ui_with_layout(egui::vec2(110.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        let mut current_container = target.container;
+                        let combo_text =
+                            INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
+                        let combo = egui::ComboBox::from_id_salt(format!("target_fmt_{job_id}_{idx}"))
+                            .selected_text(RichText::new(combo_text).small())
+                            .width(95.0)
+                            .show_ui(ui, |ui| {
+                                for (c, name, _) in INLINE_CONTAINERS {
+                                    ui.selectable_value(&mut current_container, *c, *name);
+                                }
+                            });
+
+                        if combo.response.changed() && current_container != target.container {
+                            let mut updated = target.clone();
+                            updated.container = current_container;
+                            if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
+                                let mut p = updated.output_path.clone();
+                                p.set_extension(ext);
+                                updated.output_path = p;
+                            }
+                            updated.preset_name = default_preset_for_container(current_container).to_string();
+                            let _ = queue_mgr.update_output_target(&job_id, idx, updated);
+                        }
+                    });
+
+                    // Preset Selector Column (Blue Link style)
+                    ui.allocate_ui_with_layout(egui::vec2(190.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        let is_menu_open = state.active_preset_menu == Some((job_id.clone(), idx));
+                        let pre_btn = ui
+                            .link(RichText::new(middle_truncate(&target.preset_name, 22)).color(tokens.accent_primary))
+                            .on_hover_text("Click to choose preset; double-click for settings");
+                        if pre_btn.clicked() {
+                            state.active_preset_menu = if is_menu_open { None } else { Some((job_id.clone(), idx)) };
+                        }
+                        if pre_btn.double_clicked() {
                             *on_inspect_job = Some(job.spec.clone());
                         }
 
-                        target_link.context_menu(|ui| {
-                            if ui.button("Reveal Output in Finder / Explorer").clicked() {
+                        if is_menu_open {
+                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                for preset_name in presets_for_container(target.container) {
+                                    if ui.button(preset_name).clicked() {
+                                        let mut updated = target.clone();
+                                        updated.preset_name = preset_name.to_string();
+                                        let _ = queue_mgr.update_output_target(&job_id, idx, updated);
+                                        state.active_preset_menu = None;
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button("Custom Export Settings...").clicked() {
+                                    *on_inspect_job = Some(job.spec.clone());
+                                    state.active_preset_menu = None;
+                                }
+                            });
+                        }
+                    });
+
+                    // Output File Path Column (Blue Link style)
+                    ui.allocate_ui_with_layout(egui::vec2(220.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        let path_str = target.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
+                        let out_link = ui
+                            .link(RichText::new(middle_truncate(path_str, 26)).color(tokens.accent_primary))
+                            .on_hover_text(target.output_path.display().to_string());
+                        if out_link.clicked()
+                            && let Some(new_path) = rfd::FileDialog::new().set_file_name(path_str).save_file()
+                        {
+                            let mut updated = target.clone();
+                            updated.output_path = new_path;
+                            let _ = queue_mgr.update_output_target(&job_id, idx, updated);
+                        }
+
+                        out_link.context_menu(|ui| {
+                            if ui.button("Reveal in Finder / Explorer").clicked() {
                                 reveal_in_file_manager(&target.output_path);
                                 ui.close();
                             }
@@ -674,48 +864,91 @@ fn render_job_row(
                                 *on_inspect_job = Some(job.spec.clone());
                                 ui.close();
                             }
-                            if ui.button("Duplicate Target").clicked() {
-                                let _ = queue_mgr.duplicate_output_target(&job_id, idx);
-                                ui.close();
-                            }
-                            if job.spec.targets.len() > 1 && ui.button("Remove Target").clicked() {
-                                let _ = queue_mgr.remove_output_target(&job_id, idx);
-                                ui.close();
-                            }
-                        });
-
-                        // Container format tag
-                        ui.label(RichText::new(format!("{:?}", target.container)).small().color(tokens.text_dim));
-
-                        // Output filename
-                        let path_display = target.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
-                        let display_out_name = if path_display.chars().count() > 32 {
-                            let prefix: String = path_display.chars().take(29).collect();
-                            format!("{prefix}…")
-                        } else {
-                            path_display.to_string()
-                        };
-                        ui.label(RichText::new(format!("-> {display_out_name}")).small().color(tokens.text_secondary))
-                            .on_hover_text(target.output_path.display().to_string());
-
-                        // Actions per target
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if job.spec.targets.len() > 1
-                                && icons::button(ui, icons::Icon::Trash, 16.0, false, tokens, "Remove output target").clicked()
-                            {
-                                let _ = queue_mgr.remove_output_target(&job_id, idx);
-                            }
-                            if icons::button(ui, icons::Icon::Duplicate, 16.0, false, tokens, "Duplicate output target").clicked() {
-                                let _ = queue_mgr.duplicate_output_target(&job_id, idx);
-                            }
                         });
                     });
-                }
-            });
+
+                    // Status Column
+                    ui.allocate_ui_with_layout(egui::vec2(120.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{:?}", target.container)).small().color(tokens.text_dim));
+                    });
+                });
+            }
         }
     });
 
     ui.add_space(2.0);
+}
+
+fn render_job_context_menu(
+    ui: &mut Ui,
+    job: &QueuedJob,
+    _all_jobs: &[QueuedJob],
+    state: &mut QueuePanelState,
+    queue_mgr: &Arc<QueueManager>,
+    on_inspect_job: &mut Option<CraftJobSpec>,
+) {
+    let job_id = &job.spec.job_id;
+    let out_path = job.spec.targets.first().map(|t| t.output_path.clone());
+    let src_path = match &job.spec.source {
+        SourceDescriptor::File { path, .. } => Some(path.clone()),
+        _ => None,
+    };
+
+    if let Some(ref p) = out_path {
+        if ui.button("Reveal Output in Finder / Explorer").clicked() {
+            reveal_in_file_manager(p);
+            ui.close();
+        }
+        if ui.button("Copy Output Path").clicked() {
+            ui.ctx().copy_text(p.display().to_string());
+            ui.close();
+        }
+    }
+
+    if let Some(ref p) = src_path {
+        if ui.button("Reveal Source in Finder / Explorer").clicked() {
+            reveal_in_file_manager(p);
+            ui.close();
+        }
+        if ui.button("Copy Source Path").clicked() {
+            ui.ctx().copy_text(p.display().to_string());
+            ui.close();
+        }
+    }
+
+    ui.separator();
+
+    if ui.button("Export Settings...").clicked() {
+        *on_inspect_job = Some(job.spec.clone());
+        ui.close();
+    }
+
+    if ui.button("Duplicate").clicked() {
+        let _ = queue_mgr.duplicate_job(job_id);
+        ui.close();
+    }
+
+    if ui.button("Reset Status").clicked() {
+        let _ = queue_mgr.reset_job_status(job_id);
+        ui.close();
+    }
+
+    if ui.button("Remove").clicked() {
+        let _ = queue_mgr.remove_job(job_id);
+        ui.close();
+    }
+
+    if state.selected_job_ids.len() > 1 {
+        ui.separator();
+        if ui.button(format!("Stitch {} Selected Clips...", state.selected_job_ids.len())).clicked() {
+            if let Some(ref first_path) = out_path {
+                let out = first_path.with_file_name("stitched_batch.mp4");
+                let ids = state.selected_ids_list();
+                let _ = queue_mgr.stitch_selected_jobs(&ids, out, "Match Source - High Bitrate".into());
+            }
+            ui.close();
+        }
+    }
 }
 
 fn render_status_chip(ui: &mut Ui, status: &JobStatus, tokens: &Tokens) {
@@ -787,7 +1020,7 @@ pub(crate) fn overall_fraction(jobs: &[QueuedJob]) -> f32 {
 }
 
 #[cfg(test)]
-mod progress_tests {
+mod tests {
     use super::*;
     use encodercraft_core::{ClientInfo, CraftJobSpec, JobPriority, OutputTarget, SourceDescriptor, StartPolicy};
 
@@ -813,5 +1046,35 @@ mod progress_tests {
         assert!((overall_fraction(&jobs) - 0.875).abs() < 1e-6);
         assert_eq!(overall_fraction(&[]), 0.0);
         assert_eq!(overall_fraction(&[job(1, JobStatus::Failed("x".into()), 0.0)]), 1.0);
+    }
+
+    #[test]
+    fn test_middle_truncate() {
+        assert_eq!(middle_truncate("short.mov", 20), "short.mov");
+        assert_eq!(middle_truncate("very_long_file_name_from_camera_roll.mov", 15), "very_lo…oll.mov");
+    }
+
+    #[test]
+    fn test_queue_sorting_and_selection() {
+        let mut state = QueuePanelState::default();
+        state.toggle_sort(QueueSortColumn::Source);
+        assert_eq!(state.sort_column, Some(QueueSortColumn::Source));
+        assert_eq!(state.sort_direction, SortDirection::Ascending);
+        state.toggle_sort(QueueSortColumn::Source);
+        assert_eq!(state.sort_direction, SortDirection::Descending);
+
+        let jobs = [job(1, JobStatus::Queued, 0.0)];
+        state.select_all(&jobs);
+        assert_eq!(state.selected_ids_list(), vec!["j".to_string()]);
+        state.clear_selection();
+        assert!(state.selected_ids_list().is_empty());
+    }
+
+    #[test]
+    fn test_default_presets_coverage() {
+        for (c, _, _) in INLINE_CONTAINERS {
+            let p = default_preset_for_container(*c);
+            assert!(!p.is_empty());
+        }
     }
 }

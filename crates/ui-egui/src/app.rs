@@ -608,8 +608,10 @@ impl EncoderCraftApp {
 
         if let Some(new_spec) = saved_spec {
             let job_id = new_spec.job_id.clone();
-            let _ = self.queue_mgr.remove_job(&job_id);
-            let _ = self.queue_mgr.submit_job(new_spec);
+            if self.queue_mgr.update_job_spec(&job_id, new_spec.clone()).is_err() {
+                let _ = self.queue_mgr.remove_job(&job_id);
+                let _ = self.queue_mgr.submit_job(new_spec);
+            }
         }
 
         // 5. Log Dialog
