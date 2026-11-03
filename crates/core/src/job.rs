@@ -241,6 +241,9 @@ pub struct OutputTarget {
     pub metadata: Option<crate::metadata::XmpMetadata>,
     #[serde(default)]
     pub hardware_acceleration: bool,
+    /// Still-image quality 1..=100 (JPEG and lossy WebP); `None` uses the encoder default.
+    #[serde(default)]
+    pub image_quality: Option<u8>,
 }
 
 impl Default for OutputTarget {
@@ -264,6 +267,7 @@ impl Default for OutputTarget {
             audio_stems: None,
             metadata: None,
             hardware_acceleration: false,
+            image_quality: None,
         }
     }
 }

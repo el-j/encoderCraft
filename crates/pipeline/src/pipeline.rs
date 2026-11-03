@@ -11,6 +11,7 @@ use encodercraft_audio_dsp::{AacEncoderWrapper, normalize_loudness, remix_channe
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor};
 use encodercraft_geom::{Dimensions, ScaleMode};
+use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
 use encodercraft_muxers::{
     AudioSample, AudioStreamConfig, BextMetadata, BwfWavWriter, MkvMuxerBuilder, Mp4Muxer, MxfMuxer, VideoSample, VideoStreamConfig, WavFormatTag,
 };
@@ -319,28 +320,20 @@ impl TranscodePipeline {
             frame
         };
 
-        match target.container {
-            ContainerType::Png | ContainerType::StillSequence => {
-                let png_bytes = encodercraft_image_codecs::encode_png(&final_frame)?;
-                std::fs::write(&target.output_path, png_bytes).map_err(|e| EncoderError::Io(format!("failed to write PNG: {e}")))?;
-            }
-            ContainerType::Tiff => {
-                let tiff_bytes = encodercraft_image_codecs::encode_tiff(&final_frame)?;
-                std::fs::write(&target.output_path, tiff_bytes).map_err(|e| EncoderError::Io(format!("failed to write TIFF: {e}")))?;
-            }
-            ContainerType::OpenExr => {
-                let exr_bytes = encodercraft_image_codecs::encode_exr_half(&final_frame)?;
-                std::fs::write(&target.output_path, exr_bytes).map_err(|e| EncoderError::Io(format!("failed to write OpenEXR: {e}")))?;
-            }
-            ContainerType::Bmp => {
-                let bmp_bytes = encodercraft_image_codecs::encode_bmp(&final_frame)?;
-                std::fs::write(&target.output_path, bmp_bytes).map_err(|e| EncoderError::Io(format!("failed to write BMP: {e}")))?;
-            }
-            _ => {
-                let png_bytes = encodercraft_image_codecs::encode_png(&final_frame)?;
-                std::fs::write(&target.output_path, png_bytes).map_err(|e| EncoderError::Io(format!("failed to write PNG: {e}")))?;
-            }
+        let (format, mut options) = match target.container {
+            ContainerType::Png | ContainerType::StillSequence => (StillFormat::Png, StillOptions::default()),
+            ContainerType::Tiff => (StillFormat::Tiff, StillOptions::default()),
+            ContainerType::OpenExr => (StillFormat::OpenExr, StillOptions::default()),
+            ContainerType::Bmp => (StillFormat::Bmp, StillOptions::default()),
+            ContainerType::Jpeg => (StillFormat::Jpeg, StillOptions::default()),
+            ContainerType::WebP => (StillFormat::WebP, StillOptions { webp_lossless: target.image_quality.is_none(), ..StillOptions::default() }),
+            other => return Err(EncoderError::UnsupportedCodec(format!("{other:?} is not a still-image container"))),
+        };
+        if let Some(q) = target.image_quality {
+            options.quality = q.clamp(1, 100);
         }
+        let bytes = encode_still(&final_frame, format, &options)?;
+        std::fs::write(&target.output_path, bytes).map_err(|e| EncoderError::Io(format!("failed to write {}: {e}", target.output_path.display())))?;
 
         self.progress.set_total_frames(1);
         self.progress.advance_frame(start_time);

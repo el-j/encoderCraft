@@ -250,3 +250,36 @@ fn still_images_keep_their_pixels_across_formats() {
         assert!(hi - lo > 40, "{name} is flat");
     }
 }
+
+#[test]
+fn lossy_still_formats_decode_close_to_the_source_and_never_grey() {
+    let dir = tempdir().unwrap();
+    let png = dir.path().join("source.png");
+    let frame = test_frame(5);
+    std::fs::write(&png, encodercraft_image_codecs::encode_png(&frame).unwrap()).unwrap();
+    let (src, _) = frame.plane(0).unwrap();
+
+    for (name, container) in [("out.jpg", ContainerType::Jpeg), ("out.webp", ContainerType::WebP)] {
+        let out = run(dir.path(), name, container, "Image", &png);
+        let decoded = MediaReader::open(&out).unwrap().frame_at_index(0).unwrap();
+        assert_eq!(decoded.dimensions, frame.dimensions, "{name}");
+        let (got, _) = decoded.plane(0).unwrap();
+        let total: u64 = got.iter().zip(src.iter()).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
+        let mean = total as f64 / got.len() as f64;
+        assert!(mean < 12.0, "{name} mean error {mean}");
+        let (lo, hi) = mean_luma_spread(&decoded);
+        assert!(hi - lo > 40, "{name} is flat");
+    }
+}
+
+#[test]
+fn truncated_still_is_an_error_and_leaves_no_output() {
+    let dir = tempdir().unwrap();
+    let png = dir.path().join("source.png");
+    let bytes = encodercraft_image_codecs::encode_png(&test_frame(1)).unwrap();
+    std::fs::write(&png, &bytes[..bytes.len() / 3]).unwrap();
+    let out = dir.path().join("out.png");
+    let result = TranscodePipeline::new(job(&png, target(&out, ContainerType::Png, "Image"))).execute();
+    assert!(result.is_err());
+    assert!(!out.exists());
+}
