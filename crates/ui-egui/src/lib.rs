@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod commands;
 pub mod encoding_panel;
 pub mod fonts;
 pub mod icons;
@@ -24,6 +25,7 @@ pub mod scope_view;
 pub mod theme;
 pub mod transport;
 pub mod watch_panel;
+pub mod workspace;
 
 pub use app::EncoderCraftApp;
 pub use preset_editor::{PresetEditorState, render_preset_editor};
