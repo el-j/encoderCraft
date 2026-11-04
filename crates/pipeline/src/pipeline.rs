@@ -128,7 +128,7 @@ impl TranscodePipeline {
             | ContainerType::Bmp
             | ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
             ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => {
-                self.execute_image_transcode(target, start_time)?
+                self.execute_layered_image(target, start_time)?
             }
             ContainerType::AdobeIllustratorAi | ContainerType::ArtcraftVectorcraft => self.execute_vector_svg(target, start_time)?,
             ContainerType::AutocadDxf | ContainerType::AutocadDwg | ContainerType::HpglPlotter | ContainerType::ArtcraftCadcraft => {
@@ -520,6 +520,59 @@ impl TranscodePipeline {
             _ => {
                 let pdf = doc.to_pdf_x4_bytes()?;
                 std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write default publication file: {e}")))?;
+            }
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_layered_image(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let image = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source layered image `{}`: {e}", path.display())))?;
+                encodercraft_image_codecs::LayeredImage::from_bytes_auto(&bytes)?
+            }
+            _ => {
+                let mut img = encodercraft_image_codecs::LayeredImage::new("Default Composition", 100, 100);
+                let layer = encodercraft_image_codecs::ImageLayer::new("Background", 100, 100, vec![200; 100 * 100 * 4]);
+                img.add_layer(layer);
+                img
+            }
+        };
+
+        match target.container {
+            ContainerType::ArtcraftPhotocraft => {
+                let bin = image.to_photocraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .photocraft file: {e}")))?;
+            }
+            ContainerType::AdobePhotoshopPsb => {
+                let psb = image.to_psd_bytes(true)?;
+                std::fs::write(&target.output_path, &psb).map_err(|e| EncoderError::Io(format!("failed to write PSB file: {e}")))?;
+            }
+            ContainerType::AdobePhotoshopPsd => {
+                let psd = image.to_psd_bytes(false)?;
+                std::fs::write(&target.output_path, &psd).map_err(|e| EncoderError::Io(format!("failed to write PSD file: {e}")))?;
+            }
+            ContainerType::OpenExr => {
+                let dims = encodercraft_geom::Dimensions::new(image.width, image.height)?;
+                let frame = encodercraft_core::VideoFrame::from_raw_bytes(
+                    dims,
+                    encodercraft_color::PixelFormat::Rgba8,
+                    encodercraft_color::ColorSpaceTag::SRGB,
+                    0,
+                    1,
+                    encodercraft_core::Rational64::FPS_24,
+                    image.composite_rgba,
+                )?;
+                let exr_bytes = encodercraft_image_codecs::encode_exr_half(&frame)?;
+                std::fs::write(&target.output_path, &exr_bytes).map_err(|e| EncoderError::Io(format!("failed to write EXR file: {e}")))?;
+            }
+            _ => {
+                let psd = image.to_psd_bytes(false)?;
+                std::fs::write(&target.output_path, &psd).map_err(|e| EncoderError::Io(format!("failed to write default layered file: {e}")))?;
             }
         }
 
@@ -1491,6 +1544,69 @@ mod tests {
         assert!(pdf_data.starts_with(b"%PDF-1.6"));
         let pdf_str = String::from_utf8_lossy(&pdf_data);
         assert!(pdf_str.contains("/GTS_PDFXVersion (PDF/X-4)"));
+    }
+
+    #[test]
+    fn test_execute_layered_psd_and_photocraft_transcode() {
+        let dir = tempdir().unwrap();
+        let psd_in = dir.path().join("artwork.psd");
+        let photocraft_out = dir.path().join("artwork.photocraft");
+        let psb_out = dir.path().join("artwork.psb");
+        let exr_out = dir.path().join("artwork.exr");
+
+        let mut img = encodercraft_image_codecs::LayeredImage::new("Artwork", 64, 64);
+        let layer = encodercraft_image_codecs::ImageLayer::new("Layer 1", 64, 64, vec![180; 64 * 64 * 4]);
+        img.add_layer(layer);
+        let psd_bytes = img.to_psd_bytes(false).unwrap();
+        std::fs::write(&psd_in, &psd_bytes).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-layered-job".into(),
+            client_info: ClientInfo { app_name: "photocraft".into(), app_version: "1.0".into(), pid: 202, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: psd_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_photocraft".into(),
+                    output_path: photocraft_out.clone(),
+                    preset_name: "ArtCraft Native PhotoCraft".into(),
+                    container: ContainerType::ArtcraftPhotocraft,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_psb".into(),
+                    output_path: psb_out.clone(),
+                    preset_name: "Photoshop Large Document PSB".into(),
+                    container: ContainerType::AdobePhotoshopPsb,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_exr".into(),
+                    output_path: exr_out.clone(),
+                    preset_name: "VFX Composite OpenEXR".into(),
+                    container: ContainerType::OpenExr,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(photocraft_out.exists());
+        let pc_bytes = std::fs::read(&photocraft_out).unwrap();
+        assert!(pc_bytes.starts_with(b"\x89CRAFT\x00\x01P"));
+
+        assert!(psb_out.exists());
+        let psb_bytes = std::fs::read(&psb_out).unwrap();
+        assert!(psb_bytes.starts_with(b"8BPS"));
+        assert_eq!(psb_bytes[4..6], [0, 2]); // Version 2
+
+        assert!(exr_out.exists());
+        let exr_data = std::fs::read(&exr_out).unwrap();
+        assert!(exr_data.starts_with(b"\x76\x2F\x31\x01")); // OpenEXR magic
     }
 
     #[test]
