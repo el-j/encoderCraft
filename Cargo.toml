@@ -80,6 +80,7 @@ filmcraft-mxf = { git = "https://github.com/storytold/filmcraft" }
 craft-aac = { package = "filmcraft-aac", git = "https://github.com/storytold/filmcraft" }
 craft-opus = { package = "filmcraft-opus", git = "https://github.com/storytold/filmcraft" }
 craft-audio-io = { package = "soundcraft-audio-io", git = "https://github.com/storytold/soundcraft" }
+craft-dsp = { package = "soundcraft-dsp", git = "https://github.com/storytold/soundcraft" }
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }

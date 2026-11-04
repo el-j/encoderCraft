@@ -183,6 +183,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut submitted: Vec<(String, PathBuf)> = Vec::new();
 
     for (idx, input_path) in inputs.iter().enumerate() {
+        let default_ext = if is_session_path(input_path) { "wav" } else { "mp4" };
         let output_path = if total == 1
             && let Some(ref out) = output
         {
@@ -191,10 +192,10 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
             && out_dir.is_dir()
         {
             let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-            out_dir.join(format!("{stem}_encoded.mp4"))
+            out_dir.join(format!("{stem}_encoded.{default_ext}"))
         } else {
             let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-            PathBuf::from(format!("{stem}_encoded.mp4"))
+            PathBuf::from(format!("{stem}_encoded.{default_ext}"))
         };
 
         if total > 1 {
@@ -205,6 +206,9 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
 
         let media_info = encodercraft_source::probe_media_info(input_path)?;
         let mut target = evaluate_preset(preset, &media_info, output_path.clone())?;
+        if let Some(container) = session_output_container(input_path, &output_path) {
+            target.container = container;
+        }
 
         if let Some(rate) = fps {
             target.custom_frame_rate = Some(rate);
@@ -246,6 +250,26 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
 
     queue.start_queue();
     wait_for_jobs(&queue, &submitted)
+}
+
+fn is_session_path(path: &std::path::Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("sesx") || e.eq_ignore_ascii_case("soundcraft"))
+}
+
+/// For DAW session inputs the output container follows the `-o` extension (audio masters or another session format).
+fn session_output_container(input: &std::path::Path, output: &std::path::Path) -> Option<encodercraft_core::ContainerType> {
+    use encodercraft_core::ContainerType;
+    if !is_session_path(input) {
+        return None;
+    }
+    let ext = output.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase)?;
+    if ext == "aiff" {
+        return Some(ContainerType::Aiff);
+    }
+    [ContainerType::Wave, ContainerType::Flac, ContainerType::Aiff, ContainerType::AdobeAuditionSesx, ContainerType::ArtcraftSoundcraft]
+        .into_iter()
+        .find(|c| c.file_extension().trim_start_matches('.') == ext)
+        .or(Some(ContainerType::Wave))
 }
 
 /// Blocks until every submitted job is finished, printing progress; fails if any job failed.
@@ -464,4 +488,21 @@ fn cmd_mcp() -> Result<(), EncoderError> {
     let stdout = std::io::stdout();
 
     server.run_stdio(stdin.lock(), stdout.lock()).map_err(|e| EncoderError::Io(format!("MCP stdio error: {e}")))
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use encodercraft_core::ContainerType;
+    use std::path::Path;
+
+    #[test]
+    fn session_output_follows_extension() {
+        let s = Path::new("mix.sesx");
+        assert_eq!(session_output_container(s, Path::new("o.flac")), Some(ContainerType::Flac));
+        assert_eq!(session_output_container(s, Path::new("o.aiff")), Some(ContainerType::Aiff));
+        assert_eq!(session_output_container(s, Path::new("o.soundcraft")), Some(ContainerType::ArtcraftSoundcraft));
+        assert_eq!(session_output_container(s, Path::new("o.xyz")), Some(ContainerType::Wave));
+        assert_eq!(session_output_container(Path::new("a.mov"), Path::new("o.flac")), None);
+    }
 }
