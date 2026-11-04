@@ -534,9 +534,9 @@ flowchart LR
    - Ingest & write Photoshop `.psd` / `.psb` with full layer trees via `photocraft-psd`; bidirectional conversion with `.photocraft`, multi-channel OpenEXR, BigTIFF, and DDS GPU texture maps.
 5. [x] **Vector Graphics & Illustration Pipeline ([#74](https://github.com/el-j/encoderCraft/issues/74)) (Completed 2026-11-04):**
    - Ingest Illustrator `.ai` (PDF stream + PGF/AI5 layers) via clean-room parser; bidirectional conversion with `.vectorcraft` native binary container (`\x89CRAFT\x00\x01V`), W3C SVG 2.0, PostScript EPS, print PDF, text-to-outlines conversion, and AutoCAD DXF interop.
-6. **Motion Graphics & NLE Timeline Pipeline ([#75](https://github.com/el-j/encoderCraft/issues/75)):**
-   - Ingest After Effects `.aep` RIFX chunk trees via `effectcraft-aep` (render to ProRes/H.264 or convert to `.effectcraft` / Lottie JSON).
-   - Ingest Premiere Pro `.prproj` gzipped XML via `filmcraft-prproj` (batch render sequences or convert to `.filmcraft` / FCPXML / OTIO).
+6. [x] **Motion Graphics & NLE Timeline Pipeline ([#75](https://github.com/el-j/encoderCraft/issues/75)) (Completed 2026-11-04):**
+   - Ingest After Effects `.aep` RIFX chunk trees via `effectcraft-aep` clean-room parser (render to ProRes/H.264 or convert to `.effectcraft` binary container `\x89CRAFT\x00\x01E` and W3C Lottie JSON).
+   - Ingest Premiere Pro `.prproj` gzipped XML via `filmcraft-prproj` clean-room parser (batch render sequences or convert to `.filmcraft` binary container `\x89CRAFT\x00\x01F`, Final Cut Pro XML `fcpxml` v1.9, and OpenTimelineIO `.otio`).
 7. **Audio DAW & Multitrack Pipeline ([#76](https://github.com/el-j/encoderCraft/issues/76)):**
    - Ingest Audition `.sesx` sessions via `soundcraft-audio-io` and `soundcraft-dsp`; bidirectional conversion with `.soundcraft` and discrete BWF stems with EBU R128 loudness.
 8. **UI Inspector & Headless CLI Integration ([#77](https://github.com/el-j/encoderCraft/issues/77)):**
