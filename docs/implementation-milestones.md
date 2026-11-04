@@ -523,10 +523,10 @@ flowchart LR
 **Objective:** Expand `encoderCraft` into the centralized universal media conversion and transcoding nexus across all ArtCraft creative applications and standard/proprietary commercial formats without greenfield codec reinvention. Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Milestone 8](https://github.com/el-j/encoderCraft/milestone/8).
 
 #### Deliverables & Sub-Tasks:
-1. **Core & Demux Sniffer ([#70](https://github.com/el-j/encoderCraft/issues/70)):**
+1. [x] **Core & Demux Sniffer ([#70](https://github.com/el-j/encoderCraft/issues/70)) (Completed 2026-11-04):**
    - Universal `ContainerType` and `MediaStreamKind` variants for all Adobe formats (`INDD`, `PSD`, `PSB`, `AEP`, `AI`, `PRPROJ`, `SESX`), CAD formats (`DXF`, `DWG`, `HPGL`), and native ArtCraft formats (`.designcraft`, `.photocraft`, `.vectorcraft`, `.effectcraft`, `.filmcraft`, `.soundcraft`, `.cadcraft`, `.anicraft`).
    - Magic-byte container sniffing and `ContainerType::valid_conversion_targets` smart matrix.
-2. **CAD & Technical Drafting Pipeline ([#71](https://github.com/el-j/encoderCraft/issues/71)):**
+2. [ ] **CAD & Technical Drafting Pipeline ([#71](https://github.com/el-j/encoderCraft/issues/71)):**
    - Ingest & convert AutoCAD DXF/DWG and HPGL plotter files via `cadcraft-dxf`, `cadcraft-dwg`, `cadcraft-io` into `CadDrawing` IR, `.cadcraft`, SVG, and blueprint PDF.
 3. **Prepress & Publication Pipeline ([#72](https://github.com/el-j/encoderCraft/issues/72)):**
    - Ingest InDesign `.indd` via `storytold/indd-utils` into `DocumentCanvas` IR; bidirectional `.designcraft` <-> `IDML` / `PDF/X-4` / `EPUB 3` via `designcraft-idml` and `designcraft-pdf`.

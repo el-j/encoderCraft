@@ -114,6 +114,7 @@ impl TranscodePipeline {
             }
             ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
             ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml => self.execute_document_pdf(target, start_time)?,
+            ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => self.execute_document_pdf(target, start_time)?,
             ContainerType::Gltf | ContainerType::Usdz | ContainerType::Obj | ContainerType::Stl | ContainerType::Ply => {
                 self.execute_spatial_3d(target, start_time)?
             }
@@ -124,6 +125,19 @@ impl TranscodePipeline {
             | ContainerType::OpenExr
             | ContainerType::Bmp
             | ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
+            ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => {
+                self.execute_image_transcode(target, start_time)?
+            }
+            ContainerType::AdobeIllustratorAi
+            | ContainerType::ArtcraftVectorcraft
+            | ContainerType::AutocadDxf
+            | ContainerType::AutocadDwg
+            | ContainerType::HpglPlotter
+            | ContainerType::ArtcraftCadcraft => self.execute_vector_svg(target, start_time)?,
+            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => self.execute_video_mp4(target, false, start_time)?,
+            ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_video_mp4(target, false, start_time)?,
+            ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => self.execute_audio_wav(target, start_time)?,
+            ContainerType::ArtcraftAnicraft => self.execute_image_transcode(target, start_time)?,
         }
 
         // Export multichannel audio stems if configured
