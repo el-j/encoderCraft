@@ -217,7 +217,7 @@ Alpha 1 shipped with real defects; they are tracked as issues #6–#51 under epi
 Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Milestone 8](https://github.com/el-j/encoderCraft/milestone/8).
 
 - [x] **M30.1: Core & Demux Sniffer (#70)** – Universal `ContainerType` and `MediaStreamKind` variants for Adobe formats (`INDD`, `PSD`, `PSB`, `AEP`, `AI`, `PRPROJ`, `SESX`), CAD formats (`DXF`, `DWG`, `HPGL`), and native ArtCraft formats (`.designcraft`, `.photocraft`, `.vectorcraft`, `.effectcraft`, `.filmcraft`, `.soundcraft`, `.cadcraft`, `.anicraft`); magic-byte sniffing and `ContainerType::valid_conversion_targets` smart matrix.
-- [ ] **M30.2: CAD & Technical Drafting (#71)** – AutoCAD DXF/DWG and HPGL plotter ingest and conversion via `cadcraft`.
+- [x] **M30.2: CAD & Technical Drafting (#71)** – AutoCAD DXF/DWG and HPGL plotter ingest and conversion via `cadcraft` (DXF ASCII & binary, DWG headers, HPGL/PLT, `.cadcraft`, SVG and blueprint PDF).
 - [ ] **M30.3: Prepress & Publication (#72)** – InDesign INDD/IDML and DesignCraft conversion via `designcraft` & `indd-utils`.
 - [ ] **M30.4: Layered Graphics & Photography (#73)** – Photoshop PSD/PSB and PhotoCraft conversion via `photocraft`.
 - [ ] **M30.5: Vector Graphics & Illustration (#74)** – Illustrator AI and VectorCraft conversion via `vectorcraft`.

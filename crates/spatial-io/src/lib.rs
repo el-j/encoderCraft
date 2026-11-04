@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod cad;
 pub mod gltf;
 pub mod mesh;
 pub mod obj;
@@ -12,6 +13,7 @@ pub mod ply;
 pub mod stl;
 pub mod usd;
 
+pub use cad::{CadDrawing, CadEntity, CadLayer, CadPoint2D, CadPoint3D};
 pub use gltf::{parse_glb, write_glb};
 pub use mesh::TriangleMesh;
 pub use obj::{parse_obj, write_obj};

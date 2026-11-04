@@ -526,9 +526,9 @@ flowchart LR
 1. [x] **Core & Demux Sniffer ([#70](https://github.com/el-j/encoderCraft/issues/70)) (Completed 2026-11-04):**
    - Universal `ContainerType` and `MediaStreamKind` variants for all Adobe formats (`INDD`, `PSD`, `PSB`, `AEP`, `AI`, `PRPROJ`, `SESX`), CAD formats (`DXF`, `DWG`, `HPGL`), and native ArtCraft formats (`.designcraft`, `.photocraft`, `.vectorcraft`, `.effectcraft`, `.filmcraft`, `.soundcraft`, `.cadcraft`, `.anicraft`).
    - Magic-byte container sniffing and `ContainerType::valid_conversion_targets` smart matrix.
-2. [ ] **CAD & Technical Drafting Pipeline ([#71](https://github.com/el-j/encoderCraft/issues/71)):**
+2. [x] **CAD & Technical Drafting Pipeline ([#71](https://github.com/el-j/encoderCraft/issues/71)) (Completed 2026-11-04):**
    - Ingest & convert AutoCAD DXF/DWG and HPGL plotter files via `cadcraft-dxf`, `cadcraft-dwg`, `cadcraft-io` into `CadDrawing` IR, `.cadcraft`, SVG, and blueprint PDF.
-3. **Prepress & Publication Pipeline ([#72](https://github.com/el-j/encoderCraft/issues/72)):**
+3. [ ] **Prepress & Publication Pipeline ([#72](https://github.com/el-j/encoderCraft/issues/72)):**
    - Ingest InDesign `.indd` via `storytold/indd-utils` into `DocumentCanvas` IR; bidirectional `.designcraft` <-> `IDML` / `PDF/X-4` / `EPUB 3` via `designcraft-idml` and `designcraft-pdf`.
 4. **Layered Graphics & Photography Pipeline ([#73](https://github.com/el-j/encoderCraft/issues/73)):**
    - Ingest & write Photoshop `.psd` / `.psb` with full layer trees via `photocraft-psd`; bidirectional conversion with `.photocraft`, multi-channel OpenEXR, BigTIFF, and DDS GPU texture maps.

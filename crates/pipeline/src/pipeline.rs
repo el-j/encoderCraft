@@ -128,12 +128,10 @@ impl TranscodePipeline {
             ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => {
                 self.execute_image_transcode(target, start_time)?
             }
-            ContainerType::AdobeIllustratorAi
-            | ContainerType::ArtcraftVectorcraft
-            | ContainerType::AutocadDxf
-            | ContainerType::AutocadDwg
-            | ContainerType::HpglPlotter
-            | ContainerType::ArtcraftCadcraft => self.execute_vector_svg(target, start_time)?,
+            ContainerType::AdobeIllustratorAi | ContainerType::ArtcraftVectorcraft => self.execute_vector_svg(target, start_time)?,
+            ContainerType::AutocadDxf | ContainerType::AutocadDwg | ContainerType::HpglPlotter | ContainerType::ArtcraftCadcraft => {
+                self.execute_cad_transcode(target, start_time)?
+            }
             ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => self.execute_video_mp4(target, false, start_time)?,
             ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_video_mp4(target, false, start_time)?,
             ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => self.execute_audio_wav(target, start_time)?,
@@ -228,7 +226,9 @@ impl TranscodePipeline {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes = std::fs::read(path)
                     .map_err(|e| EncoderError::Io(format!("failed to read source vector file `{}`: {e}", path.display())))?;
-                if let Ok(text) = std::str::from_utf8(&bytes) {
+                if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                    cad.to_svg()
+                } else if let Ok(text) = std::str::from_utf8(&bytes) {
                     if text.contains("<svg") {
                         text.to_string()
                     } else {
@@ -249,6 +249,58 @@ impl TranscodePipeline {
         };
 
         std::fs::write(&target.output_path, content.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_cad_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let drawing = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source CAD file `{}`: {e}", path.display())))?;
+                encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes)?
+            }
+            _ => {
+                let mut cad = encodercraft_spatial_io::CadDrawing::new("Default Drawing");
+                cad.add_line(
+                    encodercraft_spatial_io::CadPoint3D::new(0.0, 0.0, 0.0),
+                    encodercraft_spatial_io::CadPoint3D::new(100.0, 100.0, 0.0),
+                    "0",
+                );
+                cad
+            }
+        };
+
+        match target.container {
+            ContainerType::AutocadDxf | ContainerType::AutocadDwg => {
+                let dxf = drawing.to_dxf_ascii();
+                std::fs::write(&target.output_path, dxf.as_bytes())
+                    .map_err(|e| EncoderError::Io(format!("failed to write CAD DXF output file: {e}")))?;
+            }
+            ContainerType::HpglPlotter => {
+                let hpgl = drawing.to_hpgl();
+                std::fs::write(&target.output_path, hpgl.as_bytes())
+                    .map_err(|e| EncoderError::Io(format!("failed to write HPGL plotter file: {e}")))?;
+            }
+            ContainerType::ArtcraftCadcraft => {
+                let bin = drawing.to_cadcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .cadcraft binary file: {e}")))?;
+            }
+            ContainerType::Svg => {
+                let svg = drawing.to_svg();
+                std::fs::write(&target.output_path, svg.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+            }
+            ContainerType::Pdf => {
+                let pdf = drawing.to_pdf_bytes()?;
+                std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write PDF blueprint file: {e}")))?;
+            }
+            _ => {
+                let dxf = drawing.to_dxf_ascii();
+                std::fs::write(&target.output_path, dxf.as_bytes())
+                    .map_err(|e| EncoderError::Io(format!("failed to write default CAD file: {e}")))?;
+            }
+        }
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
@@ -414,6 +466,8 @@ impl TranscodePipeline {
                     std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
                 if bytes.starts_with(b"%PDF-") {
                     bytes
+                } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                    cad.to_pdf_bytes()?
                 } else {
                     generate_minimal_pdf(&format!("Document export: {}", path.file_name().and_then(|n| n.to_str()).unwrap_or("document")))
                 }
@@ -1266,6 +1320,69 @@ mod tests {
         assert!(svg_out.exists());
         let text = std::fs::read_to_string(svg_out).unwrap();
         assert!(text.contains("<circle"));
+    }
+
+    #[test]
+    fn test_execute_cad_dxf_and_cadcraft_transcode() {
+        let dir = tempdir().unwrap();
+        let dxf_in = dir.path().join("blueprint.dxf");
+        let cadcraft_out = dir.path().join("blueprint.cadcraft");
+        let svg_out = dir.path().join("blueprint.svg");
+        let hpgl_out = dir.path().join("blueprint.plt");
+
+        let mut cad = encodercraft_spatial_io::CadDrawing::new("Foundation");
+        cad.add_line(encodercraft_spatial_io::CadPoint3D::new(0.0, 0.0, 0.0), encodercraft_spatial_io::CadPoint3D::new(500.0, 200.0, 0.0), "Walls");
+        cad.add_circle(encodercraft_spatial_io::CadPoint3D::new(250.0, 100.0, 0.0), 50.0, "Walls");
+        std::fs::write(&dxf_in, cad.to_dxf_ascii()).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-cad-job".into(),
+            client_info: ClientInfo { app_name: "cadcraft".into(), app_version: "1.0".into(), pid: 42, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: dxf_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_cadcraft".into(),
+                    output_path: cadcraft_out.clone(),
+                    preset_name: "ArtCraft Native CadCraft".into(),
+                    container: ContainerType::ArtcraftCadcraft,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_svg".into(),
+                    output_path: svg_out.clone(),
+                    preset_name: "Web Vector SVG".into(),
+                    container: ContainerType::Svg,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_hpgl".into(),
+                    output_path: hpgl_out.clone(),
+                    preset_name: "HPGL Pen Plotter".into(),
+                    container: ContainerType::HpglPlotter,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(cadcraft_out.exists());
+        let cad_bytes = std::fs::read(&cadcraft_out).unwrap();
+        assert!(cad_bytes.starts_with(b"\x89CRAFT\x00\x01C"));
+
+        assert!(svg_out.exists());
+        let svg_text = std::fs::read_to_string(&svg_out).unwrap();
+        assert!(svg_text.contains("<svg"));
+        assert!(svg_text.contains("<line"));
+        assert!(svg_text.contains("<circle"));
+
+        assert!(hpgl_out.exists());
+        let hpgl_text = std::fs::read_to_string(&hpgl_out).unwrap();
+        assert!(hpgl_text.starts_with("IN;SP1;"));
     }
 
     #[test]
