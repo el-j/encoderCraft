@@ -1,5 +1,9 @@
 //! Codec capability table: the single source of truth for `encodercraft-cli --formats`
-//! and the generated section of `docs/file-format-matrix.md`.
+//! and the generated section of `docs/file-format-matrix.md`, plus the container x codec matrix.
+
+use encodercraft_core::ContainerType;
+
+use crate::VideoCodecKind;
 
 /// What encoderCraft can do with one video codec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +41,61 @@ pub const CODEC_CAPABILITIES: &[CodecCapability] = &[
     CodecCapability { codec: "Motion JPEG", decode: false, encode: true, decode_verified: false, notes: "encode only" },
     CodecCapability { codec: "GIF", decode: false, encode: true, decode_verified: false, notes: "animated GIF89a encode only" },
 ];
+
+/// Video codecs the muxer of `container` can store; empty for non-video containers.
+pub fn codecs_for_container(container: ContainerType) -> &'static [VideoCodecKind] {
+    use VideoCodecKind::{Av1, DnxHd, Gif, H264, Hevc, ProRes, Vp9};
+    match container {
+        ContainerType::IsoBmffMp4 | ContainerType::MatroskaMkv => &[H264, Hevc, Av1, Vp9],
+        ContainerType::QuickTimeMov => &[H264, Hevc, ProRes, DnxHd],
+        ContainerType::WebM => &[Vp9, Av1],
+        ContainerType::MxfOp1a | ContainerType::MxfOpAtom => &[DnxHd, ProRes, H264],
+        ContainerType::AnimatedGif => &[Gif],
+        _ => &[],
+    }
+}
+
+/// Whether `container` can store `codec`.
+pub fn container_accepts(container: ContainerType, codec: VideoCodecKind) -> bool {
+    codecs_for_container(container).contains(&codec)
+}
+
+/// Renders the container x codec matrix as a Markdown table for the docs.
+pub fn render_container_matrix_markdown() -> String {
+    let containers = [
+        ("MP4", ContainerType::IsoBmffMp4),
+        ("MOV", ContainerType::QuickTimeMov),
+        ("MKV", ContainerType::MatroskaMkv),
+        ("WebM", ContainerType::WebM),
+        ("MXF OP1a", ContainerType::MxfOp1a),
+        ("MXF OP-Atom", ContainerType::MxfOpAtom),
+        ("GIF", ContainerType::AnimatedGif),
+    ];
+    let codecs = [
+        ("H.264", VideoCodecKind::H264),
+        ("HEVC", VideoCodecKind::Hevc),
+        ("AV1", VideoCodecKind::Av1),
+        ("VP9", VideoCodecKind::Vp9),
+        ("ProRes", VideoCodecKind::ProRes),
+        ("DNxHR", VideoCodecKind::DnxHd),
+        ("GIF", VideoCodecKind::Gif),
+    ];
+    let mut out = String::from("| Container |");
+    for (name, _) in codecs {
+        out.push_str(&format!(" {name} |"));
+    }
+    out.push_str("\n|---|");
+    out.push_str(&"---|".repeat(codecs.len()));
+    out.push('\n');
+    for (cname, container) in containers {
+        out.push_str(&format!("| {cname} |"));
+        for (_, codec) in codecs {
+            out.push_str(if container_accepts(container, codec) { " yes |" } else { " - |" });
+        }
+        out.push('\n');
+    }
+    out
+}
 
 /// Renders the table as aligned plain text for the CLI.
 pub fn render_text() -> String {
@@ -86,6 +145,15 @@ mod tests {
         }
         let encodable = CODEC_CAPABILITIES.iter().filter(|c| c.encode).count();
         assert_eq!(encodable, 8);
+    }
+
+    #[test]
+    fn matrix_matches_executors() {
+        assert!(container_accepts(ContainerType::QuickTimeMov, VideoCodecKind::ProRes));
+        assert!(!container_accepts(ContainerType::IsoBmffMp4, VideoCodecKind::ProRes));
+        assert!(!container_accepts(ContainerType::WebM, VideoCodecKind::H264));
+        assert!(codecs_for_container(ContainerType::Wave).is_empty());
+        assert_eq!(render_container_matrix_markdown().lines().count(), 9);
     }
 
     #[test]

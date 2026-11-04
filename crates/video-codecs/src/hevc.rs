@@ -4,7 +4,9 @@ use craft_hevcenc::{Encoder, EncoderConfig, Frame, RateControl};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
+use crate::params::EncodeParams;
 use crate::yuv::frame_to_yuv420_16;
+use encodercraft_core::RateMode;
 
 /// HEVC (H.265) video encoder wrapper.
 pub struct HevcEncoderWrapper {
@@ -14,13 +16,21 @@ pub struct HevcEncoderWrapper {
 impl HevcEncoderWrapper {
     /// Creates a new HEVC encoder instance.
     pub fn new(width: u32, height: u32, fps: Rational64, bitrate_kbps: Option<u32>) -> Result<Self, EncoderError> {
+        Self::with_params(width, height, fps, &EncodeParams { bitrate_kbps, ..EncodeParams::default() })
+    }
+
+    /// Creates an HEVC encoder honouring rate mode and GOP length; B-frames, HDR tags and profiles are rejected.
+    pub fn with_params(width: u32, height: u32, fps: Rational64, params: &EncodeParams) -> Result<Self, EncoderError> {
+        params.reject_unsupported("HEVC", false, false, false)?;
         let fps_num = if fps.num > 0 { fps.num as u32 } else { 30 };
         let fps_den = if fps.den > 0 { fps.den as u32 } else { 1 };
         let mut cfg = EncoderConfig::new(width, height, fps_num, fps_den);
-        if let Some(kbps) = bitrate_kbps {
-            cfg.rate = RateControl::Bitrate { kbps };
-        } else {
-            cfg.rate = RateControl::ConstantQp(28);
+        cfg.rate = match (params.rate_mode, params.bitrate_kbps) {
+            (RateMode::ConstantQuality, _) | (_, None) => RateControl::ConstantQp(28),
+            (_, Some(kbps)) => RateControl::Bitrate { kbps },
+        };
+        if let Some(interval) = params.keyframe_interval {
+            cfg.keyint = interval.max(1);
         }
         let inner = Encoder::new(cfg).map_err(|e| EncoderError::Internal(format!("failed to initialize HEVC encoder: {e}")))?;
         Ok(Self { inner })

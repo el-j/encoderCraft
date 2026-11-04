@@ -17,6 +17,7 @@ encodercraft-demux = { workspace = true }
 encodercraft-engine = { workspace = true }
 encodercraft-pipeline = { workspace = true }
 encodercraft-presets = { workspace = true }
+encodercraft-video-codecs = { workspace = true }
 encodercraft-source = { workspace = true }
 encodercraft-watch = { workspace = true }
 filmcraft-scopes = { workspace = true }

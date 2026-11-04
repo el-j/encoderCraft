@@ -588,6 +588,59 @@ impl SourceSelection {
     }
 }
 
+/// Rate-control strategy requested for a video encode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RateMode {
+    /// Constant bitrate when a bitrate is given, constant quality otherwise.
+    #[default]
+    Auto,
+    Cbr,
+    Vbr,
+    /// Constant quality; the bitrate is ignored.
+    ConstantQuality,
+}
+
+/// Colour description written into the video bitstream (ITU-T H.273 code points).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColorTag {
+    /// BT.709 primaries, transfer and matrix, limited range.
+    #[default]
+    Bt709,
+    /// BT.2020 with the PQ (SMPTE ST 2084) transfer.
+    Pq,
+    /// BT.2020 with the HLG (ARIB STD-B67) transfer.
+    Hlg,
+}
+
+impl ColorTag {
+    /// `(primaries, transfer, matrix)` per ITU-T H.273.
+    pub const fn code_points(self) -> (u8, u8, u8) {
+        match self {
+            Self::Bt709 => (1, 1, 1),
+            Self::Pq => (9, 16, 9),
+            Self::Hlg => (9, 18, 9),
+        }
+    }
+}
+
+/// Video encoder settings of a target; every field falls back to a codec default when `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VideoEncodeSettings {
+    /// Codec identifier (`h264`, `hevc`, `av1`, `vp9`, `prores`, `dnxhr`, ...). `None` infers it from the preset name.
+    pub codec: Option<String>,
+    /// Maximum distance between keyframes in frames.
+    pub keyframe_interval: Option<u32>,
+    /// Codec profile: ProRes `proxy|lt|422|hq|4444|4444xq`, DNx `lb|sq|hq|hqx|444`, H.264 `baseline|main|high`.
+    pub profile: Option<String>,
+    /// Consecutive B-frames, for codecs that support them.
+    pub bframes: Option<u8>,
+    pub rate_mode: RateMode,
+    pub color: Option<ColorTag>,
+}
+
 /// Output target specifications.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -630,6 +683,9 @@ pub struct OutputTarget {
     /// Sequence, page range or layers of the source to export.
     #[serde(default)]
     pub selection: SourceSelection,
+    /// Codec, GOP, B-frame, rate-control and colour settings of the video stream.
+    #[serde(default)]
+    pub video: VideoEncodeSettings,
 }
 
 impl Default for OutputTarget {
@@ -655,6 +711,7 @@ impl Default for OutputTarget {
             hardware_acceleration: false,
             image_quality: None,
             selection: SourceSelection::default(),
+            video: VideoEncodeSettings::default(),
         }
     }
 }

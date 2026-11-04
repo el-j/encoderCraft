@@ -36,5 +36,6 @@ log = { workspace = true }
 
 [dev-dependencies]
 photocraft-codecs = { workspace = true }
+encodercraft-presets = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
