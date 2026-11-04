@@ -160,14 +160,15 @@ impl TranscodePipeline {
                 {
                     return true;
                 }
-                if let Ok(bytes) = std::fs::read(path) {
-                    if bytes.starts_with(b"\x89CRAFT\x00\x01S") {
+                let mut head = Vec::with_capacity(512);
+                if let Ok(file) = File::open(path)
+                    && std::io::Read::read_to_end(&mut std::io::Read::take(file, 512), &mut head).is_ok()
+                {
+                    if head.starts_with(b"\x89CRAFT\x00\x01S") {
                         return true;
                     }
-                    let check_len = bytes.len().min(512);
-                    if let Ok(s) = std::str::from_utf8(&bytes[..check_len])
-                        && (s.contains("<sesx") || s.contains("<session"))
-                    {
+                    let text = String::from_utf8_lossy(&head);
+                    if text.contains("<sesx") || text.contains("<session") {
                         return true;
                     }
                 }
@@ -915,8 +916,14 @@ impl TranscodePipeline {
             }
         };
 
+        let session_dir = match &self.spec.source {
+            SourceDescriptor::File { path, .. } => path.parent().map(std::path::Path::to_path_buf),
+            _ => None,
+        };
+
         if let Some(parent) = target.output_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent)
+                .map_err(|e| EncoderError::Io(format!("failed to create output directory `{}`: {e}", parent.display())))?;
         }
 
         match target.container {
@@ -929,9 +936,6 @@ impl TranscodePipeline {
                 std::fs::write(&target.output_path, xml.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write .sesx XML file: {e}")))?;
             }
             ContainerType::Wave => {
-                let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create output WAV file: {e}")))?;
-                let writer = BufWriter::new(out_file);
-
                 let bext = BextMetadata {
                     description: format!("Encoded by encoderCraft - {}", target.preset_name),
                     originator: "encoderCraft".into(),
@@ -941,18 +945,20 @@ impl TranscodePipeline {
                 let xmp_xml = target.metadata.as_ref().map(|m| m.to_xmp_packet());
                 let ixml_xml = session.to_ixml(None);
 
+                let wav_format = match session.bit_depth {
+                    0..=16 => WavFormatTag::Pcm16,
+                    17..=24 => WavFormatTag::Pcm24,
+                    _ => WavFormatTag::IeeeFloat32,
+                };
                 let target_lufs = target.target_lufs.map(|l| l as f64);
-                let master_buf = session.render_master(target_lufs)?;
+                let mut renderer = session.renderer(session_dir.as_deref())?;
+                let master_buf = renderer.render_master(target_lufs)?;
 
-                let mut wav_writer = BwfWavWriter::new_with_metadata(
-                    writer,
-                    session.sample_rate,
-                    2,
-                    WavFormatTag::Pcm24,
-                    Some(&bext),
-                    xmp_xml.as_deref(),
-                    Some(&ixml_xml),
-                )?;
+                let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create output WAV file: {e}")))?;
+                let writer = BufWriter::new(out_file);
+
+                let mut wav_writer =
+                    BwfWavWriter::new_with_metadata(writer, session.sample_rate, 2, wav_format, Some(&bext), xmp_xml.as_deref(), Some(&ixml_xml))?;
 
                 wav_writer.write_buffer(&master_buf)?;
                 wav_writer.finish()?;
@@ -961,37 +967,56 @@ impl TranscodePipeline {
                 if let Some(mode) = target.audio_stems
                     && mode != encodercraft_core::AudioStemMode::None
                 {
-                    let stems = session.render_stems()?;
                     let parent = target.output_path.parent().unwrap_or_else(|| std::path::Path::new("."));
                     let base_stem = target.output_path.file_stem().and_then(|s| s.to_str()).unwrap_or("stem");
 
-                    for (stem_name, stem_buf) in stems {
-                        let stem_path = parent.join(format!("{base_stem}_Stem_{stem_name}.wav"));
-                        let stem_file = File::create(&stem_path).map_err(|e| EncoderError::Io(format!("failed to create audio stem file: {e}")))?;
-                        let stem_writer = BufWriter::new(stem_file);
-                        let stem_ixml = session.to_ixml(Some(&stem_name));
+                    for track_index in renderer.stem_track_indices() {
+                        let (stem_name, stem_buf) = renderer.render_stem(track_index)?;
+                        let track_name = session.tracks.get(track_index).map(|t| t.name.as_str());
+                        let stem_ixml = session.to_ixml(track_name);
 
-                        let mut s_writer = BwfWavWriter::new_with_metadata(
-                            stem_writer,
-                            session.sample_rate,
-                            stem_buf.channel_count() as u16,
-                            WavFormatTag::Pcm24,
-                            Some(&bext),
-                            None,
-                            Some(&stem_ixml),
-                        )?;
-                        s_writer.write_buffer(&stem_buf)?;
-                        s_writer.finish()?;
+                        let mut outputs: Vec<(String, AudioSampleBuffer)> = Vec::new();
+                        if mode == encodercraft_core::AudioStemMode::DiscreteMono && stem_buf.channel_count() == 2 {
+                            for (suffix, ch) in [("L", 0usize), ("R", 1usize)] {
+                                let plane = stem_buf.channel(ch)?.to_vec();
+                                let mono = AudioSampleBuffer::from_planar_channels(
+                                    stem_buf.sample_rate,
+                                    encodercraft_core::ChannelLayout::Mono,
+                                    0,
+                                    vec![plane],
+                                )?;
+                                outputs.push((format!("{stem_name}_{suffix}"), mono));
+                            }
+                        } else {
+                            outputs.push((stem_name, stem_buf));
+                        }
+
+                        for (name, buf) in outputs {
+                            let stem_path = parent.join(format!("{base_stem}_Stem_{name}.wav"));
+                            let stem_file =
+                                File::create(&stem_path).map_err(|e| EncoderError::Io(format!("failed to create audio stem file: {e}")))?;
+                            let mut s_writer = BwfWavWriter::new_with_metadata(
+                                BufWriter::new(stem_file),
+                                session.sample_rate,
+                                buf.channel_count() as u16,
+                                wav_format,
+                                Some(&bext),
+                                None,
+                                Some(&stem_ixml),
+                            )?;
+                            s_writer.write_buffer(&buf)?;
+                            s_writer.finish()?;
+                        }
                     }
                 }
             }
             ContainerType::Flac => {
-                let master_buf = session.render_master(target.target_lufs.map(|l| l as f64))?;
+                let master_buf = session.renderer(session_dir.as_deref())?.render_master(target.target_lufs.map(|l| l as f64))?;
                 let flac_bytes = encodercraft_audio_dsp::encode_audio_flac(&master_buf)?;
                 std::fs::write(&target.output_path, flac_bytes).map_err(|e| EncoderError::Io(format!("failed to write FLAC file: {e}")))?;
             }
             ContainerType::Aiff => {
-                let master_buf = session.render_master(target.target_lufs.map(|l| l as f64))?;
+                let master_buf = session.renderer(session_dir.as_deref())?.render_master(target.target_lufs.map(|l| l as f64))?;
                 let aiff_bytes = encodercraft_audio_dsp::encode_audio_aiff(&master_buf)?;
                 std::fs::write(&target.output_path, aiff_bytes).map_err(|e| EncoderError::Io(format!("failed to write AIFF file: {e}")))?;
             }
@@ -2506,6 +2531,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sesx_in = dir.path().join("session.sesx");
 
+        let tone = |freq: f32, amp: f32, rate: u32| -> Vec<f32> {
+            (0..rate * 2).map(|i| amp * (2.0 * std::f32::consts::PI * freq * i as f32 / rate as f32).sin()).collect()
+        };
+        let vocal_src = AudioSampleBuffer::from_planar_channels(
+            44_100,
+            encodercraft_core::ChannelLayout::Stereo,
+            0,
+            vec![tone(440.0, 0.3, 44_100), tone(440.0, 0.3, 44_100)],
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("vocal.aiff"), encodercraft_audio_dsp::encode_audio_aiff(&vocal_src).unwrap()).unwrap();
+        let guitar_src =
+            AudioSampleBuffer::from_planar_channels(48_000, encodercraft_core::ChannelLayout::Mono, 0, vec![tone(110.0, 0.4, 48_000)]).unwrap();
+        std::fs::write(dir.path().join("guitar.flac"), encodercraft_audio_dsp::encode_audio_flac(&guitar_src).unwrap()).unwrap();
+
         let mut session = encodercraft_audio_dsp::DawSession::new("Album Mix", 48000, 24);
         let mut t1 = encodercraft_audio_dsp::DawTrack::new(1, "Vocal", encodercraft_audio_dsp::DawTrackType::Audio);
         t1.volume_db = -2.0;
@@ -2514,9 +2554,9 @@ mod tests {
             id: 1,
             name: "Verse 1".to_string(),
             start_samples: 0,
-            length_samples: 48000,
+            length_samples: 96000,
             source_in_samples: 0,
-            source_path: None,
+            source_path: Some("vocal.aiff".into()),
             gain_db: 0.0,
         });
 
@@ -2527,9 +2567,9 @@ mod tests {
             id: 2,
             name: "Rhythm".to_string(),
             start_samples: 0,
-            length_samples: 48000,
+            length_samples: 96000,
             source_in_samples: 0,
-            source_path: None,
+            source_path: Some("guitar.flac".into()),
             gain_db: 0.0,
         });
 
@@ -2597,10 +2637,108 @@ mod tests {
         assert!(wav_bytes.windows(4).any(|w| w == b"iXML"));
         assert!(wav_bytes.windows(4).any(|w| w == b"bext"));
 
-        let stem_vocal = dir.path().join("master_Stem_01_Vocal.wav");
-        let stem_guitar = dir.path().join("master_Stem_02_Guitar.wav");
-        assert!(stem_vocal.exists());
-        assert!(stem_guitar.exists());
+        let master = encodercraft_audio_dsp::decode_audio(&wav_bytes).unwrap();
+        assert_eq!(master.sample_rate, 48_000);
+        assert_eq!(master.samples_per_channel(), 96_000);
+        let stats = encodercraft_audio_dsp::measure_loudness(&master).unwrap();
+        assert!((stats.integrated_lufs + 23.0).abs() < 0.5, "integrated {}", stats.integrated_lufs);
+        assert!(stats.true_peak_dbtp <= -0.9);
+
+        // DiscreteMono: stereo "Vocal" splits to L/R mono files, mono-source "Guitar" is panned into both
+        for name in ["01_Vocal_L", "01_Vocal_R", "02_Guitar_L", "02_Guitar_R"] {
+            let path = dir.path().join(format!("master_Stem_{name}.wav"));
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("missing stem {name}: {e}"));
+            assert!(bytes.windows(4).any(|w| w == b"iXML"), "{name} lacks iXML");
+            let stem = encodercraft_audio_dsp::decode_audio(&bytes).unwrap();
+            assert_eq!(stem.channel_count(), 1);
+            assert_eq!(stem.samples_per_channel(), 96_000);
+            let plane = stem.channel(0).unwrap();
+            assert!(plane.iter().any(|v| v.abs() > 0.05), "{name} is silent");
+            assert!(plane.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+        }
+        let vocal_ixml = String::from_utf8_lossy(&std::fs::read(dir.path().join("master_Stem_01_Vocal_L.wav")).unwrap()).into_owned();
+        assert!(vocal_ixml.contains("<NAME>Vocal</NAME>"));
+        assert!(!vocal_ixml.contains("<NAME>Guitar</NAME>"));
+    }
+
+    #[test]
+    fn test_daw_pipeline_missing_clip_audio_is_an_error_and_stereo_pairs_and_flac_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let src =
+            AudioSampleBuffer::from_planar_channels(48_000, encodercraft_core::ChannelLayout::Stereo, 0, vec![vec![0.2; 48_000], vec![0.2; 48_000]])
+                .unwrap();
+        std::fs::write(dir.path().join("bed.aiff"), encodercraft_audio_dsp::encode_audio_aiff(&src).unwrap()).unwrap();
+
+        let make = |clip_file: &str| {
+            let mut session = encodercraft_audio_dsp::DawSession::new("S", 48_000, 16);
+            let mut t = encodercraft_audio_dsp::DawTrack::new(1, "Bed", encodercraft_audio_dsp::DawTrackType::Audio);
+            t.clips.push(encodercraft_audio_dsp::DawClip {
+                id: 1,
+                name: "bed".into(),
+                start_samples: 0,
+                length_samples: 48_000,
+                source_in_samples: 0,
+                source_path: Some(clip_file.into()),
+                gain_db: 0.0,
+            });
+            session.tracks.push(t);
+            let sc_path = dir.path().join(format!("{clip_file}.soundcraft"));
+            std::fs::write(&sc_path, session.to_soundcraft_binary().unwrap()).unwrap();
+            sc_path
+        };
+        let job = |source: PathBuf, targets: Vec<OutputTarget>| CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "daw_job2".into(),
+            client_info: ClientInfo { app_name: "t".into(), app_version: "1".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: source, start_tick: None, duration_ticks: None, timebase: None },
+            targets,
+        };
+
+        let flac_out = dir.path().join("out.flac");
+        let wav_out = dir.path().join("pairs.wav");
+        TranscodePipeline::new(job(
+            make("bed.aiff"),
+            vec![
+                OutputTarget { target_id: "f".into(), container: ContainerType::Flac, output_path: flac_out.clone(), ..Default::default() },
+                OutputTarget {
+                    target_id: "w".into(),
+                    container: ContainerType::Wave,
+                    output_path: wav_out.clone(),
+                    audio_stems: Some(encodercraft_core::AudioStemMode::StereoPairs),
+                    ..Default::default()
+                },
+            ],
+        ))
+        .execute()
+        .unwrap();
+
+        let flac = encodercraft_audio_dsp::decode_audio(&std::fs::read(&flac_out).unwrap()).unwrap();
+        assert!((flac.channel(0).unwrap()[24_000] - 0.2).abs() < 1e-3);
+        let pair = encodercraft_audio_dsp::decode_audio(&std::fs::read(dir.path().join("pairs_Stem_01_Bed.wav")).unwrap()).unwrap();
+        assert_eq!(pair.channel_count(), 2);
+        // 16-bit session depth is honoured for the master
+        let wav = std::fs::read(&wav_out).unwrap();
+        let mut pos = 12;
+        let mut bits = None;
+        while let Some(header) = wav.get(pos..pos + 8) {
+            let size = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+            if &header[..4] == b"fmt " {
+                bits = wav.get(pos + 22..pos + 24).map(|b| u16::from_le_bytes([b[0], b[1]]));
+                break;
+            }
+            pos += 8 + size + (size & 1);
+        }
+        assert_eq!(bits, Some(16));
+
+        let err = TranscodePipeline::new(job(
+            make("absent.aiff"),
+            vec![OutputTarget { target_id: "w".into(), container: ContainerType::Wave, output_path: dir.path().join("x.wav"), ..Default::default() }],
+        ))
+        .execute();
+        assert!(err.is_err());
+        assert!(!dir.path().join("x.wav").exists(), "a failed render must not leave a partial output file");
     }
 }
 

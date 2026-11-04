@@ -510,6 +510,9 @@ fn sniff_text_formats(bytes: &[u8]) -> Option<ContainerKind> {
         {
             return Some(ContainerKind::AdobePremierePrproj);
         }
+        if trimmed.starts_with("<sesx") || ((trimmed.starts_with("<?xml") || trimmed.starts_with("<!DOCTYPE sesx")) && trimmed.contains("<sesx")) {
+            return Some(ContainerKind::AdobeAuditionSesx);
+        }
         if (trimmed.starts_with("<?xml") || trimmed.starts_with("<session")) && trimmed.contains("<session") {
             return Some(ContainerKind::AdobeAuditionSesx);
         }
@@ -657,6 +660,9 @@ mod tests {
         assert_eq!(sniff_container(&prproj_gz), Some(ContainerKind::AdobePremierePrproj));
 
         // Audition SESX
+        let sesx_root = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sesx version=\"1.9\"><session/></sesx>";
+        assert_eq!(sniff_container(sesx_root), Some(ContainerKind::AdobeAuditionSesx));
+        assert_eq!(sniff_container(b"<sesx audioRate=\"48000\"></sesx>"), Some(ContainerKind::AdobeAuditionSesx));
         let sesx_xml = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<session Version=\"1.0\"></session>";
         assert_eq!(sniff_container(sesx_xml), Some(ContainerKind::AdobeAuditionSesx));
 
