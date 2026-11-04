@@ -17,6 +17,7 @@ encodercraft-presets = { workspace = true }
 encodercraft-watch = { workspace = true }
 encodercraft-engine = { workspace = true }
 encodercraft-source = { workspace = true }
+encodercraft-video-codecs = { workspace = true }
 encodercraft-ipc = { workspace = true }
 encodercraft-dispatch = { workspace = true }
 encodercraft-mcp = { workspace = true }

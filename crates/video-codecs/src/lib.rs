@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod av1;
+pub mod capabilities;
 pub mod decoder;
 pub mod dispatcher;
 pub mod dnx;

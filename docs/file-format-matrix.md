@@ -131,3 +131,20 @@ Because `encoderCraft` bridges all six dimensions, users can execute transcode o
 2. **Video Sequence to Multi-Screen Delivery:** Ingest a 4K ProRes master → output an MXF OP-1a broadcast master (EBU R128 -23 LUFS), a YouTube 4K MP4 (-14 LUFS), a TikTok 9:16 vertical MP4 (-14 LUFS), and a 1080p animated GIF teaser.
 3. **Print Publication to Multi-Channel:** Ingest a DesignCraft book → produce a print-ready PDF/X-4 with bleed, a reflowable EPUB 3, an optimized web PDF, and 300 DPI high-resolution CMYK TIFF proofs.
 4. **Game Texture Baking:** Ingest high-res 32-bit floating point EXR textures → generate packed BC7 DDS textures for Unreal/DirectX, compressed WebP previews for web asset stores, and 16-bit PNG heightmaps.
+
+## 9. Video Codec Capability Table (generated)
+
+Generated from `crates/video-codecs/src/capabilities.rs`; `encodercraft-cli --formats` prints the same data. "Decode verified" means a conformance test decodes a stream made by an independent encoder (`crates/source/tests/decoders.rs`) and checks size, frame count and PSNR. AV1 has a pure-Rust decoder (`filmcraft-av1`).
+
+| Codec | Decode | Encode | Decode verified | Notes |
+|---|---|---|---|---|
+| H.264 | yes | yes | yes | 8-bit 4:2:0 progressive decode (filmcraft-h264) |
+| HEVC | yes | yes | yes | Main / Main 10 decode (filmcraft-hevc) |
+| VP8 | yes | no | yes | decode only (filmcraft-vp8) |
+| VP9 | yes | yes | yes | filmcraft-vp9 |
+| AV1 | yes | yes | yes | pure-Rust decoder (filmcraft-av1) |
+| MPEG-2 | yes | no | yes | MPEG-1/2 in PS and TS, decode only (filmcraft-mpeg2v) |
+| ProRes | yes | yes | yes | filmcraft-prores |
+| DNxHD/DNxHR | yes | yes | no | filmcraft-dnx; round-trips in video-codecs tests only |
+| Motion JPEG | no | yes | - | encode only |
+| GIF | no | yes | - | animated GIF89a encode only |

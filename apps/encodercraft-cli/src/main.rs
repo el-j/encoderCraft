@@ -29,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("convert") => cmd_convert(&args[2..])?,
         Some("probe") => cmd_probe(&args[2..])?,
         Some("presets") => cmd_presets()?,
+        Some("--formats") | Some("formats") => print!("{}", encodercraft_video_codecs::capabilities::render_text()),
         Some("queue") => cmd_queue(&args[2..])?,
         Some("watch") => cmd_watch(&args[2..])?,
         Some("daemon") => cmd_daemon(&args[2..])?,
@@ -68,6 +69,7 @@ fn print_usage() {
     );
     println!("  probe <input>                           Inspect containers, codecs, and stream metadata");
     println!("  presets                                 List all factory presets");
+    println!("  --formats                               Show the codec decode/encode capability table");
     println!("  queue [list|start|pause|clear|cancel <id>|log] Interact with running daemon queue");
     println!("  watch <dir> -p <preset> -o <out_dir>    Start automated directory monitor");
     println!("  daemon [--port <port>]                  Run background IPC daemon");
