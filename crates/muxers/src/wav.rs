@@ -35,12 +35,25 @@ impl<W: Write + Seek> BwfWavWriter<W> {
 
     /// Initializes a new WAV container with optional `bext` broadcast chunk and `axml` XMP metadata chunk.
     pub fn new_with_xmp(
+        writer: W,
+        sample_rate: u32,
+        channels: u16,
+        format: WavFormatTag,
+        bext: Option<&BextMetadata>,
+        xmp_xml: Option<&str>,
+    ) -> Result<Self, EncoderError> {
+        Self::new_with_metadata(writer, sample_rate, channels, format, bext, xmp_xml, None)
+    }
+
+    /// Initializes a new WAV container with optional `bext`, `axml` (XMP), and `iXML` multitrack metadata chunks.
+    pub fn new_with_metadata(
         mut writer: W,
         sample_rate: u32,
         channels: u16,
         format: WavFormatTag,
         bext: Option<&BextMetadata>,
         xmp_xml: Option<&str>,
+        ixml_xml: Option<&str>,
     ) -> Result<Self, EncoderError> {
         if sample_rate == 0 || channels == 0 {
             return Err(EncoderError::InvalidJobSpec("sample rate and channels must be positive".into()));
@@ -107,6 +120,18 @@ impl<W: Write + Seek> BwfWavWriter<W> {
             writer.write_all(xml_bytes).map_err(|e| EncoderError::Io(format!("failed to write axml body: {e}")))?;
             if !axml_len.is_multiple_of(2) {
                 writer.write_all(&[0u8]).map_err(|e| EncoderError::Io(format!("failed to write axml pad: {e}")))?;
+            }
+        }
+
+        // 4. Optional `iXML` chunk for DAW track metadata (EBU Tech 3285 Supplement 2)
+        if let Some(xml) = ixml_xml {
+            writer.write_all(b"iXML").map_err(|e| EncoderError::Io(format!("failed to write iXML chunk id: {e}")))?;
+            let xml_bytes = xml.as_bytes();
+            let ixml_len = xml_bytes.len() as u32;
+            writer.write_all(&ixml_len.to_le_bytes()).map_err(|e| EncoderError::Io(format!("failed to write iXML length: {e}")))?;
+            writer.write_all(xml_bytes).map_err(|e| EncoderError::Io(format!("failed to write iXML body: {e}")))?;
+            if !ixml_len.is_multiple_of(2) {
+                writer.write_all(&[0u8]).map_err(|e| EncoderError::Io(format!("failed to write iXML pad: {e}")))?;
             }
         }
 
