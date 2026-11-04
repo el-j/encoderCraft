@@ -529,6 +529,65 @@ impl ContainerType {
     }
 }
 
+/// Which part of a multi-item source a target exports. All-`None` exports the whole source.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSelection {
+    /// Sequence or composition of a project, by exact name or zero-based index.
+    #[serde(default)]
+    pub sequence: Option<String>,
+    /// Inclusive 1-based page range of a document.
+    #[serde(default)]
+    pub pages: Option<(u32, u32)>,
+    /// Names of the layers to keep (CAD and layered raster sources).
+    #[serde(default)]
+    pub layers: Option<Vec<String>>,
+}
+
+impl SourceSelection {
+    pub fn is_empty(&self) -> bool {
+        self.sequence.is_none() && self.pages.is_none() && self.layers.is_none()
+    }
+
+    /// Rejects selections that can never be satisfied.
+    pub fn validate(&self) -> Result<(), EncoderError> {
+        if let Some((first, last)) = self.pages
+            && (first == 0 || last < first)
+        {
+            return Err(EncoderError::InvalidJobSpec(format!(
+                "invalid page range {first}-{last}: pages are 1-based and the range must not be reversed"
+            )));
+        }
+        if let Some(layers) = &self.layers
+            && layers.is_empty()
+        {
+            return Err(EncoderError::InvalidJobSpec("layer selection must name at least one layer".into()));
+        }
+        if let Some(seq) = &self.sequence
+            && seq.trim().is_empty()
+        {
+            return Err(EncoderError::InvalidJobSpec("sequence selection cannot be empty".into()));
+        }
+        Ok(())
+    }
+
+    /// Parses `N` or `A-B` (1-based, inclusive).
+    pub fn parse_pages(text: &str) -> Result<(u32, u32), EncoderError> {
+        let bad = || EncoderError::InvalidJobSpec(format!("invalid page range '{text}' (use N or A-B, 1-based)"));
+        let (a, b) = match text.split_once('-') {
+            Some((a, b)) => (a.trim().parse::<u32>().map_err(|_| bad())?, b.trim().parse::<u32>().map_err(|_| bad())?),
+            None => {
+                let n = text.trim().parse::<u32>().map_err(|_| bad())?;
+                (n, n)
+            }
+        };
+        if a == 0 || b < a {
+            return Err(bad());
+        }
+        Ok((a, b))
+    }
+}
+
 /// Output target specifications.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -568,6 +627,9 @@ pub struct OutputTarget {
     /// Still-image quality 1..=100 (JPEG and lossy WebP); `None` uses the encoder default.
     #[serde(default)]
     pub image_quality: Option<u8>,
+    /// Sequence, page range or layers of the source to export.
+    #[serde(default)]
+    pub selection: SourceSelection,
 }
 
 impl Default for OutputTarget {
@@ -592,6 +654,7 @@ impl Default for OutputTarget {
             metadata: None,
             hardware_acceleration: false,
             image_quality: None,
+            selection: SourceSelection::default(),
         }
     }
 }
@@ -616,6 +679,9 @@ impl CraftJobSpec {
     pub fn validate(&self) -> Result<(), EncoderError> {
         if self.job_id.trim().is_empty() {
             return Err(EncoderError::InvalidJobSpec("jobId cannot be empty".into()));
+        }
+        for target in &self.targets {
+            target.selection.validate()?;
         }
 
         if self.targets.is_empty() {
@@ -752,6 +818,24 @@ mod tests {
         assert!(!ContainerType::AutocadDwg.can_convert_to(ContainerType::IsoBmffMp4));
         assert!(ContainerType::AdobeAuditionSesx.can_convert_to(ContainerType::ArtcraftSoundcraft));
         assert!(ContainerType::ArtcraftSoundcraft.can_convert_to(ContainerType::AdobeAuditionSesx));
+    }
+
+    #[test]
+    fn test_source_selection_validation_and_page_parsing() {
+        assert_eq!(SourceSelection::parse_pages("3").ok(), Some((3, 3)));
+        assert_eq!(SourceSelection::parse_pages("2-5").ok(), Some((2, 5)));
+        for bad in ["0", "5-2", "a-b", "", "1-", "-3"] {
+            assert!(SourceSelection::parse_pages(bad).is_err(), "{bad}");
+        }
+        assert!(SourceSelection::default().is_empty());
+        assert!(SourceSelection { pages: Some((0, 1)), ..Default::default() }.validate().is_err());
+        assert!(SourceSelection { layers: Some(vec![]), ..Default::default() }.validate().is_err());
+        assert!(SourceSelection { sequence: Some(" ".into()), ..Default::default() }.validate().is_err());
+        assert!(SourceSelection { sequence: Some("Main".into()), pages: Some((1, 2)), layers: Some(vec!["a".into()]) }.validate().is_ok());
+        let json = serde_json::to_string(&OutputTarget::default()).unwrap_or_default();
+        let back: OutputTarget =
+            serde_json::from_str(&json.replace(",\"selection\":{\"sequence\":null,\"pages\":null,\"layers\":null}", "")).unwrap();
+        assert!(back.selection.is_empty(), "selection must default when absent from older job files");
     }
 
     #[test]

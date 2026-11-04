@@ -542,6 +542,7 @@ flowchart LR
 8. **UI Inspector & Headless CLI Integration ([#77](https://github.com/el-j/encoderCraft/issues/77)):**
    - Dynamic tab visibility and smart destination filtering in Export Settings Inspector.
    - Sequence/composition selection picker for multi-timeline project files.
+   - Page-range and layer pickers (Layout / CAD / Layers tabs) fed by a source inventory; the same selection is available as `--sequence`, `--pages` and `--layers` and shown by `probe`.
    - CLI `encodercraft convert <input> --to <format> -o <output>` subcommand.
 
 ---

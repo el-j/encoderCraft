@@ -60,6 +60,9 @@ fn print_usage() {
     println!("      --caption <file>                    Subtitle/caption file to embed or burn");
     println!("      --fps <rate>                        Frame rate for image sequences (e.g. 25, 29.97, 30000/1001); input like shot_%04d.png");
     println!("      --burn-captions                     Burn captions directly into video frames");
+    println!("      --sequence <name|index>             Export only this sequence/composition of a project source (see `probe`)");
+    println!("      --pages <N|A-B>                     Export only these pages of a document source");
+    println!("      --layers <a,b,...>                  Export only these layers of a CAD drawing or layered image");
     println!(
         "  convert <input> --to <format> [-o <file>] Convert to a target format (extension or name, e.g. pdf, flac, soundcraft); invalid pairs are rejected"
     );
@@ -112,6 +115,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut caption_file = None;
     let mut burn_captions = false;
     let mut fps = None;
+    let mut selection = encodercraft_core::SourceSelection::default();
 
     let mut i = 0;
     while i < args.len() {
@@ -143,6 +147,22 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 "--fps" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--fps needs a value such as 25 or 30000/1001".into()))?;
                     fps = Some(parse_fps(val)?);
+                    i += 1;
+                }
+                "--sequence" => {
+                    let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--sequence needs a name or index".into()))?;
+                    selection.sequence = Some(val.clone());
+                    i += 1;
+                }
+                "--pages" => {
+                    let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--pages needs a page or range such as 3 or 2-5".into()))?;
+                    selection.pages = Some(encodercraft_core::SourceSelection::parse_pages(val)?);
+                    i += 1;
+                }
+                "--layers" => {
+                    let val =
+                        args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--layers needs a comma-separated list of layer names".into()))?;
+                    selection.layers = Some(val.split(',').map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect());
                     i += 1;
                 }
                 "--stems" => {
@@ -207,6 +227,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         for input in &inputs {
             let source = input.extension().and_then(|e| e.to_str()).and_then(encodercraft_core::ContainerType::from_extension);
             if let Some(source) = source
+                && source != target
                 && !source.can_convert_to(target)
             {
                 let valid: Vec<&str> = source.valid_conversion_targets().iter().map(|c| c.file_extension()).collect();
@@ -260,8 +281,11 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
             target.container = container;
         } else if let Some(container) = session_output_container(input_path, &output_path) {
             target.container = container;
+        } else if let Some(container) = project_output_container(input_path, &output_path)? {
+            target.container = container;
         }
 
+        target.selection = selection.clone();
         if let Some(rate) = fps {
             target.custom_frame_rate = Some(rate);
         }
@@ -336,6 +360,41 @@ fn session_output_container(input: &std::path::Path, output: &std::path::Path) -
         .or(Some(ContainerType::Wave))
 }
 
+/// Project, document, CAD and layered sources are not media: without `--to`, the `-o` extension picks the output
+/// container, and it must be a valid conversion target for the source.
+fn project_output_container(input: &std::path::Path, output: &std::path::Path) -> Result<Option<encodercraft_core::ContainerType>, EncoderError> {
+    use encodercraft_core::{ContainerType, MediaStreamKind};
+    let Some(source) = input.extension().and_then(|e| e.to_str()).and_then(ContainerType::from_extension) else {
+        return Ok(None);
+    };
+    let kind = source.media_kind();
+    let non_media = matches!(
+        kind,
+        MediaStreamKind::ProjectTimeline
+            | MediaStreamKind::MotionGraph
+            | MediaStreamKind::Cad2D
+            | MediaStreamKind::LayeredComposite
+            | MediaStreamKind::Document
+    );
+    if !non_media {
+        return Ok(None);
+    }
+    let Some(ext) = output.extension().and_then(|e| e.to_str()) else {
+        return Ok(Some(source));
+    };
+    // Interchange formats are written by the timeline exporter, which keys off the output extension.
+    if kind == MediaStreamKind::ProjectTimeline && (ext.eq_ignore_ascii_case("fcpxml") || ext.eq_ignore_ascii_case("otio")) {
+        return Ok(Some(ContainerType::AdobePremierePrproj));
+    }
+    let target = ContainerType::from_extension(ext)
+        .ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown output format '.{ext}' for {}", input.display())))?;
+    if target != source && !source.can_convert_to(target) {
+        let valid: Vec<&str> = source.valid_conversion_targets().iter().map(|c| c.file_extension()).collect();
+        return Err(EncoderError::InvalidJobSpec(format!("cannot convert {} to .{ext}; valid targets: {}", input.display(), valid.join(", "))));
+    }
+    Ok(Some(target))
+}
+
 /// Blocks until every submitted job is finished, printing progress; fails if any job failed.
 fn wait_for_jobs(queue: &QueueManager, submitted: &[(String, PathBuf)]) -> Result<(), EncoderError> {
     let mut reported = vec![false; submitted.len()];
@@ -385,9 +444,26 @@ fn wait_for_jobs(queue: &QueueManager, submitted: &[(String, PathBuf)]) -> Resul
 fn cmd_probe(args: &[String]) -> Result<(), EncoderError> {
     let input = args.first().ok_or_else(|| EncoderError::InvalidJobSpec("probe command requires an input file path".into()))?;
 
-    let info = probe_file(Path::new(input))?;
-    let json = serde_json::to_string_pretty(&info).map_err(|e| EncoderError::Io(format!("json format error: {e}")))?;
-    println!("{json}");
+    let inventory = encodercraft_pipeline::inspect_source(Path::new(input));
+    // Project, document, CAD and layered sources have no media streams; their inventory is the probe result.
+    match probe_file(Path::new(input)) {
+        Ok(info) => {
+            let json = serde_json::to_string_pretty(&info).map_err(|e| EncoderError::Io(format!("json format error: {e}")))?;
+            println!("{json}");
+        }
+        Err(e) if inventory.is_empty() => return Err(e),
+        Err(_) => {}
+    }
+    for seq in &inventory.sequences {
+        let duration = seq.duration_secs.map(|d| format!(", {d:.2}s")).unwrap_or_default();
+        println!("sequence[{}]: {} ({}x{} @ {} fps{duration})", seq.index, seq.name, seq.width, seq.height, seq.fps);
+    }
+    if let Some(pages) = inventory.pages {
+        println!("pages: {pages}");
+    }
+    if !inventory.layers.is_empty() {
+        println!("layers: {}", inventory.layers.join(", "));
+    }
     Ok(())
 }
 

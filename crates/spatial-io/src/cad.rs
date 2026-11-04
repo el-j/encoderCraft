@@ -62,6 +62,19 @@ pub enum CadEntity {
     Text { position: CadPoint3D, text: String, height: f64, layer: String, color_rgb: Option<[u8; 3]> },
 }
 
+impl CadEntity {
+    /// Name of the layer the entity is drawn on.
+    pub fn layer(&self) -> &String {
+        match self {
+            Self::Line { layer, .. }
+            | Self::Circle { layer, .. }
+            | Self::Arc { layer, .. }
+            | Self::Polyline { layer, .. }
+            | Self::Text { layer, .. } => layer,
+        }
+    }
+}
+
 /// Intermediate Representation for a 2D/3D Technical CAD Drawing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CadDrawing {
@@ -110,6 +123,34 @@ impl CadDrawing {
 
     pub fn add_text(&mut self, position: CadPoint3D, text: impl Into<String>, height: f64, layer: &str) {
         self.entities.push(CadEntity::Text { position, text: text.into(), height, layer: layer.to_string(), color_rgb: None });
+    }
+
+    /// Names of all layers, including ones that only appear on entities without a table entry.
+    pub fn layer_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.layers.iter().map(|l| l.name.clone()).collect();
+        for entity in &self.entities {
+            if !names.iter().any(|n| n == entity.layer()) {
+                names.push(entity.layer().to_string());
+            }
+        }
+        names
+    }
+
+    /// Keeps only the named layers and the entities drawn on them.
+    /// Unknown names are an error so a typo can never silently export an empty or wrong drawing.
+    pub fn retain_layers(&mut self, names: &[String]) -> Result<(), EncoderError> {
+        let available = self.layer_names();
+        for name in names {
+            if !available.contains(name) {
+                return Err(EncoderError::InvalidJobSpec(format!(
+                    "CAD layer '{name}' not found; available layers: {}",
+                    self.layer_names().join(", ")
+                )));
+            }
+        }
+        self.layers.retain(|l| names.contains(&l.name));
+        self.entities.retain(|e| names.contains(e.layer()));
+        Ok(())
     }
 
     /// Computes the (min_x, min_y, max_x, max_y) 2D bounding box of the drawing.
@@ -823,6 +864,24 @@ fn quick_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retain_layers_filters_entities_and_rejects_unknown_names() {
+        let mut d = CadDrawing::new("t");
+        d.add_layer("WALLS", [255, 0, 0]);
+        d.add_layer("DIMS", [0, 255, 0]);
+        d.add_line(CadPoint3D::new(0.0, 0.0, 0.0), CadPoint3D::new(1.0, 1.0, 0.0), "WALLS");
+        d.add_circle(CadPoint3D::new(0.0, 0.0, 0.0), 2.0, "DIMS");
+        d.add_text(CadPoint3D::new(0.0, 0.0, 0.0), "x", 1.0, "DIMS");
+        let mut only_walls = d.clone();
+        only_walls.retain_layers(&["WALLS".to_string()]).unwrap();
+        assert_eq!(only_walls.entities.len(), 1);
+        assert_eq!(only_walls.layer_names(), vec!["WALLS".to_string()]);
+        assert!(!only_walls.to_dxf_ascii().contains("DIMS"));
+        let err = d.retain_layers(&["MISSING".to_string()]).unwrap_err().to_string();
+        assert!(err.contains("MISSING") && err.contains("WALLS"), "{err}");
+        assert_eq!(d.entities.len(), 3, "a failed selection must not modify the drawing");
+    }
 
     #[test]
     fn test_cad_drawing_dxf_roundtrip() {

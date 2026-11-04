@@ -204,91 +204,121 @@ impl DocumentCanvas {
         let height = self.page_height;
         let bleed = 9.0; // 1/8 inch bleed (9 pt)
 
-        let mut content_stream = String::new();
-        // Base coordinate transform and page item rendering
-        for page in &self.pages {
-            for item in &page.items {
-                match item {
-                    DocumentItem::Text { x, y, text, font_size, .. } => {
-                        let safe_text = text.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
-                        content_stream.push_str(&format!("BT\n/F1 {font_size:.1} Tf\n{x:.2} {y:.2} Td\n({safe_text}) Tj\nET\n"));
-                    }
-                    DocumentItem::Rectangle { x, y, width, height, fill_rgb, stroke_rgb } => {
-                        if let Some(fill) = fill_rgb {
-                            content_stream.push_str(&format!(
-                                "{:.3} {:.3} {:.3} rg\n{x:.2} {y:.2} {width:.2} {height:.2} re f\n",
-                                fill[0] as f64 / 255.0,
-                                fill[1] as f64 / 255.0,
-                                fill[2] as f64 / 255.0
-                            ));
-                        }
-                        if let Some(stroke) = stroke_rgb {
-                            content_stream.push_str(&format!(
-                                "{:.3} {:.3} {:.3} RG\n1.0 w\n{x:.2} {y:.2} {width:.2} {height:.2} re S\n",
-                                stroke[0] as f64 / 255.0,
-                                stroke[1] as f64 / 255.0,
-                                stroke[2] as f64 / 255.0
-                            ));
-                        }
-                    }
-                }
-            }
+        let mut contents: Vec<String> = self.pages.iter().map(render_page_content).collect();
+        if contents.is_empty() {
+            contents.push(String::new());
+        }
+        if contents.iter().all(String::is_empty)
+            && let Some(first) = contents.first_mut()
+        {
+            *first = format!("BT\n/F1 18 Tf\n54 720 Td\n({}) Tj\nET\n", quick_escape(&self.title));
         }
 
-        if content_stream.is_empty() {
-            content_stream = format!("BT\n/F1 18 Tf\n54 720 Td\n({}) Tj\nET\n", quick_escape(&self.title));
-        }
-
-        let stream_bytes = content_stream.as_bytes();
-        let stream_len = stream_bytes.len();
-
+        // Object layout: 1 catalog, 2 page tree, 3 font, 4 output intent, 5 info, then page/content pairs from 6.
         let mut pdf = Vec::new();
+        let mut offsets: Vec<usize> = Vec::new();
         // Conforming PDF 1.6 Header for PDF/X-4:2010
         pdf.extend_from_slice(b"%PDF-1.6\n%\xe2\xe3\xcf\xd3\n");
 
-        let o1 = pdf.len();
-        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /OutputIntents [6 0 R] >>\nendobj\n");
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /OutputIntents [4 0 R] >>\nendobj\n");
 
-        let o2 = pdf.len();
-        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        let kids: Vec<String> = (0..contents.len()).map(|i| format!("{} 0 R", 6 + i * 2)).collect();
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("2 0 obj\n<< /Type /Pages /Kids [{}] /Count {} >>\nendobj\n", kids.join(" "), contents.len()).as_bytes());
 
-        let o3 = pdf.len();
-        let page_obj = format!(
-            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.2} {h:.2}] /BleedBox [0 0 {w:.2} {h:.2}] /TrimBox [{b:.2} {b:.2} {tw:.2} {th:.2}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
-            w = width + (bleed * 2.0),
-            h = height + (bleed * 2.0),
-            b = bleed,
-            tw = width + bleed,
-            th = height + bleed
-        );
-        pdf.extend_from_slice(page_obj.as_bytes());
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
-        let o4 = pdf.len();
-        let stream_obj = format!("4 0 obj\n<< /Length {} >>\nstream\n{}endstream\nendobj\n", stream_len, content_stream);
-        pdf.extend_from_slice(stream_obj.as_bytes());
-
-        let o5 = pdf.len();
-        pdf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
-
-        let o6 = pdf.len();
+        offsets.push(pdf.len());
         pdf.extend_from_slice(
-            b"6 0 obj\n<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (FOGRA39) /Info (Coated FOGRA39) /RegistryName (http://www.color.org) >>\nendobj\n",
+            b"4 0 obj\n<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (FOGRA39) /Info (Coated FOGRA39) /RegistryName (http://www.color.org) >>\nendobj\n",
         );
 
-        let o7 = pdf.len();
+        offsets.push(pdf.len());
         let safe_title = self.title.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
-        let info_obj = format!("7 0 obj\n<< /Title ({safe_title}) /GTS_PDFXVersion (PDF/X-4) /Producer (encoderCraft Prepress Engine) >>\nendobj\n");
-        pdf.extend_from_slice(info_obj.as_bytes());
+        pdf.extend_from_slice(
+            format!("5 0 obj\n<< /Title ({safe_title}) /GTS_PDFXVersion (PDF/X-4) /Producer (encoderCraft Prepress Engine) >>\nendobj\n").as_bytes(),
+        );
+
+        for (i, content) in contents.iter().enumerate() {
+            let page_id = 6 + i * 2;
+            let content_id = page_id + 1;
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(
+                format!(
+                    "{page_id} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.2} {h:.2}] /BleedBox [0 0 {w:.2} {h:.2}] /TrimBox [{b:.2} {b:.2} {tw:.2} {th:.2}] /Contents {content_id} 0 R /Resources << /Font << /F1 3 0 R >> >> >>\nendobj\n",
+                    w = width + (bleed * 2.0),
+                    h = height + (bleed * 2.0),
+                    b = bleed,
+                    tw = width + bleed,
+                    th = height + bleed
+                )
+                .as_bytes(),
+            );
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{content_id} 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n", content.len()).as_bytes());
+        }
 
         let xref_pos = pdf.len();
-        let xref = format!(
-            "xref\n0 8\n0000000000 65535 f \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \ntrailer\n<< /Size 8 /Root 1 0 R /Info 7 0 R >>\nstartxref\n{}\n%%EOF\n",
-            o1, o2, o3, o4, o5, o6, o7, xref_pos
-        );
+        let mut xref = format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1);
+        for off in &offsets {
+            xref.push_str(&format!("{off:010} 00000 n \n"));
+        }
+        xref.push_str(&format!("trailer\n<< /Size {} /Root 1 0 R /Info 5 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n", offsets.len() + 1));
         pdf.extend_from_slice(xref.as_bytes());
 
         Ok(pdf)
     }
+
+    /// Keeps only the inclusive 1-based page range and renumbers the remaining pages from 1.
+    pub fn select_pages(&mut self, first: u32, last: u32) -> Result<(), EncoderError> {
+        let total = self.pages.len();
+        if first == 0 || last < first {
+            return Err(EncoderError::InvalidJobSpec(format!("invalid page range {first}-{last}")));
+        }
+        if first as usize > total {
+            return Err(EncoderError::InvalidJobSpec(format!("page range {first}-{last} is outside the document, which has {total} page(s)")));
+        }
+        let end = (last as usize).min(total);
+        let mut kept: Vec<DocumentPage> = self.pages.drain(first as usize - 1..end).collect();
+        for (i, page) in kept.iter_mut().enumerate() {
+            page.page_number = i + 1;
+        }
+        self.pages = kept;
+        Ok(())
+    }
+}
+
+fn render_page_content(page: &DocumentPage) -> String {
+    let mut content_stream = String::new();
+    for item in &page.items {
+        match item {
+            DocumentItem::Text { x, y, text, font_size, .. } => {
+                let safe_text = text.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+                content_stream.push_str(&format!("BT\n/F1 {font_size:.1} Tf\n{x:.2} {y:.2} Td\n({safe_text}) Tj\nET\n"));
+            }
+            DocumentItem::Rectangle { x, y, width, height, fill_rgb, stroke_rgb } => {
+                if let Some(fill) = fill_rgb {
+                    content_stream.push_str(&format!(
+                        "{:.3} {:.3} {:.3} rg\n{x:.2} {y:.2} {width:.2} {height:.2} re f\n",
+                        fill[0] as f64 / 255.0,
+                        fill[1] as f64 / 255.0,
+                        fill[2] as f64 / 255.0
+                    ));
+                }
+                if let Some(stroke) = stroke_rgb {
+                    content_stream.push_str(&format!(
+                        "{:.3} {:.3} {:.3} RG\n1.0 w\n{x:.2} {y:.2} {width:.2} {height:.2} re S\n",
+                        stroke[0] as f64 / 255.0,
+                        stroke[1] as f64 / 255.0,
+                        stroke[2] as f64 / 255.0
+                    ));
+                }
+            }
+        }
+    }
+    content_stream
 }
 
 fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
@@ -414,6 +444,56 @@ mod tests {
 
         let reimported = DocumentCanvas::from_idml_bytes(&idml).expect("IDML reimport should succeed");
         assert_eq!(reimported.title, "Imported IDML Package");
+    }
+
+    fn three_page_doc() -> DocumentCanvas {
+        let mut doc = DocumentCanvas::new("Report");
+        doc.pages[0].add_text(54.0, 720.0, 100.0, 20.0, "PAGE-ONE", 14.0);
+        doc.add_page().add_text(54.0, 720.0, 100.0, 20.0, "PAGE-TWO", 14.0);
+        doc.add_page().add_text(54.0, 720.0, 100.0, 20.0, "PAGE-THREE", 14.0);
+        doc
+    }
+
+    #[test]
+    fn pdf_has_one_page_object_per_document_page() {
+        let pdf = three_page_doc().to_pdf_x4_bytes().unwrap();
+        let text = String::from_utf8_lossy(&pdf);
+        assert!(text.contains("/Count 3"));
+        assert_eq!(text.matches("/Type /Page ").count(), 3);
+        // every xref offset must point at its object header (bytes: the header has non-UTF-8 marker bytes)
+        let latin: String = pdf.iter().map(|&b| b as char).collect();
+        let xref_at: usize = latin.rsplit("startxref\n").next().unwrap().trim().trim_end_matches("%%EOF").trim().parse().unwrap();
+        let tail = String::from_utf8(pdf[xref_at..].to_vec()).unwrap();
+        let mut lines = tail.lines();
+        lines.next();
+        let count: usize = lines.next().unwrap().split(' ').nth(1).unwrap().parse().unwrap();
+        lines.next();
+        for obj in 1..count {
+            let off: usize = lines.next().unwrap()[..10].parse().unwrap();
+            assert!(pdf[off..].starts_with(format!("{obj} 0 obj").as_bytes()), "object {obj} offset {off}");
+        }
+    }
+
+    #[test]
+    fn select_pages_keeps_range_and_renumbers() {
+        let mut doc = three_page_doc();
+        doc.select_pages(2, 3).unwrap();
+        assert_eq!(doc.pages.len(), 2);
+        assert_eq!(doc.pages[0].page_number, 1);
+        let pdf = String::from_utf8_lossy(&doc.to_pdf_x4_bytes().unwrap()).to_string();
+        assert!(!pdf.contains("PAGE-ONE") && pdf.contains("PAGE-TWO") && pdf.contains("PAGE-THREE"));
+        assert!(pdf.contains("/Count 2"));
+
+        let mut clamped = three_page_doc();
+        clamped.select_pages(3, 99).unwrap();
+        assert_eq!(clamped.pages.len(), 1);
+
+        let mut outside = three_page_doc();
+        let err = outside.select_pages(4, 5).unwrap_err().to_string();
+        assert!(err.contains("3 page"), "{err}");
+        assert_eq!(outside.pages.len(), 3);
+        assert!(outside.select_pages(0, 1).is_err());
+        assert!(outside.select_pages(3, 2).is_err());
     }
 
     #[test]

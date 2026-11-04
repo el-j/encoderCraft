@@ -3,7 +3,10 @@
 use std::path::PathBuf;
 
 use egui::{ColorImage, RichText, TextureHandle, Ui, Window};
-use encodercraft_core::{CaptionExportFormat, ContainerType, CraftJobSpec, MediaStreamKind, OutputTarget, Rational64, SourceDescriptor};
+use encodercraft_core::{
+    CaptionExportFormat, ContainerType, CraftJobSpec, MediaStreamKind, OutputTarget, Rational64, SourceDescriptor, SourceSelection,
+};
+use encodercraft_pipeline::SourceInventory;
 use encodercraft_source::MediaProbe;
 
 use crate::preview_decoder::{PreviewDecoder, PreviewEvent};
@@ -15,6 +18,14 @@ use crate::theme::Tokens;
 pub enum InspectorTab {
     #[default]
     Video,
+    /// Sequence / composition picker for project sources.
+    Composition,
+    /// Page range picker for document sources.
+    Layout,
+    /// Layer picker for CAD drawings.
+    Cad,
+    /// Layer picker for layered raster sources.
+    Layers,
     Audio,
     Effects,
     Captions,
@@ -27,6 +38,10 @@ impl InspectorTab {
     pub fn label(self) -> &'static str {
         match self {
             Self::Video => "Video",
+            Self::Composition => "Composition",
+            Self::Layout => "Layout",
+            Self::Cad => "CAD",
+            Self::Layers => "Layers",
             Self::Audio => "Audio",
             Self::Effects => "Effects",
             Self::Captions => "Captions",
@@ -37,15 +52,84 @@ impl InspectorTab {
     }
 }
 
-/// Tabs relevant to the selected output container; domains without video or audio hide those tabs.
-pub fn visible_tabs(target: ContainerType) -> Vec<InspectorTab> {
+/// Tabs for a job: source-specific pickers first, then the tabs relevant to the output container.
+/// Domains without video or audio hide those tabs.
+pub fn visible_tabs(source: Option<ContainerType>, target: ContainerType) -> Vec<InspectorTab> {
     use InspectorTab::*;
-    match target.media_kind() {
-        MediaStreamKind::AudioOnly => vec![Audio, Loudness, Publish, Metadata],
-        MediaStreamKind::StillImage | MediaStreamKind::LayeredComposite => vec![Video, Effects, Publish, Metadata],
-        MediaStreamKind::Vector2D | MediaStreamKind::Document | MediaStreamKind::Spatial3D | MediaStreamKind::Cad2D => vec![Publish, Metadata],
-        _ => vec![Video, Audio, Effects, Captions, Publish, Loudness, Metadata],
+    let mut tabs = Vec::new();
+    match source.map(|c| c.media_kind()) {
+        Some(MediaStreamKind::ProjectTimeline | MediaStreamKind::MotionGraph) => tabs.push(Composition),
+        Some(MediaStreamKind::Document) => tabs.push(Layout),
+        Some(MediaStreamKind::Cad2D) => tabs.push(Cad),
+        Some(MediaStreamKind::LayeredComposite) => tabs.push(Layers),
+        _ => {}
     }
+    match target.media_kind() {
+        MediaStreamKind::AudioOnly => tabs.extend([Audio, Loudness, Publish, Metadata]),
+        MediaStreamKind::StillImage | MediaStreamKind::LayeredComposite => tabs.extend([Video, Effects, Publish, Metadata]),
+        MediaStreamKind::Vector2D | MediaStreamKind::Document | MediaStreamKind::Spatial3D | MediaStreamKind::Cad2D => {
+            tabs.extend([Publish, Metadata])
+        }
+        _ => tabs.extend([Video, Audio, Effects, Captions, Publish, Loudness, Metadata]),
+    }
+    tabs
+}
+
+/// Whether the source holds structure (sequences, pages, layers) rather than plain media, so it is worth inspecting.
+pub fn source_has_structure(source: Option<ContainerType>) -> bool {
+    matches!(
+        source.map(|c| c.media_kind()),
+        Some(
+            MediaStreamKind::ProjectTimeline
+                | MediaStreamKind::MotionGraph
+                | MediaStreamKind::Document
+                | MediaStreamKind::Cad2D
+                | MediaStreamKind::LayeredComposite
+        )
+    )
+}
+
+/// Value stored in `SourceSelection::sequence` for entry `idx`: the name when it is unique, otherwise the index.
+pub fn sequence_key(inventory: &SourceInventory, idx: usize) -> Option<String> {
+    let seq = inventory.sequences.get(idx)?;
+    if inventory.sequences.iter().filter(|s| s.name == seq.name).count() == 1 { Some(seq.name.clone()) } else { Some(idx.to_string()) }
+}
+
+/// Index of the currently selected sequence; with no selection the first sequence is the default view.
+pub fn selected_sequence_index(inventory: &SourceInventory, selection: &SourceSelection) -> Option<usize> {
+    match &selection.sequence {
+        None => None,
+        Some(key) => {
+            inventory.sequences.iter().position(|s| &s.name == key).or_else(|| key.parse::<usize>().ok().filter(|i| *i < inventory.sequences.len()))
+        }
+    }
+}
+
+/// Sets the inclusive page range, clamped to the document; the full range clears the selection.
+pub fn set_page_range(selection: &mut SourceSelection, total: usize, first: u32, last: u32) {
+    let total = u32::try_from(total).unwrap_or(u32::MAX).max(1);
+    let first = first.clamp(1, total);
+    let last = last.clamp(first, total);
+    selection.pages = if first == 1 && last == total { None } else { Some((first, last)) };
+}
+
+/// Checks or unchecks one layer. `None` means every layer; the last remaining layer cannot be unchecked.
+pub fn set_layer_enabled(selection: &mut SourceSelection, all: &[String], name: &str, enabled: bool) {
+    let mut current: Vec<String> = match &selection.layers {
+        Some(l) => l.clone(),
+        None => all.to_vec(),
+    };
+    let present = current.iter().any(|l| l == name);
+    if enabled && !present {
+        current.push(name.to_string());
+    } else if !enabled && present && current.len() > 1 {
+        current.retain(|l| l != name);
+    } else {
+        return;
+    }
+    // keep the source order so output layer order is stable
+    current.sort_by_key(|l| all.iter().position(|a| a == l).unwrap_or(usize::MAX));
+    selection.layers = if current.len() == all.len() { None } else { Some(current) };
 }
 
 /// Source container of a job, taken from the input file extension.
@@ -90,6 +174,9 @@ pub struct InspectorState {
     pub audio_channels_idx: usize,
     pub publish_destination: Option<PathBuf>,
     pub post_encode_action: String,
+    /// Sequences, pages and layers of the current source, loaded once per source path.
+    pub inventory: SourceInventory,
+    pub inventory_path: Option<PathBuf>,
 }
 
 impl Default for InspectorState {
@@ -111,6 +198,8 @@ impl Default for InspectorState {
             audio_channels_idx: 1,    // Stereo (2.0)
             publish_destination: None,
             post_encode_action: "None".into(),
+            inventory: SourceInventory::default(),
+            inventory_path: None,
         }
     }
 }
@@ -329,6 +418,7 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, _spec: &Craft
 
 fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut CraftJobSpec, tokens: &Tokens) {
     let source = source_container(spec);
+    refresh_inventory(state, spec, source);
     let destinations = destination_options(source);
     let targets = &mut spec.targets;
     let target = match targets.first_mut() {
@@ -399,7 +489,7 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
     ui.separator();
 
     // Tabs
-    let tabs = visible_tabs(target.container);
+    let tabs = visible_tabs(source, target.container);
     if !tabs.contains(&state.active_tab)
         && let Some(first) = tabs.first()
     {
@@ -416,6 +506,10 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
 
     egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| match state.active_tab {
         InspectorTab::Video => render_video_tab(ui, target, state),
+        InspectorTab::Composition => render_composition_tab(ui, &mut target.selection, &state.inventory),
+        InspectorTab::Layout => render_layout_tab(ui, &mut target.selection, &state.inventory),
+        InspectorTab::Cad => render_layers_tab(ui, "CAD Layers", &mut target.selection, &state.inventory),
+        InspectorTab::Layers => render_layers_tab(ui, "Image Layers", &mut target.selection, &state.inventory),
         InspectorTab::Audio => render_audio_tab(ui, target, state),
         InspectorTab::Effects => render_effects_tab(ui, target),
         InspectorTab::Captions => render_captions_tab(ui, target),
@@ -423,6 +517,87 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
         InspectorTab::Loudness => render_loudness_tab(ui, target),
         InspectorTab::Metadata => render_metadata_tab(ui, &mut spec.client_info, target),
     });
+}
+
+/// Loads the source inventory once per source path; plain media sources are never read.
+fn refresh_inventory(state: &mut InspectorState, spec: &CraftJobSpec, source: Option<ContainerType>) {
+    let path = match &spec.source {
+        SourceDescriptor::File { path, .. } if source_has_structure(source) => Some(path.clone()),
+        _ => None,
+    };
+    if state.inventory_path == path {
+        return;
+    }
+    state.inventory = match &path {
+        Some(p) => encodercraft_pipeline::inspect_source(p),
+        None => SourceInventory::default(),
+    };
+    state.inventory_path = path;
+}
+
+fn render_composition_tab(ui: &mut Ui, selection: &mut SourceSelection, inventory: &SourceInventory) {
+    ui.heading("Sequence / Composition");
+    ui.add_space(4.0);
+    if inventory.sequences.is_empty() {
+        ui.label("No sequences were found in this source.");
+        return;
+    }
+    if inventory.sequences.len() > 1 && selection.sequence.is_none() {
+        ui.colored_label(ui.visuals().warn_fg_color, "This project has several sequences; pick one or all are exported.");
+    }
+    if ui.selectable_label(selection.sequence.is_none(), format!("All sequences ({})", inventory.sequences.len())).clicked() {
+        selection.sequence = None;
+    }
+    let chosen = selected_sequence_index(inventory, selection);
+    for (idx, seq) in inventory.sequences.iter().enumerate() {
+        let duration = seq.duration_secs.map(|d| format!(", {d:.1} s")).unwrap_or_default();
+        let label = format!("{}  ({}x{} @ {} fps{duration})", seq.name, seq.width, seq.height, seq.fps);
+        if ui.selectable_label(chosen == Some(idx), label).clicked() {
+            selection.sequence = sequence_key(inventory, idx);
+        }
+    }
+}
+
+fn render_layout_tab(ui: &mut Ui, selection: &mut SourceSelection, inventory: &SourceInventory) {
+    ui.heading("Page Range");
+    ui.add_space(4.0);
+    let Some(total) = inventory.pages else {
+        ui.label("No pages were found in this source.");
+        return;
+    };
+    let total32 = u32::try_from(total).unwrap_or(u32::MAX).max(1);
+    let (mut first, mut last) = selection.pages.unwrap_or((1, total32));
+    ui.horizontal(|ui| {
+        ui.label("From");
+        let a = ui.add(egui::DragValue::new(&mut first).range(1..=total32)).changed();
+        ui.label("to");
+        let b = ui.add(egui::DragValue::new(&mut last).range(1..=total32)).changed();
+        ui.label(format!("of {total}"));
+        if a || b {
+            set_page_range(selection, total, first, last);
+        }
+    });
+    if ui.button("All pages").clicked() {
+        selection.pages = None;
+    }
+}
+
+fn render_layers_tab(ui: &mut Ui, title: &str, selection: &mut SourceSelection, inventory: &SourceInventory) {
+    ui.heading(title);
+    ui.add_space(4.0);
+    if inventory.layers.is_empty() {
+        ui.label("No layers were found in this source.");
+        return;
+    }
+    for name in &inventory.layers {
+        let mut on = selection.layers.as_ref().is_none_or(|l| l.contains(name));
+        if ui.checkbox(&mut on, name).changed() {
+            set_layer_enabled(selection, &inventory.layers, name, on);
+        }
+    }
+    if ui.button("All layers").clicked() {
+        selection.layers = None;
+    }
 }
 
 fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut InspectorState) {
@@ -772,13 +947,86 @@ mod tests {
 
     #[test]
     fn test_visible_tabs_follow_target_domain() {
-        assert!(!visible_tabs(ContainerType::Wave).contains(&InspectorTab::Video));
-        assert!(visible_tabs(ContainerType::Flac).contains(&InspectorTab::Loudness));
-        assert!(visible_tabs(ContainerType::IsoBmffMp4).contains(&InspectorTab::Captions));
-        let doc = visible_tabs(ContainerType::Pdf);
+        assert!(!visible_tabs(None, ContainerType::Wave).contains(&InspectorTab::Video));
+        assert!(visible_tabs(None, ContainerType::Flac).contains(&InspectorTab::Loudness));
+        assert!(visible_tabs(None, ContainerType::IsoBmffMp4).contains(&InspectorTab::Captions));
+        let doc = visible_tabs(None, ContainerType::Pdf);
         assert!(!doc.contains(&InspectorTab::Video) && !doc.contains(&InspectorTab::Audio));
-        assert!(visible_tabs(ContainerType::Png).contains(&InspectorTab::Video));
-        assert!(!visible_tabs(ContainerType::Png).contains(&InspectorTab::Audio));
+        assert!(visible_tabs(None, ContainerType::Png).contains(&InspectorTab::Video));
+        assert!(!visible_tabs(None, ContainerType::Png).contains(&InspectorTab::Audio));
+    }
+
+    #[test]
+    fn test_source_specific_tabs() {
+        let prproj = visible_tabs(Some(ContainerType::AdobePremierePrproj), ContainerType::IsoBmffMp4);
+        assert_eq!(prproj.first(), Some(&InspectorTab::Composition));
+        assert!(prproj.contains(&InspectorTab::Video));
+        assert_eq!(visible_tabs(Some(ContainerType::AdobeAfterEffectsAep), ContainerType::Wave).first(), Some(&InspectorTab::Composition));
+        assert_eq!(visible_tabs(Some(ContainerType::Idml), ContainerType::Pdf).first(), Some(&InspectorTab::Layout));
+        assert_eq!(visible_tabs(Some(ContainerType::AutocadDxf), ContainerType::Svg).first(), Some(&InspectorTab::Cad));
+        assert_eq!(visible_tabs(Some(ContainerType::AdobePhotoshopPsd), ContainerType::Png).first(), Some(&InspectorTab::Layers));
+        assert!(
+            !visible_tabs(Some(ContainerType::Wave), ContainerType::Flac)
+                .iter()
+                .any(|t| matches!(t, InspectorTab::Composition | InspectorTab::Layout | InspectorTab::Cad | InspectorTab::Layers))
+        );
+        assert!(source_has_structure(Some(ContainerType::Pdf)) || source_has_structure(Some(ContainerType::Idml)));
+        assert!(!source_has_structure(Some(ContainerType::IsoBmffMp4)) && !source_has_structure(None));
+    }
+
+    fn inv_with_sequences(names: &[&str]) -> SourceInventory {
+        SourceInventory {
+            sequences: names
+                .iter()
+                .enumerate()
+                .map(|(index, n)| encodercraft_pipeline::SequenceInfo {
+                    index,
+                    name: (*n).into(),
+                    width: 1920,
+                    height: 1080,
+                    fps: 25.0,
+                    duration_secs: None,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_sequence_selection_keys() {
+        let inv = inv_with_sequences(&["Main", "Social", "Main"]);
+        assert_eq!(sequence_key(&inv, 1).as_deref(), Some("Social"));
+        assert_eq!(sequence_key(&inv, 0).as_deref(), Some("0"));
+        assert_eq!(sequence_key(&inv, 9), None);
+        let sel = SourceSelection { sequence: sequence_key(&inv, 2), ..Default::default() };
+        assert_eq!(selected_sequence_index(&inv, &sel), Some(2));
+        let sel = SourceSelection { sequence: Some("Social".into()), ..Default::default() };
+        assert_eq!(selected_sequence_index(&inv, &sel), Some(1));
+        assert_eq!(selected_sequence_index(&inv, &SourceSelection::default()), None);
+    }
+
+    #[test]
+    fn test_page_range_and_layer_toggles() {
+        let mut sel = SourceSelection::default();
+        set_page_range(&mut sel, 10, 3, 5);
+        assert_eq!(sel.pages, Some((3, 5)));
+        set_page_range(&mut sel, 10, 0, 99);
+        assert_eq!(sel.pages, None);
+        set_page_range(&mut sel, 10, 8, 2);
+        assert_eq!(sel.pages, Some((8, 8)));
+        assert!(sel.validate().is_ok());
+
+        let all: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let mut sel = SourceSelection::default();
+        set_layer_enabled(&mut sel, &all, "b", false);
+        assert_eq!(sel.layers, Some(vec!["a".to_string(), "c".to_string()]));
+        set_layer_enabled(&mut sel, &all, "b", true);
+        assert_eq!(sel.layers, None);
+        set_layer_enabled(&mut sel, &all, "a", false);
+        set_layer_enabled(&mut sel, &all, "b", false);
+        set_layer_enabled(&mut sel, &all, "c", false);
+        assert_eq!(sel.layers, Some(vec!["c".to_string()]));
+        assert!(sel.validate().is_ok());
     }
 
     #[test]

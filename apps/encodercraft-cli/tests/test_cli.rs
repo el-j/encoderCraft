@@ -244,3 +244,70 @@ fn test_cli_convert_session_to_soundcraft_and_flac() {
     let bad = Command::new(bin).arg("convert").arg(&sesx).args(["--to", "mp4"]).current_dir(dir.path()).output().expect("run");
     assert!(!bad.status.success());
 }
+
+#[test]
+fn test_cli_selects_sequence_pages_and_layers() {
+    use encodercraft_pipeline::{DocumentCanvas, TimelineProject, TimelineSequence, inspect_source};
+    use encodercraft_spatial_io::{CadDrawing, CadPoint3D};
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    // multi-sequence project: probe lists both, --sequence keeps one, unknown names fail
+    let mut project = TimelineProject::new("P");
+    project.add_sequence(TimelineSequence::new("Main", 1920, 1080, 25.0));
+    project.add_sequence(TimelineSequence::new("Social", 1080, 1920, 30.0));
+    let src = dir.path().join("show.prproj");
+    std::fs::write(&src, project.to_prproj()).expect("write project");
+    let probe = Command::new(bin).arg("probe").arg(&src).output().expect("run probe");
+    let text = String::from_utf8_lossy(&probe.stdout);
+    assert!(text.contains("sequence[0]: Main") && text.contains("sequence[1]: Social"), "{text}");
+
+    let out = dir.path().join("social.prproj");
+    let run = Command::new(bin).arg("encode").arg(&src).args(["--sequence", "1", "-o"]).arg(&out).output().expect("run encode");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let inv = inspect_source(&out);
+    assert_eq!(inv.sequences.len(), 1);
+    assert_eq!(inv.sequences[0].name, "Social");
+
+    let bad = dir.path().join("bad.prproj");
+    let run = Command::new(bin).arg("encode").arg(&src).args(["--sequence", "Missing", "-o"]).arg(&bad).output().expect("run encode");
+    assert!(!run.status.success());
+    assert!(!bad.exists());
+
+    // document pages
+    let mut doc = DocumentCanvas::new("Report");
+    doc.pages[0].add_text(54.0, 720.0, 100.0, 20.0, "PAGE-ONE", 14.0);
+    doc.add_page().add_text(54.0, 720.0, 100.0, 20.0, "PAGE-TWO", 14.0);
+    let doc_src = dir.path().join("report.designcraft");
+    std::fs::write(&doc_src, doc.to_designcraft_binary().expect("serialize")).expect("write doc");
+    let probe = Command::new(bin).arg("probe").arg(&doc_src).output().expect("run probe");
+    assert!(String::from_utf8_lossy(&probe.stdout).contains("pages: 2"));
+    let out = dir.path().join("p2.pdf");
+    let run = Command::new(bin).arg("convert").arg(&doc_src).args(["--to", "pdf", "--pages", "2", "-o"]).arg(&out).output().expect("run convert");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let pdf = String::from_utf8_lossy(&std::fs::read(&out).expect("read pdf")).to_string();
+    assert!(pdf.contains("PAGE-TWO") && !pdf.contains("PAGE-ONE"));
+    let run = Command::new(bin)
+        .arg("convert")
+        .arg(&doc_src)
+        .args(["--to", "pdf", "--pages", "7-9", "-o"])
+        .arg(dir.path().join("x.pdf"))
+        .output()
+        .expect("run");
+    assert!(!run.status.success());
+    let run = Command::new(bin).arg("convert").arg(&doc_src).args(["--to", "pdf", "--pages", "abc"]).output().expect("run");
+    assert!(!run.status.success());
+
+    // CAD layers
+    let mut cad = CadDrawing::new("Plan");
+    let origin = CadPoint3D::new(0.0, 0.0, 0.0);
+    cad.add_line(origin, CadPoint3D::new(10.0, 0.0, 0.0), "WALLS");
+    cad.add_line(origin, CadPoint3D::new(0.0, 10.0, 0.0), "FURNITURE");
+    let cad_src = dir.path().join("plan.cadcraft");
+    std::fs::write(&cad_src, cad.to_cadcraft_binary().expect("serialize")).expect("write cad");
+    let out = dir.path().join("walls.cadcraft");
+    let run = Command::new(bin).arg("encode").arg(&cad_src).args(["--layers", "WALLS", "-o"]).arg(&out).output().expect("run encode");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let back = CadDrawing::from_cadcraft_binary(&std::fs::read(&out).expect("read cad")).expect("parse cad");
+    assert_eq!(back.entities.len(), 1);
+}

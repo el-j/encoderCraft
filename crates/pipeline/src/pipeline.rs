@@ -422,7 +422,7 @@ impl TranscodePipeline {
     }
 
     fn execute_cad_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let drawing = match &self.spec.source {
+        let mut drawing = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source CAD file `{}`: {e}", path.display())))?;
                 if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
@@ -479,6 +479,10 @@ impl TranscodePipeline {
                 cad
             }
         };
+
+        if let Some(layers) = &target.selection.layers {
+            drawing.retain_layers(layers)?;
+        }
 
         match target.container {
             ContainerType::AutocadDxf | ContainerType::AutocadDwg => {
@@ -668,21 +672,37 @@ impl TranscodePipeline {
     }
 
     fn execute_document_pdf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let pages = target.selection.pages;
+        let no_pages = |what: &str| -> Result<(), EncoderError> {
+            if pages.is_some() {
+                return Err(EncoderError::InvalidJobSpec(format!("a page range cannot be applied to {what}; it has no selectable pages")));
+            }
+            Ok(())
+        };
         let pdf_bytes = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes =
                     std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
                 if bytes.starts_with(b"%PDF-") {
+                    no_pages("a PDF source")?;
                     bytes
                 } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                    no_pages("a CAD drawing")?;
                     cad.to_pdf_bytes()?
-                } else if let Ok(doc) = crate::document::DocumentCanvas::from_bytes_auto(&bytes) {
+                } else if let Ok(mut doc) = crate::document::DocumentCanvas::from_bytes_auto(&bytes) {
+                    if let Some((first, last)) = pages {
+                        doc.select_pages(first, last)?;
+                    }
                     doc.to_pdf_x4_bytes()?
                 } else {
+                    no_pages("this source")?;
                     generate_minimal_pdf(&format!("Document export: {}", path.file_name().and_then(|n| n.to_str()).unwrap_or("document")))
                 }
             }
-            _ => generate_minimal_pdf("Exported Document"),
+            _ => {
+                no_pages("a missing source")?;
+                generate_minimal_pdf("Exported Document")
+            }
         };
 
         std::fs::write(&target.output_path, &pdf_bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
@@ -693,7 +713,7 @@ impl TranscodePipeline {
     }
 
     fn execute_document_publication(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let doc = match &self.spec.source {
+        let mut doc = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes =
                     std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
@@ -709,6 +729,9 @@ impl TranscodePipeline {
             }
             _ => crate::document::DocumentCanvas::new("Exported Document"),
         };
+        if let Some((first, last)) = target.selection.pages {
+            doc.select_pages(first, last)?;
+        }
 
         match target.container {
             ContainerType::ArtcraftDesigncraft => {
@@ -735,7 +758,7 @@ impl TranscodePipeline {
     }
 
     fn execute_layered_image(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let image = match &self.spec.source {
+        let mut image = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes =
                     std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source layered image `{}`: {e}", path.display())))?;
@@ -748,6 +771,10 @@ impl TranscodePipeline {
                 img
             }
         };
+
+        if let Some(layers) = &target.selection.layers {
+            image.select_layers(layers)?;
+        }
 
         match target.container {
             ContainerType::ArtcraftPhotocraft => {
@@ -788,7 +815,7 @@ impl TranscodePipeline {
     }
 
     fn execute_motion_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let project = match &self.spec.source {
+        let mut project = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes =
                     std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source motion file `{}`: {e}", path.display())))?;
@@ -808,6 +835,10 @@ impl TranscodePipeline {
                 proj
             }
         };
+
+        if let Some(key) = &target.selection.sequence {
+            project.select_comp(key)?;
+        }
 
         match target.container {
             ContainerType::ArtcraftEffectcraft => {
@@ -842,7 +873,7 @@ impl TranscodePipeline {
     }
 
     fn execute_timeline_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let project = match &self.spec.source {
+        let mut project = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source NLE file `{}`: {e}", path.display())))?;
                 if bytes.starts_with(b"\x89CRAFT\x00\x01F") {
@@ -862,6 +893,10 @@ impl TranscodePipeline {
             }
         };
 
+        if let Some(key) = &target.selection.sequence {
+            project.select_sequence(key)?;
+        }
+
         let ext = target.output_path.extension().and_then(|s| s.to_str()).unwrap_or("");
         match target.container {
             ContainerType::ArtcraftFilmcraft => {
@@ -877,14 +912,7 @@ impl TranscodePipeline {
                 std::fs::write(&target.output_path, otio.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OTIO file: {e}")))?;
             }
             ContainerType::AdobePremierePrproj => {
-                let seq_name = project.sequences.first().map(|s| s.name.as_str()).unwrap_or("Sequence");
-                let xml = format!(
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<PremiereData Version=\"3\">\n  <Sequence>\n    <Name>{}</Name>\n  </Sequence>\n</PremiereData>",
-                    seq_name
-                );
-                let compressed = miniz_oxide::deflate::compress_to_vec(xml.as_bytes(), 6);
-                let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-                gzip.extend_from_slice(&compressed);
+                let gzip = project.to_prproj();
                 std::fs::write(&target.output_path, &gzip).map_err(|e| EncoderError::Io(format!("failed to write PRPROJ file: {e}")))?;
             }
             _ => {
@@ -2052,6 +2080,96 @@ mod tests {
         assert!(exr_out.exists());
         let exr_data = std::fs::read(&exr_out).unwrap();
         assert!(exr_data.starts_with(b"\x76\x2F\x31\x01")); // OpenEXR magic
+    }
+
+    fn selection_spec(
+        source: std::path::PathBuf,
+        out: std::path::PathBuf,
+        container: ContainerType,
+        selection: encodercraft_core::SourceSelection,
+    ) -> CraftJobSpec {
+        CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "selection-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: source, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t".into(),
+                output_path: out,
+                preset_name: "p".into(),
+                container,
+                selection,
+                ..Default::default()
+            }],
+        }
+    }
+
+    #[test]
+    fn selection_restricts_timeline_sequences_and_rejects_unknown() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("in.prproj");
+        let mut t = crate::project::TimelineProject::new("P");
+        t.add_sequence(crate::project::TimelineSequence::new("Main", 1920, 1080, 25.0));
+        t.add_sequence(crate::project::TimelineSequence::new("Social", 1080, 1920, 30.0));
+        std::fs::write(&src, t.to_prproj()).unwrap();
+
+        let out = dir.path().join("all.prproj");
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::AdobePremierePrproj, Default::default())).execute().unwrap();
+        assert_eq!(crate::inventory::inspect_source(&out).sequences.len(), 2);
+
+        let out = dir.path().join("one.prproj");
+        let sel = encodercraft_core::SourceSelection { sequence: Some("Social".into()), ..Default::default() };
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::AdobePremierePrproj, sel)).execute().unwrap();
+        let inv = crate::inventory::inspect_source(&out);
+        assert_eq!(inv.sequences.len(), 1);
+        assert_eq!(inv.sequences[0].name, "Social");
+        assert_eq!(inv.sequences[0].width, 1080);
+
+        let out = dir.path().join("bad.prproj");
+        let sel = encodercraft_core::SourceSelection { sequence: Some("Nope".into()), ..Default::default() };
+        assert!(TranscodePipeline::new(selection_spec(src, out.clone(), ContainerType::AdobePremierePrproj, sel)).execute().is_err());
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn selection_restricts_document_pages_and_cad_layers() {
+        let dir = tempdir().unwrap();
+        let mut doc = crate::document::DocumentCanvas::new("Report");
+        doc.pages[0].add_text(54.0, 720.0, 100.0, 20.0, "PAGE-ONE", 14.0);
+        doc.add_page().add_text(54.0, 720.0, 100.0, 20.0, "PAGE-TWO", 14.0);
+        let src = dir.path().join("in.designcraft");
+        std::fs::write(&src, doc.to_designcraft_binary().unwrap()).unwrap();
+
+        let out = dir.path().join("p2.pdf");
+        let sel = encodercraft_core::SourceSelection { pages: Some((2, 2)), ..Default::default() };
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::Pdf, sel)).execute().unwrap();
+        let pdf = String::from_utf8_lossy(&std::fs::read(&out).unwrap()).to_string();
+        assert!(pdf.contains("PAGE-TWO") && !pdf.contains("PAGE-ONE"));
+
+        let out = dir.path().join("bad.pdf");
+        let sel = encodercraft_core::SourceSelection { pages: Some((9, 9)), ..Default::default() };
+        assert!(TranscodePipeline::new(selection_spec(src, out.clone(), ContainerType::Pdf, sel)).execute().is_err());
+        assert!(!out.exists());
+
+        let mut cad = encodercraft_spatial_io::CadDrawing::new("Plan");
+        let p0 = encodercraft_spatial_io::CadPoint3D::new(0.0, 0.0, 0.0);
+        cad.add_line(p0, encodercraft_spatial_io::CadPoint3D::new(10.0, 0.0, 0.0), "WALLS");
+        cad.add_line(p0, encodercraft_spatial_io::CadPoint3D::new(0.0, 10.0, 0.0), "FURNITURE");
+        let src = dir.path().join("plan.cadcraft");
+        std::fs::write(&src, cad.to_cadcraft_binary().unwrap()).unwrap();
+        let out = dir.path().join("walls.cadcraft");
+        let sel = encodercraft_core::SourceSelection { layers: Some(vec!["WALLS".into()]), ..Default::default() };
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::ArtcraftCadcraft, sel)).execute().unwrap();
+        let back = encodercraft_spatial_io::CadDrawing::from_cadcraft_binary(&std::fs::read(&out).unwrap()).unwrap();
+        assert_eq!(back.entities.len(), 1);
+        assert!(!back.layer_names().contains(&"FURNITURE".to_string()));
+
+        let out = dir.path().join("bad.cadcraft");
+        let sel = encodercraft_core::SourceSelection { layers: Some(vec!["NOPE".into()]), ..Default::default() };
+        assert!(TranscodePipeline::new(selection_spec(src, out.clone(), ContainerType::ArtcraftCadcraft, sel)).execute().is_err());
+        assert!(!out.exists());
     }
 
     #[test]

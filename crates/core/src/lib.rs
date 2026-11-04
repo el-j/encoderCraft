@@ -16,7 +16,7 @@ pub use error::EncoderError;
 pub use frame::{MAX_FRAME_BUFFER_BYTES, PlaneDescriptor, VideoFrame};
 pub use job::{
     AudioStemMode, CaptionExportFormat, ClientInfo, ContainerType, CraftJobSpec, JobPriority, JobStatus, MediaStreamKind, OutputTarget,
-    SourceDescriptor, StartPolicy, StitchedClipSource,
+    SourceDescriptor, SourceSelection, StartPolicy, StitchedClipSource,
 };
 pub use metadata::XmpMetadata;
 pub use timecode::{MediaTimecode, Rational64};

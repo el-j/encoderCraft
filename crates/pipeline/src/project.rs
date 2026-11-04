@@ -188,6 +188,15 @@ impl MotionProject {
         Self { name: name.into(), comps: Vec::new() }
     }
 
+    /// Reduces the project to the one composition named (or zero-based indexed) by `key`.
+    pub fn select_comp(&mut self, key: &str) -> Result<(), EncoderError> {
+        let names: Vec<&str> = self.comps.iter().map(|c| c.name.as_str()).collect();
+        let idx = resolve_item(&names, key, "composition")?;
+        let chosen = self.comps.swap_remove(idx);
+        self.comps = vec![chosen];
+        Ok(())
+    }
+
     pub fn add_comp(&mut self, comp: MotionComp) {
         self.comps.push(comp);
     }
@@ -499,46 +508,64 @@ impl TimelineProject {
         let xml_str = String::from_utf8_lossy(&xml_bytes);
 
         let mut project = Self::new("Premiere Pro Project");
-        let mut sequence = TimelineSequence::new("Main Sequence", 1920, 1080, 24.0);
-
-        let mut video_track = TimelineTrack { name: "Video 1".to_string(), kind: TrackKind::Video, items: Vec::new() };
-
-        // Parse Sequence attributes
-        if let Some(name) = extract_xml_tag(&xml_str, "Name") {
-            sequence.name = name;
-        }
-
-        // Parse TrackItems and Clips
-        for item_block in xml_str.split("<TrackItem") {
-            if !item_block.contains("</TrackItem>") {
-                continue;
+        let blocks = sequence_blocks(&xml_str);
+        if blocks.is_empty() {
+            // Flat documents without <Sequence> wrappers describe a single sequence.
+            project.add_sequence(parse_prproj_sequence(&xml_str));
+        } else {
+            for block in blocks {
+                project.add_sequence(parse_prproj_sequence(block));
             }
-
-            let name = extract_xml_tag(item_block, "Name").unwrap_or_else(|| "Clip".to_string());
-            let start = extract_xml_tag(item_block, "Start").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-            let end = extract_xml_tag(item_block, "End").and_then(|s| s.parse::<u64>().ok()).unwrap_or(start + 24000);
-            let in_tick = extract_xml_tag(item_block, "In").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-            let out_tick = extract_xml_tag(item_block, "Out").and_then(|s| s.parse::<u64>().ok()).unwrap_or(end - start);
-            let file_path = extract_xml_tag(item_block, "FilePath");
-
-            video_track.items.push(TimelineItem { name, start_tick: start, end_tick: end, in_tick, out_tick, source_path: file_path });
         }
-
-        if video_track.items.is_empty() {
-            video_track.items.push(TimelineItem {
-                name: "Leader".to_string(),
-                start_tick: 0,
-                end_tick: 24000,
-                in_tick: 0,
-                out_tick: 24000,
-                source_path: None,
-            });
-        }
-
-        sequence.add_track(video_track);
-        project.add_sequence(sequence);
-
         Ok(project)
+    }
+
+    /// Serializes every sequence in the dialect `from_prproj` reads, as a gzip-wrapped `<PremiereData>` document.
+    pub fn to_prproj(&self) -> Vec<u8> {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<PremiereData Version=\"3\">\n");
+        for seq in &self.sequences {
+            xml.push_str("  <Sequence>\n");
+            xml.push_str(&format!(
+                "    <Name>{}</Name>\n    <FrameWidth>{}</FrameWidth>\n    <FrameHeight>{}</FrameHeight>\n    <FrameRate>{}</FrameRate>\n",
+                xml_escape(&seq.name),
+                seq.width,
+                seq.height,
+                seq.fps
+            ));
+            for track in &seq.tracks {
+                let kind = if track.kind == TrackKind::Audio { "Audio" } else { "Video" };
+                for item in &track.items {
+                    xml.push_str("    <TrackItem>\n");
+                    xml.push_str(&format!(
+                        "      <Kind>{kind}</Kind>\n      <Name>{}</Name>\n      <Start>{}</Start>\n      <End>{}</End>\n      <In>{}</In>\n      <Out>{}</Out>\n",
+                        xml_escape(&item.name),
+                        item.start_tick,
+                        item.end_tick,
+                        item.in_tick,
+                        item.out_tick
+                    ));
+                    if let Some(path) = &item.source_path {
+                        xml.push_str(&format!("      <FilePath>{}</FilePath>\n", xml_escape(path)));
+                    }
+                    xml.push_str("    </TrackItem>\n");
+                }
+            }
+            xml.push_str("  </Sequence>\n");
+        }
+        xml.push_str("</PremiereData>");
+        let compressed = miniz_oxide::deflate::compress_to_vec(xml.as_bytes(), 6);
+        let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+        gzip.extend_from_slice(&compressed);
+        gzip
+    }
+
+    /// Reduces the project to the one sequence named (or zero-based indexed) by `key`.
+    pub fn select_sequence(&mut self, key: &str) -> Result<(), EncoderError> {
+        let names: Vec<&str> = self.sequences.iter().map(|s| s.name.as_str()).collect();
+        let idx = resolve_item(&names, key, "sequence")?;
+        let chosen = self.sequences.swap_remove(idx);
+        self.sequences = vec![chosen];
+        Ok(())
     }
 
     /// Exports timeline to Final Cut Pro XML (.fcpxml v1.9) format.
@@ -635,6 +662,74 @@ impl TimelineProject {
     }
 }
 
+/// Resolves `key` as an exact item name first, then as a zero-based index.
+fn resolve_item(names: &[&str], key: &str, what: &str) -> Result<usize, EncoderError> {
+    let key = key.trim();
+    if let Some(idx) = names.iter().position(|n| *n == key) {
+        return Ok(idx);
+    }
+    if let Ok(idx) = key.parse::<usize>()
+        && idx < names.len()
+    {
+        return Ok(idx);
+    }
+    let available: Vec<String> = names.iter().enumerate().map(|(i, n)| format!("{i}: {n}")).collect();
+    Err(EncoderError::InvalidJobSpec(format!("{what} '{key}' not found; available: {}", available.join(", "))))
+}
+
+/// Slices out each `<Sequence ...>...</Sequence>` element body.
+fn sequence_blocks(xml: &str) -> Vec<&str> {
+    let mut blocks = Vec::new();
+    let mut rest = xml;
+    while let Some(open) = rest.find("<Sequence") {
+        let after = rest.get(open + "<Sequence".len()..).unwrap_or("");
+        let is_element = after.starts_with('>') || after.starts_with(' ');
+        let Some(close) = after.find("</Sequence>") else { break };
+        if is_element {
+            let body_start = after.find('>').map(|i| i + 1).unwrap_or(0);
+            if let Some(body) = after.get(body_start..close.max(body_start)) {
+                blocks.push(body);
+            }
+        }
+        rest = after.get(close + "</Sequence>".len()..).unwrap_or("");
+    }
+    blocks
+}
+
+fn parse_prproj_sequence(block: &str) -> TimelineSequence {
+    let header = block.split("<TrackItem").next().unwrap_or(block);
+    let name = extract_xml_tag(header, "Name").filter(|n| !n.is_empty()).unwrap_or_else(|| "Main Sequence".to_string());
+    let width = extract_xml_tag(header, "FrameWidth").and_then(|v| v.parse::<u32>().ok()).filter(|v| *v > 0).unwrap_or(1920);
+    let height = extract_xml_tag(header, "FrameHeight").and_then(|v| v.parse::<u32>().ok()).filter(|v| *v > 0).unwrap_or(1080);
+    let fps = extract_xml_tag(header, "FrameRate").and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(24.0);
+    let mut sequence = TimelineSequence::new(name, width, height, fps);
+
+    let mut video = TimelineTrack { name: "Video 1".to_string(), kind: TrackKind::Video, items: Vec::new() };
+    let mut audio = TimelineTrack { name: "Audio 1".to_string(), kind: TrackKind::Audio, items: Vec::new() };
+    for item_block in block.split("<TrackItem").skip(1) {
+        let Some(end_of_item) = item_block.find("</TrackItem>") else { continue };
+        let item_block = item_block.get(..end_of_item).unwrap_or(item_block);
+        let name = extract_xml_tag(item_block, "Name").unwrap_or_else(|| "Clip".to_string());
+        let start = extract_xml_tag(item_block, "Start").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        let end = extract_xml_tag(item_block, "End").and_then(|s| s.parse::<u64>().ok()).unwrap_or_else(|| start.saturating_add(24000));
+        let in_tick = extract_xml_tag(item_block, "In").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        let out_tick = extract_xml_tag(item_block, "Out").and_then(|s| s.parse::<u64>().ok()).unwrap_or_else(|| end.saturating_sub(start));
+        let source_path = extract_xml_tag(item_block, "FilePath");
+        let item = TimelineItem { name, start_tick: start, end_tick: end, in_tick, out_tick, source_path };
+        if extract_xml_tag(item_block, "Kind").is_some_and(|k| k.eq_ignore_ascii_case("audio")) {
+            audio.items.push(item);
+        } else {
+            video.items.push(item);
+        }
+        sequence.duration_ticks = sequence.duration_ticks.max(end);
+    }
+    sequence.add_track(video);
+    if !audio.items.is_empty() {
+        sequence.add_track(audio);
+    }
+    sequence
+}
+
 fn extract_xml_tag(haystack: &str, tag: &str) -> Option<String> {
     let start_tag = format!("<{}>", tag);
     let end_tag = format!("</{}>", tag);
@@ -720,6 +815,65 @@ mod tests {
 
         let otio = project.to_otio_json().unwrap();
         assert!(otio.contains("\"OTIO_SCHEMA\": \"Timeline.1\""));
+    }
+
+    fn multi_sequence_xml() -> String {
+        r#"<PremiereData Version="3">
+  <Sequence><Name>Cut A</Name><FrameWidth>3840</FrameWidth><FrameHeight>2160</FrameHeight><FrameRate>25</FrameRate>
+    <TrackItem><Name>a1.mov</Name><Start>0</Start><End>100</End><In>0</In><Out>100</Out><FilePath>/m/a1.mov</FilePath></TrackItem>
+    <TrackItem><Kind>Audio</Kind><Name>a1.wav</Name><Start>0</Start><End>100</End><In>0</In><Out>100</Out></TrackItem>
+  </Sequence>
+  <Sequence Id="2"><Name>Cut B</Name>
+    <TrackItem><Name>b1.mov</Name><Start>10</Start><End>500</End><In>0</In><Out>490</Out></TrackItem>
+    <TrackItem><Name>b2.mov</Name><Start>500</Start><End>900</End><In>0</In><Out>400</Out></TrackItem>
+  </Sequence>
+</PremiereData>"#
+            .to_string()
+    }
+
+    #[test]
+    fn prproj_with_several_sequences_parses_selects_and_round_trips() {
+        let proj = TimelineProject::from_prproj(multi_sequence_xml().as_bytes()).unwrap();
+        assert_eq!(proj.sequences.len(), 2);
+        let a = &proj.sequences[0];
+        assert_eq!((a.name.as_str(), a.width, a.height, a.fps), ("Cut A", 3840, 2160, 25.0));
+        assert_eq!(a.tracks.len(), 2);
+        assert_eq!(a.tracks[1].kind, TrackKind::Audio);
+        let b = &proj.sequences[1];
+        assert_eq!(b.name, "Cut B");
+        assert_eq!(b.tracks[0].items.len(), 2);
+        assert_eq!(b.duration_ticks, 900);
+
+        let back = TimelineProject::from_prproj(&proj.to_prproj()).unwrap();
+        assert_eq!(back.sequences.len(), 2);
+        assert_eq!(back.sequences[0].tracks[1].items[0].name, "a1.wav");
+        assert_eq!(back.sequences[1].tracks[0].items[1].start_tick, 500);
+
+        let mut by_name = proj.clone();
+        by_name.select_sequence("Cut A").unwrap();
+        assert_eq!(by_name.sequences.len(), 1);
+        let mut by_index = proj.clone();
+        by_index.select_sequence("1").unwrap();
+        assert_eq!(by_index.sequences[0].tracks[0].items.len(), 2);
+        let mut missing = proj.clone();
+        let err = missing.select_sequence("Nope").unwrap_err().to_string();
+        assert!(err.contains("Nope") && err.contains("0: Cut A"), "{err}");
+        assert_eq!(missing.sequences.len(), 2, "failed selection must not alter the project");
+        assert!(missing.select_sequence("7").is_err());
+    }
+
+    #[test]
+    fn motion_comp_selection() {
+        let mut p = MotionProject::new("p");
+        p.add_comp(MotionComp::new("Main", 1920, 1080, 24.0, 10));
+        p.add_comp(MotionComp::new("Title", 1280, 720, 30.0, 20));
+        let mut t = p.clone();
+        t.select_comp("Title").unwrap();
+        assert_eq!((t.comps.len(), t.comps[0].width), (1, 1280));
+        let mut i = p.clone();
+        i.select_comp("0").unwrap();
+        assert_eq!(i.comps[0].name, "Main");
+        assert!(p.select_comp("zzz").is_err());
     }
 
     #[test]
