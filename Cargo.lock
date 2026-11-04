@@ -1040,6 +1040,7 @@ dependencies = [
  "filmcraft-mxf",
  "filmcraft-time",
  "log",
+ "miniz_oxide 0.9.1",
  "photocraft-codecs",
  "proptest",
  "rayon",

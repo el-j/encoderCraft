@@ -135,8 +135,8 @@ impl TranscodePipeline {
             ContainerType::AutocadDxf | ContainerType::AutocadDwg | ContainerType::HpglPlotter | ContainerType::ArtcraftCadcraft => {
                 self.execute_cad_transcode(target, start_time)?
             }
-            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => self.execute_video_mp4(target, false, start_time)?,
-            ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_video_mp4(target, false, start_time)?,
+            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => self.execute_motion_project(target, start_time)?,
+            ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_timeline_project(target, start_time)?,
             ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => self.execute_audio_wav(target, start_time)?,
             ContainerType::ArtcraftAnicraft => self.execute_image_transcode(target, start_time)?,
         }
@@ -740,6 +740,117 @@ impl TranscodePipeline {
             _ => {
                 let psd = image.to_psd_bytes(false)?;
                 std::fs::write(&target.output_path, &psd).map_err(|e| EncoderError::Io(format!("failed to write default layered file: {e}")))?;
+            }
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_motion_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let project = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source motion file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"\x89CRAFT\x00\x01E") {
+                    crate::project::MotionProject::from_effectcraft_binary(&bytes)?
+                } else if bytes.starts_with(b"RIFX") {
+                    crate::project::MotionProject::from_aep(&bytes)?
+                } else {
+                    let mut proj = crate::project::MotionProject::new("Default Motion Project");
+                    proj.add_comp(crate::project::MotionComp::new("Comp 1", 1920, 1080, 24.0, 120));
+                    proj
+                }
+            }
+            _ => {
+                let mut proj = crate::project::MotionProject::new("Default Motion Project");
+                proj.add_comp(crate::project::MotionComp::new("Comp 1", 1920, 1080, 24.0, 120));
+                proj
+            }
+        };
+
+        match target.container {
+            ContainerType::ArtcraftEffectcraft => {
+                let bin = project.to_effectcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .effectcraft file: {e}")))?;
+            }
+            ContainerType::AdobeAfterEffectsAep => {
+                let mut out = Vec::new();
+                out.extend_from_slice(b"RIFX");
+                let comp = project.comps.first();
+                let w = comp.map(|c| c.width).unwrap_or(1920);
+                let h = comp.map(|c| c.height).unwrap_or(1080);
+                let mut chunk = Vec::new();
+                chunk.extend_from_slice(b"Egg!");
+                chunk.extend_from_slice(b"Comp");
+                chunk.extend_from_slice(&8u32.to_be_bytes());
+                chunk.extend_from_slice(&w.to_be_bytes());
+                chunk.extend_from_slice(&h.to_be_bytes());
+                out.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+                out.extend_from_slice(&chunk);
+                std::fs::write(&target.output_path, &out).map_err(|e| EncoderError::Io(format!("failed to write AEP file: {e}")))?;
+            }
+            _ => {
+                let lottie = project.to_lottie_json()?;
+                std::fs::write(&target.output_path, lottie.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write motion file: {e}")))?;
+            }
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_timeline_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let project = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source NLE file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"\x89CRAFT\x00\x01F") {
+                    crate::project::TimelineProject::from_filmcraft_binary(&bytes)?
+                } else if bytes.starts_with(&[0x1f, 0x8b]) || bytes.windows(13).any(|w| w == b"<PremiereData") {
+                    crate::project::TimelineProject::from_prproj(&bytes)?
+                } else {
+                    let mut proj = crate::project::TimelineProject::new("Default Timeline");
+                    proj.add_sequence(crate::project::TimelineSequence::new("Sequence 1", 1920, 1080, 24.0));
+                    proj
+                }
+            }
+            _ => {
+                let mut proj = crate::project::TimelineProject::new("Default Timeline");
+                proj.add_sequence(crate::project::TimelineSequence::new("Sequence 1", 1920, 1080, 24.0));
+                proj
+            }
+        };
+
+        let ext = target.output_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        match target.container {
+            ContainerType::ArtcraftFilmcraft => {
+                let bin = project.to_filmcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .filmcraft file: {e}")))?;
+            }
+            ContainerType::AdobePremierePrproj if ext == "fcpxml" => {
+                let fcpxml = project.to_fcpxml();
+                std::fs::write(&target.output_path, fcpxml.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write FCPXML file: {e}")))?;
+            }
+            ContainerType::AdobePremierePrproj if ext == "otio" => {
+                let otio = project.to_otio_json()?;
+                std::fs::write(&target.output_path, otio.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OTIO file: {e}")))?;
+            }
+            ContainerType::AdobePremierePrproj => {
+                let seq_name = project.sequences.first().map(|s| s.name.as_str()).unwrap_or("Sequence");
+                let xml = format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<PremiereData Version=\"3\">\n  <Sequence>\n    <Name>{}</Name>\n  </Sequence>\n</PremiereData>",
+                    seq_name
+                );
+                let compressed = miniz_oxide::deflate::compress_to_vec(xml.as_bytes(), 6);
+                let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+                gzip.extend_from_slice(&compressed);
+                std::fs::write(&target.output_path, &gzip).map_err(|e| EncoderError::Io(format!("failed to write PRPROJ file: {e}")))?;
+            }
+            _ => {
+                let otio = project.to_otio_json()?;
+                std::fs::write(&target.output_path, otio.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OTIO file: {e}")))?;
             }
         }
 
@@ -2142,6 +2253,106 @@ mod tests {
         assert!(out_dxf.exists());
         let dxf_str = std::fs::read_to_string(&out_dxf).unwrap();
         assert!(dxf_str.contains("ENTITIES"));
+    }
+
+    #[test]
+    fn test_motion_and_nle_pipeline() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // 1. Motion Graphics: AEP -> EffectCraft
+        let aep_in = tmp.path().join("motion.aep");
+        let effectcraft_out = tmp.path().join("motion.effectcraft");
+        let aep_out = tmp.path().join("exported.aep");
+
+        let mut rifx = Vec::new();
+        rifx.extend_from_slice(b"RIFX");
+        rifx.extend_from_slice(&24u32.to_be_bytes());
+        rifx.extend_from_slice(b"Egg!Comp");
+        rifx.extend_from_slice(&8u32.to_be_bytes());
+        rifx.extend_from_slice(&1920u32.to_be_bytes());
+        rifx.extend_from_slice(&1080u32.to_be_bytes());
+        std::fs::write(&aep_in, &rifx).unwrap();
+
+        let motion_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-motion".into(),
+            client_info: ClientInfo { app_name: "effectcraft".into(), app_version: "1.0".into(), pid: 10, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: aep_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_eff".into(),
+                    container: ContainerType::ArtcraftEffectcraft,
+                    output_path: effectcraft_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_aep".into(),
+                    container: ContainerType::AdobeAfterEffectsAep,
+                    output_path: aep_out.clone(),
+                    ..Default::default()
+                },
+            ],
+        };
+        TranscodePipeline::new(motion_spec).execute().unwrap();
+        assert!(effectcraft_out.exists());
+        let eff_bytes = std::fs::read(&effectcraft_out).unwrap();
+        assert!(eff_bytes.starts_with(b"\x89CRAFT\x00\x01E"));
+        assert!(aep_out.exists());
+        let aep_bytes = std::fs::read(&aep_out).unwrap();
+        assert!(aep_bytes.starts_with(b"RIFX"));
+
+        // 2. NLE Timelines: PRPROJ -> FilmCraft, FCPXML, OTIO
+        let prproj_in = tmp.path().join("edit.prproj");
+        let filmcraft_out = tmp.path().join("edit.filmcraft");
+        let fcpxml_out = tmp.path().join("edit.fcpxml");
+        let otio_out = tmp.path().join("edit.otio");
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?><PremiereData Version="3"><Sequence><Name>Cut_v01</Name></Sequence></PremiereData>"#;
+        let compressed = miniz_oxide::deflate::compress_to_vec(xml.as_bytes(), 6);
+        let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+        gzip.extend_from_slice(&compressed);
+        std::fs::write(&prproj_in, &gzip).unwrap();
+
+        let nle_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-nle".into(),
+            client_info: ClientInfo { app_name: "filmcraft".into(), app_version: "1.0".into(), pid: 11, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: prproj_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_film".into(),
+                    container: ContainerType::ArtcraftFilmcraft,
+                    output_path: filmcraft_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_fcp".into(),
+                    container: ContainerType::AdobePremierePrproj,
+                    output_path: fcpxml_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_otio".into(),
+                    container: ContainerType::AdobePremierePrproj,
+                    output_path: otio_out.clone(),
+                    ..Default::default()
+                },
+            ],
+        };
+        TranscodePipeline::new(nle_spec).execute().unwrap();
+        assert!(filmcraft_out.exists());
+        let film_bytes = std::fs::read(&filmcraft_out).unwrap();
+        assert!(film_bytes.starts_with(b"\x89CRAFT\x00\x01F"));
+        assert!(fcpxml_out.exists());
+        let fcpxml_str = std::fs::read_to_string(&fcpxml_out).unwrap();
+        assert!(fcpxml_str.contains("<fcpxml version=\"1.9\">"));
+        assert!(otio_out.exists());
+        let otio_str = std::fs::read_to_string(&otio_out).unwrap();
+        assert!(otio_str.contains("Timeline.1"));
     }
 }
 

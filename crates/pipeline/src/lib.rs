@@ -15,6 +15,7 @@ pub mod naming;
 pub mod overlay;
 pub mod pipeline;
 pub mod progress;
+pub mod project;
 pub mod scale;
 pub mod stitch;
 
@@ -26,5 +27,6 @@ pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output
 pub use overlay::{OverlayPosition, TimecodeOverlay, WatermarkOverlay};
 pub use pipeline::TranscodePipeline;
 pub use progress::JobProgress;
+pub use project::{MotionComp, MotionLayer, MotionProject, TimelineProject, TimelineSequence, TimelineTrack};
 pub use scale::FrameScaler;
 pub use stitch::{ClipStitcher, StitchOptions, stitch_audio_buffers};
