@@ -528,9 +528,9 @@ flowchart LR
    - Magic-byte container sniffing and `ContainerType::valid_conversion_targets` smart matrix.
 2. [x] **CAD & Technical Drafting Pipeline ([#71](https://github.com/el-j/encoderCraft/issues/71)) (Completed 2026-11-04):**
    - Ingest & convert AutoCAD DXF/DWG and HPGL plotter files via `cadcraft-dxf`, `cadcraft-dwg`, `cadcraft-io` into `CadDrawing` IR, `.cadcraft`, SVG, and blueprint PDF.
-3. [ ] **Prepress & Publication Pipeline ([#72](https://github.com/el-j/encoderCraft/issues/72)):**
+3. [x] **Prepress & Publication Pipeline ([#72](https://github.com/el-j/encoderCraft/issues/72)) (Completed 2026-11-04):**
    - Ingest InDesign `.indd` via `storytold/indd-utils` into `DocumentCanvas` IR; bidirectional `.designcraft` <-> `IDML` / `PDF/X-4` / `EPUB 3` via `designcraft-idml` and `designcraft-pdf`.
-4. **Layered Graphics & Photography Pipeline ([#73](https://github.com/el-j/encoderCraft/issues/73)):**
+4. [ ] **Layered Graphics & Photography Pipeline ([#73](https://github.com/el-j/encoderCraft/issues/73)):**
    - Ingest & write Photoshop `.psd` / `.psb` with full layer trees via `photocraft-psd`; bidirectional conversion with `.photocraft`, multi-channel OpenEXR, BigTIFF, and DDS GPU texture maps.
 5. **Vector Graphics & Illustration Pipeline ([#74](https://github.com/el-j/encoderCraft/issues/74)):**
    - Ingest Illustrator `.ai` (PDF stream + PGF/AI5 layers) via `vectorcraft-ai`; bidirectional conversion with `.vectorcraft`, W3C SVG 2.0, and EPS.

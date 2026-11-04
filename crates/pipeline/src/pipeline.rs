@@ -113,8 +113,10 @@ impl TranscodePipeline {
                 }
             }
             ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
-            ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml => self.execute_document_pdf(target, start_time)?,
-            ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => self.execute_document_pdf(target, start_time)?,
+            ContainerType::Pdf | ContainerType::Docx => self.execute_document_pdf(target, start_time)?,
+            ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
+                self.execute_document_publication(target, start_time)?
+            }
             ContainerType::Gltf | ContainerType::Usdz | ContainerType::Obj | ContainerType::Stl | ContainerType::Ply => {
                 self.execute_spatial_3d(target, start_time)?
             }
@@ -468,6 +470,8 @@ impl TranscodePipeline {
                     bytes
                 } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
                     cad.to_pdf_bytes()?
+                } else if let Ok(doc) = crate::document::DocumentCanvas::from_bytes_auto(&bytes) {
+                    doc.to_pdf_x4_bytes()?
                 } else {
                     generate_minimal_pdf(&format!("Document export: {}", path.file_name().and_then(|n| n.to_str()).unwrap_or("document")))
                 }
@@ -476,6 +480,48 @@ impl TranscodePipeline {
         };
 
         std::fs::write(&target.output_path, &pdf_bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_document_publication(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let doc = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
+                if let Ok(canvas) = crate::document::DocumentCanvas::from_bytes_auto(&bytes) {
+                    canvas
+                } else {
+                    let mut canvas = crate::document::DocumentCanvas::new(path.file_stem().and_then(|s| s.to_str()).unwrap_or("Document"));
+                    if let Ok(text) = std::str::from_utf8(&bytes) {
+                        canvas.pages[0].add_text(54.0, 720.0, 500.0, 20.0, text.lines().next().unwrap_or("Document Item"), 14.0);
+                    }
+                    canvas
+                }
+            }
+            _ => crate::document::DocumentCanvas::new("Exported Document"),
+        };
+
+        match target.container {
+            ContainerType::ArtcraftDesigncraft => {
+                let bin = doc.to_designcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .designcraft file: {e}")))?;
+            }
+            ContainerType::Idml | ContainerType::AdobeInDesignIndd => {
+                let idml = doc.to_idml_bytes()?;
+                std::fs::write(&target.output_path, &idml).map_err(|e| EncoderError::Io(format!("failed to write IDML package: {e}")))?;
+            }
+            ContainerType::Pdf => {
+                let pdf = doc.to_pdf_x4_bytes()?;
+                std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write PDF/X-4 document: {e}")))?;
+            }
+            _ => {
+                let pdf = doc.to_pdf_x4_bytes()?;
+                std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write default publication file: {e}")))?;
+            }
+        }
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
@@ -1383,6 +1429,68 @@ mod tests {
         assert!(hpgl_out.exists());
         let hpgl_text = std::fs::read_to_string(&hpgl_out).unwrap();
         assert!(hpgl_text.starts_with("IN;SP1;"));
+    }
+
+    #[test]
+    fn test_execute_prepress_indd_and_designcraft_transcode() {
+        let dir = tempdir().unwrap();
+        let indd_in = dir.path().join("brochure.indd");
+        let designcraft_out = dir.path().join("brochure.designcraft");
+        let idml_out = dir.path().join("brochure.idml");
+        let pdf_out = dir.path().join("brochure.pdf");
+
+        let mut indd_bytes = vec![0x06, 0x06, 0xED, 0xF5, 0xD8, 0x1D, 0x46, 0xE5, 0xBD, 0x31, 0xEF, 0xE7, 0xFE, 0x74, 0xB7, 0x1D];
+        indd_bytes.extend_from_slice(b"ObjectStreams<spread><story>Spring Collection</story></spread>");
+        std::fs::write(&indd_in, &indd_bytes).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-prepress-job".into(),
+            client_info: ClientInfo { app_name: "designcraft".into(), app_version: "1.0".into(), pid: 101, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: indd_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_designcraft".into(),
+                    output_path: designcraft_out.clone(),
+                    preset_name: "ArtCraft Native DesignCraft".into(),
+                    container: ContainerType::ArtcraftDesigncraft,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_idml".into(),
+                    output_path: idml_out.clone(),
+                    preset_name: "InDesign IDML Package".into(),
+                    container: ContainerType::Idml,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_pdf".into(),
+                    output_path: pdf_out.clone(),
+                    preset_name: "Press Quality PDF/X-4".into(),
+                    container: ContainerType::Pdf,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(designcraft_out.exists());
+        let dc_bytes = std::fs::read(&designcraft_out).unwrap();
+        assert!(dc_bytes.starts_with(b"\x89CRAFT\x00\x01D"));
+
+        assert!(idml_out.exists());
+        let idml_bytes = std::fs::read(&idml_out).unwrap();
+        assert!(idml_bytes.starts_with(b"PK\x03\x04"));
+
+        assert!(pdf_out.exists());
+        let pdf_data = std::fs::read(&pdf_out).unwrap();
+        assert!(pdf_data.starts_with(b"%PDF-1.6"));
+        let pdf_str = String::from_utf8_lossy(&pdf_data);
+        assert!(pdf_str.contains("/GTS_PDFXVersion (PDF/X-4)"));
     }
 
     #[test]

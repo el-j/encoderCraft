@@ -8,6 +8,7 @@
 
 pub mod captions;
 pub mod channel_buffer;
+pub mod document;
 pub(crate) mod input;
 pub mod lut;
 pub mod naming;
@@ -19,6 +20,7 @@ pub mod stitch;
 
 pub use captions::{CaptionBurner, CaptionTrack, NativeCaptionFormat};
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
+pub use document::{DocumentCanvas, DocumentItem, DocumentPage};
 pub use lut::Lut3D;
 pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output_path};
 pub use overlay::{OverlayPosition, TimecodeOverlay, WatermarkOverlay};
