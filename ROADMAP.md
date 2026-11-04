@@ -220,7 +220,7 @@ Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Mil
 - [x] **M30.2: CAD & Technical Drafting (#71)** – AutoCAD DXF/DWG and HPGL plotter ingest and conversion via `cadcraft` (DXF ASCII & binary, DWG headers, HPGL/PLT, `.cadcraft`, SVG and blueprint PDF).
 - [x] **M30.3: Prepress & Publication (#72)** – InDesign INDD/IDML and DesignCraft conversion via `designcraft` & `indd-utils` (ObjectStreams database unpacker, IDML package, `.designcraft`, EPUB 3, and PDF/X-4 with OutputIntents).
 - [x] **M30.4: Layered Graphics & Photography (#73)** – Photoshop PSD/PSB and PhotoCraft conversion via `photocraft` (layer trees, blend modes, masks, `.photocraft` container, PSB large documents, and multi-part OpenEXR).
-- [ ] **M30.5: Vector Graphics & Illustration (#74)** – Illustrator AI and VectorCraft conversion via `vectorcraft`.
+- [x] **M30.5: Vector Graphics & Illustration (#74)** – Illustrator AI and VectorCraft conversion via `vectorcraft` (clean-room dual-stream PDF/AI reader/writer, `VectorCanvas` IR, multi-artboards, `.vectorcraft` binary container, SVG 2.0, PostScript EPS, text-to-outlines, and AutoCAD DXF interop).
 - [ ] **M30.6: Motion Graphics & NLE Timeline (#75)** – After Effects AEP and Premiere PRPROJ conversion via `effectcraft` & `filmcraft`.
 - [ ] **M30.7: Audio DAW & Multitrack (#76)** – Audition SESX and SoundCraft conversion via `soundcraft`.
 - [ ] **M30.8: UI Inspector & Headless CLI (#77)** – Conversion target filtering and `convert` subcommand.
