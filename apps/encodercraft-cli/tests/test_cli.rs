@@ -156,3 +156,91 @@ fn test_cli_rejects_a_bad_frame_rate() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid frame rate"));
 }
+
+#[test]
+fn test_cli_convert_image_to_png_and_rejects_invalid_pairs() {
+    use encodercraft_source::MediaReader;
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src.bmp");
+    write_bmp(&src, 25);
+    let want = MediaReader::open(&src).expect("open source").frame_at_index(0).expect("decode source").data().to_vec();
+
+    let out = dir.path().join("out.png");
+    let run = Command::new(bin).arg("convert").arg(&src).args(["--to", "png", "-o"]).arg(&out).output().expect("run convert");
+    assert!(run.status.success(), "convert failed: {}", String::from_utf8_lossy(&run.stderr));
+    let got = MediaReader::open(&out).expect("open png").frame_at_index(0).expect("decode png").data().to_vec();
+    assert_eq!(got, want, "lossless PNG must keep the pixels");
+
+    // default output name follows the target extension
+    let default = Command::new(bin).current_dir(dir.path()).arg("convert").arg(&src).args(["--to", "tif"]).output().expect("run convert");
+    assert!(default.status.success(), "{}", String::from_utf8_lossy(&default.stderr));
+    assert!(dir.path().join("src_encoded.tif").exists());
+
+    // image -> audio is not a valid conversion and must not create output
+    let bad_out = dir.path().join("bad.wav");
+    let bad = Command::new(bin).arg("convert").arg(&src).args(["--to", "wav", "-o"]).arg(&bad_out).output().expect("run convert");
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("valid targets"));
+    assert!(!bad_out.exists());
+
+    // mismatched -o extension, unknown format and missing --to
+    let mismatch = Command::new(bin).arg("convert").arg(&src).args(["--to", "png", "-o"]).arg(dir.path().join("x.jpg")).output().expect("run");
+    assert!(!mismatch.status.success());
+    assert!(!Command::new(bin).arg("convert").arg(&src).args(["--to", "bogus"]).output().expect("run").status.success());
+    assert!(!Command::new(bin).arg("convert").arg(&src).output().expect("run").status.success());
+}
+
+#[test]
+fn test_cli_convert_session_to_soundcraft_and_flac() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wav = dir.path().join("tone.wav");
+    let samples: Vec<u8> = (0..48_000u32)
+        .flat_map(|i| {
+            let v = ((i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 12_000.0) as i16;
+            [v.to_le_bytes(), v.to_le_bytes()].concat()
+        })
+        .collect();
+    let mut w = Vec::new();
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + samples.len() as u32).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&48_000u32.to_le_bytes());
+    w.extend_from_slice(&(48_000u32 * 4).to_le_bytes());
+    w.extend_from_slice(&4u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+    w.extend_from_slice(&samples);
+    std::fs::write(&wav, w).expect("write wav");
+    let sesx = dir.path().join("mix.sesx");
+    std::fs::write(
+        &sesx,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<sesx version="1.0" audioRate="48000" bitDepth="24" sessionName="T">
+  <masterTrack volume="0.00" pan="0.00"/>
+  <tracks><audioTrack id="1" name="Tone" volume="0.00" pan="0.00" muted="false" solo="false"><trackClips>
+    <audioClip id="1" name="a" startPoint="0" endPoint="48000" sourceIn="0" gain="0.00"><filePath>tone.wav</filePath></audioClip>
+  </trackClips></audioTrack></tracks>
+</sesx>"#,
+    )
+    .expect("write sesx");
+
+    let sc = dir.path().join("mix.soundcraft");
+    let run = Command::new(bin).arg("convert").arg(&sesx).args(["--to", "soundcraft", "-o"]).arg(&sc).output().expect("run");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(std::fs::read(&sc).expect("read").starts_with(b"\x89CRAFT\x00\x01S"));
+
+    let flac = dir.path().join("mix.flac");
+    let run = Command::new(bin).arg("convert").arg(&sc).args(["--to", "flac", "-o"]).arg(&flac).output().expect("run");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(std::fs::read(&flac).expect("read").starts_with(b"fLaC"));
+
+    // sessions are audio documents: video targets are rejected
+    let bad = Command::new(bin).arg("convert").arg(&sesx).args(["--to", "mp4"]).current_dir(dir.path()).output().expect("run");
+    assert!(!bad.status.success());
+}

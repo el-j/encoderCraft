@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use egui::{ColorImage, RichText, TextureHandle, Ui, Window};
-use encodercraft_core::{CaptionExportFormat, CraftJobSpec, OutputTarget, Rational64, SourceDescriptor};
+use encodercraft_core::{CaptionExportFormat, ContainerType, CraftJobSpec, MediaStreamKind, OutputTarget, Rational64, SourceDescriptor};
 use encodercraft_source::MediaProbe;
 
 use crate::preview_decoder::{PreviewDecoder, PreviewEvent};
@@ -21,6 +21,47 @@ pub enum InspectorTab {
     Publish,
     Loudness,
     Metadata,
+}
+
+impl InspectorTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Video => "Video",
+            Self::Audio => "Audio",
+            Self::Effects => "Effects",
+            Self::Captions => "Captions",
+            Self::Publish => "Publish",
+            Self::Loudness => "Loudness",
+            Self::Metadata => "Metadata",
+        }
+    }
+}
+
+/// Tabs relevant to the selected output container; domains without video or audio hide those tabs.
+pub fn visible_tabs(target: ContainerType) -> Vec<InspectorTab> {
+    use InspectorTab::*;
+    match target.media_kind() {
+        MediaStreamKind::AudioOnly => vec![Audio, Loudness, Publish, Metadata],
+        MediaStreamKind::StillImage | MediaStreamKind::LayeredComposite => vec![Video, Effects, Publish, Metadata],
+        MediaStreamKind::Vector2D | MediaStreamKind::Document | MediaStreamKind::Spatial3D | MediaStreamKind::Cad2D => vec![Publish, Metadata],
+        _ => vec![Video, Audio, Effects, Captions, Publish, Loudness, Metadata],
+    }
+}
+
+/// Source container of a job, taken from the input file extension.
+pub fn source_container(spec: &CraftJobSpec) -> Option<ContainerType> {
+    match &spec.source {
+        SourceDescriptor::File { path, .. } => path.extension().and_then(|e| e.to_str()).and_then(ContainerType::from_extension),
+        _ => None,
+    }
+}
+
+/// Destination formats offered for a source: only valid conversions, or the common set when the source is unknown.
+pub fn destination_options(source: Option<ContainerType>) -> Vec<(ContainerType, &'static str, &'static str)> {
+    match source {
+        Some(src) => src.valid_conversion_targets().into_iter().map(|c| (c, c.display_name(), c.file_extension())).collect(),
+        None => INLINE_CONTAINERS.to_vec(),
+    }
 }
 
 /// Preview monitor tab mode within the Export Settings dialog.
@@ -287,6 +328,8 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, _spec: &Craft
 }
 
 fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut CraftJobSpec, tokens: &Tokens) {
+    let source = source_container(spec);
+    let destinations = destination_options(source);
     let targets = &mut spec.targets;
     let target = match targets.first_mut() {
         Some(t) => t,
@@ -297,17 +340,15 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
     ui.horizontal(|ui| {
         ui.label(RichText::new("Format:").strong());
         let current_c = target.container;
-        let combo_text = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_c).map(|(_, name, _)| *name).unwrap_or("Custom");
+        let combo_text = destinations.iter().find(|(c, _, _)| *c == current_c).map(|(_, name, _)| *name).unwrap_or("Custom");
         egui::ComboBox::from_id_salt("inspector_format_combo").selected_text(combo_text).width(140.0).show_ui(ui, |ui| {
-            for (c, name, _) in INLINE_CONTAINERS {
+            for (c, name, ext) in &destinations {
                 if ui.selectable_label(target.container == *c, *name).clicked() {
                     target.container = *c;
                     target.preset_name = default_preset_for_container(*c).to_string();
-                    if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(ct, _, _)| *ct == *c) {
-                        let mut p = target.output_path.clone();
-                        p.set_extension(ext);
-                        target.output_path = p;
-                    }
+                    let mut p = target.output_path.clone();
+                    p.set_extension(ext);
+                    target.output_path = p;
                 }
             }
         });
@@ -358,14 +399,16 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
     ui.separator();
 
     // Tabs
+    let tabs = visible_tabs(target.container);
+    if !tabs.contains(&state.active_tab)
+        && let Some(first) = tabs.first()
+    {
+        state.active_tab = *first;
+    }
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut state.active_tab, InspectorTab::Video, "Video");
-        ui.selectable_value(&mut state.active_tab, InspectorTab::Audio, "Audio");
-        ui.selectable_value(&mut state.active_tab, InspectorTab::Effects, "Effects");
-        ui.selectable_value(&mut state.active_tab, InspectorTab::Captions, "Captions");
-        ui.selectable_value(&mut state.active_tab, InspectorTab::Publish, "Publish");
-        ui.selectable_value(&mut state.active_tab, InspectorTab::Loudness, "Loudness");
-        ui.selectable_value(&mut state.active_tab, InspectorTab::Metadata, "Metadata");
+        for tab in &tabs {
+            ui.selectable_value(&mut state.active_tab, *tab, tab.label());
+        }
     });
 
     ui.separator();
@@ -726,6 +769,42 @@ fn render_metadata_tab(ui: &mut Ui, client_info: &mut encodercraft_core::ClientI
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_visible_tabs_follow_target_domain() {
+        assert!(!visible_tabs(ContainerType::Wave).contains(&InspectorTab::Video));
+        assert!(visible_tabs(ContainerType::Flac).contains(&InspectorTab::Loudness));
+        assert!(visible_tabs(ContainerType::IsoBmffMp4).contains(&InspectorTab::Captions));
+        let doc = visible_tabs(ContainerType::Pdf);
+        assert!(!doc.contains(&InspectorTab::Video) && !doc.contains(&InspectorTab::Audio));
+        assert!(visible_tabs(ContainerType::Png).contains(&InspectorTab::Video));
+        assert!(!visible_tabs(ContainerType::Png).contains(&InspectorTab::Audio));
+    }
+
+    #[test]
+    fn test_destination_filtering_by_source() {
+        let indd: Vec<_> = destination_options(Some(ContainerType::AdobeInDesignIndd)).into_iter().map(|d| d.0).collect();
+        assert!(indd.contains(&ContainerType::Pdf) && indd.contains(&ContainerType::Idml) && indd.contains(&ContainerType::ArtcraftDesigncraft));
+        assert!(indd.contains(&ContainerType::Tiff));
+        assert!(!indd.iter().any(|c| matches!(c.media_kind(), MediaStreamKind::VideoWithAudio | MediaStreamKind::AudioOnly)));
+        let dwg: Vec<_> = destination_options(Some(ContainerType::AutocadDwg)).into_iter().map(|d| d.0).collect();
+        assert!(dwg.contains(&ContainerType::AutocadDxf) && !dwg.contains(&ContainerType::IsoBmffMp4));
+        assert_eq!(destination_options(None).len(), INLINE_CONTAINERS.len());
+    }
+
+    #[test]
+    fn test_source_container_from_job() {
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "j".into(),
+            client_info: encodercraft_core::ClientInfo { app_name: "t".into(), app_version: "0".into(), pid: 0, user_notes: None },
+            priority: encodercraft_core::JobPriority::Normal,
+            start_policy: encodercraft_core::StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: PathBuf::from("/x/design.INDD"), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![],
+        };
+        assert_eq!(source_container(&spec), Some(ContainerType::AdobeInDesignIndd));
+    }
 
     #[test]
     fn test_format_timecode() {

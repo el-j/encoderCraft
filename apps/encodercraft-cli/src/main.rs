@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match args.get(1).map(String::as_str) {
         Some("encode") => cmd_encode(&args[2..])?,
+        Some("convert") => cmd_convert(&args[2..])?,
         Some("probe") => cmd_probe(&args[2..])?,
         Some("presets") => cmd_presets()?,
         Some("queue") => cmd_queue(&args[2..])?,
@@ -59,6 +60,9 @@ fn print_usage() {
     println!("      --caption <file>                    Subtitle/caption file to embed or burn");
     println!("      --fps <rate>                        Frame rate for image sequences (e.g. 25, 29.97, 30000/1001); input like shot_%04d.png");
     println!("      --burn-captions                     Burn captions directly into video frames");
+    println!(
+        "  convert <input> --to <format> [-o <file>] Convert to a target format (extension or name, e.g. pdf, flac, soundcraft); invalid pairs are rejected"
+    );
     println!("  probe <input>                           Inspect containers, codecs, and stream metadata");
     println!("  presets                                 List all factory presets");
     println!("  queue [list|start|pause|clear|cancel <id>|log] Interact with running daemon queue");
@@ -97,6 +101,8 @@ fn gcd(a: i64, b: i64) -> i64 {
 fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut inputs: Vec<PathBuf> = Vec::new();
     let mut preset_name = "Match Source - High Bitrate".to_string();
+    let mut preset_explicit = false;
+    let mut to: Option<encodercraft_core::ContainerType> = None;
     let mut output = None;
     let mut export_stems = false;
     let mut hardware_accel = false;
@@ -114,6 +120,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 "-p" | "--preset" => {
                     if let Some(val) = args.get(i + 1) {
                         preset_name = val.clone();
+                        preset_explicit = true;
                         i += 1;
                     }
                 }
@@ -122,6 +129,16 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                         output = Some(PathBuf::from(val));
                         i += 1;
                     }
+                }
+                "--to" => {
+                    let val = args
+                        .get(i + 1)
+                        .ok_or_else(|| EncoderError::InvalidJobSpec("--to needs a target format such as pdf, flac or soundcraft".into()))?;
+                    to = Some(
+                        encodercraft_core::ContainerType::from_extension(val)
+                            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown target format '{val}'")))?,
+                    );
+                    i += 1;
                 }
                 "--fps" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--fps needs a value such as 25 or 30000/1001".into()))?;
@@ -172,7 +189,36 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     }
 
     let registry = PresetRegistry::default();
+    if let Some(container) = to
+        && !preset_explicit
+        && let Some(p) = registry.list().iter().find(|p| p.container == container)
+    {
+        preset_name = p.name.clone();
+    }
     let preset = registry.find_by_name(&preset_name).ok_or_else(|| EncoderError::InvalidJobSpec(format!("preset '{preset_name}' not found")))?;
+
+    if let Some(target) = to {
+        if let Some(out) = output.as_ref().filter(|o| total_is_single(&inputs) && !o.is_dir())
+            && let Some(ext) = out.extension().and_then(|e| e.to_str())
+            && encodercraft_core::ContainerType::from_extension(ext).is_some_and(|c| c != target)
+        {
+            return Err(EncoderError::InvalidJobSpec(format!("output extension '.{ext}' does not match --to {}", target.file_extension())));
+        }
+        for input in &inputs {
+            let source = input.extension().and_then(|e| e.to_str()).and_then(encodercraft_core::ContainerType::from_extension);
+            if let Some(source) = source
+                && !source.can_convert_to(target)
+            {
+                let valid: Vec<&str> = source.valid_conversion_targets().iter().map(|c| c.file_extension()).collect();
+                return Err(EncoderError::InvalidJobSpec(format!(
+                    "cannot convert {} to {}; valid targets: {}",
+                    input.display(),
+                    target.file_extension(),
+                    valid.join(", ")
+                )));
+            }
+        }
+    }
 
     let total = inputs.len();
     if total > 1 {
@@ -183,7 +229,11 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut submitted: Vec<(String, PathBuf)> = Vec::new();
 
     for (idx, input_path) in inputs.iter().enumerate() {
-        let default_ext = if is_session_path(input_path) { "wav" } else { "mp4" };
+        let default_ext = match to {
+            Some(c) => c.file_extension(),
+            None if is_session_path(input_path) => "wav",
+            None => "mp4",
+        };
         let output_path = if total == 1
             && let Some(ref out) = output
         {
@@ -206,7 +256,9 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
 
         let media_info = encodercraft_source::probe_media_info(input_path)?;
         let mut target = evaluate_preset(preset, &media_info, output_path.clone())?;
-        if let Some(container) = session_output_container(input_path, &output_path) {
+        if let Some(container) = to {
+            target.container = container;
+        } else if let Some(container) = session_output_container(input_path, &output_path) {
             target.container = container;
         }
 
@@ -252,6 +304,18 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     wait_for_jobs(&queue, &submitted)
 }
 
+fn total_is_single(inputs: &[PathBuf]) -> bool {
+    inputs.len() == 1
+}
+
+/// `convert <input> --to <format>`: validates the source/target pair, then runs the regular encode path.
+fn cmd_convert(args: &[String]) -> Result<(), EncoderError> {
+    if !args.iter().any(|a| a == "--to") {
+        return Err(EncoderError::InvalidJobSpec("convert requires --to <format> (e.g. --to pdf)".into()));
+    }
+    cmd_encode(args)
+}
+
 fn is_session_path(path: &std::path::Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("sesx") || e.eq_ignore_ascii_case("soundcraft"))
 }
@@ -268,7 +332,7 @@ fn session_output_container(input: &std::path::Path, output: &std::path::Path) -
     }
     [ContainerType::Wave, ContainerType::Flac, ContainerType::Aiff, ContainerType::AdobeAuditionSesx, ContainerType::ArtcraftSoundcraft]
         .into_iter()
-        .find(|c| c.file_extension().trim_start_matches('.') == ext)
+        .find(|c| c.file_extension() == ext)
         .or(Some(ContainerType::Wave))
 }
 

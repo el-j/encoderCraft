@@ -223,7 +223,7 @@ Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Mil
 - [x] **M30.5: Vector Graphics & Illustration (#74)** – Illustrator AI and VectorCraft conversion via `vectorcraft` (clean-room dual-stream PDF/AI reader/writer, `VectorCanvas` IR, multi-artboards, `.vectorcraft` binary container, SVG 2.0, PostScript EPS, text-to-outlines, and AutoCAD DXF interop).
 - [x] **M30.6: Motion Graphics & NLE Timeline (#75)** – After Effects AEP and Premiere PRPROJ conversion via `effectcraft` & `filmcraft` (RIFX parser, bounded decompression bomb defense, `.effectcraft` container, W3C Lottie JSON, `.filmcraft` container, Final Cut Pro XML, and OpenTimelineIO).
 - [x] **M30.7: Audio DAW & Multitrack (#76)** – Audition SESX and SoundCraft conversion: clean-room `.sesx`/`.soundcraft` parsers, `DawSession` IR, BWF master with iXML, stems and R128 loudness; hardened against hostile input; real clip decode, resample, gain/pan/declick mixing via `soundcraft-dsp`, WAV/FLAC/AIFF/`.sesx`/`.soundcraft` outputs, CLI `encode mix.sesx -o out.wav --stems`.
-- [ ] **M30.8: UI Inspector & Headless CLI (#77)** – Conversion target filtering and `convert` subcommand.
+- [~] **M30.8: UI Inspector & Headless CLI (#77)** – Done: `encodercraft convert <input> --to <format> -o <out>` with source/target validation, inspector destination filtering by source container, and domain-aware inspector tabs. Remaining: multi-sequence/composition picker and domain-specific (Document/CAD/Layers) tabs.
 
 ## Known Issues (alpha.1, tracked above)
 
