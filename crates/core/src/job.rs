@@ -223,6 +223,7 @@ pub enum ContainerType {
     OpenExr,
     Bmp,
     Svg,
+    PostScriptEps,
     Gltf,
     Usdz,
     Obj,
@@ -277,6 +278,7 @@ impl ContainerType {
             Self::OpenExr => "exr",
             Self::Bmp => "bmp",
             Self::Svg => "svg",
+            Self::PostScriptEps => "eps",
             Self::Gltf => "glb",
             Self::Usdz => "usdz",
             Self::Obj => "obj",
@@ -329,6 +331,7 @@ impl ContainerType {
             Self::OpenExr => "ILM OpenEXR (Float)",
             Self::Bmp => "Windows Bitmap (BMP)",
             Self::Svg => "Scalable Vector Graphics (SVG)",
+            Self::PostScriptEps => "Encapsulated PostScript (EPS)",
             Self::Gltf => "glTF 2.0 Binary (GLB)",
             Self::Usdz => "Apple AR Quick Look (USDZ)",
             Self::Obj => "Wavefront 3D (OBJ)",
@@ -369,7 +372,7 @@ impl ContainerType {
             }
             Self::Png | Self::Jpeg | Self::WebP | Self::Tiff | Self::OpenExr | Self::Bmp => MediaStreamKind::StillImage,
             Self::StillSequence | Self::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
-            Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft => MediaStreamKind::Vector2D,
+            Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps => MediaStreamKind::Vector2D,
             Self::Pdf | Self::Docx | Self::Idml | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => MediaStreamKind::Document,
             Self::Gltf | Self::Usdz | Self::Obj | Self::Stl | Self::Ply => MediaStreamKind::Spatial3D,
             Self::AutocadDxf | Self::AutocadDwg | Self::HpglPlotter | Self::ArtcraftCadcraft => MediaStreamKind::Cad2D,
@@ -411,7 +414,9 @@ impl ContainerType {
                 Self::WebP,
                 Self::Bmp,
             ],
-            MediaStreamKind::Vector2D => vec![Self::ArtcraftVectorcraft, Self::Svg, Self::Pdf, Self::AutocadDxf, Self::Png, Self::AdobeIllustratorAi],
+            MediaStreamKind::Vector2D => {
+                vec![Self::ArtcraftVectorcraft, Self::Svg, Self::Pdf, Self::PostScriptEps, Self::AutocadDxf, Self::Png, Self::AdobeIllustratorAi]
+            }
             MediaStreamKind::Document => vec![Self::ArtcraftDesigncraft, Self::Pdf, Self::Idml, Self::Docx, Self::Png, Self::Tiff],
             MediaStreamKind::Spatial3D => vec![Self::Gltf, Self::Usdz, Self::Obj, Self::Stl, Self::Ply],
             MediaStreamKind::Cad2D => {
@@ -618,6 +623,7 @@ mod tests {
         assert_eq!(ContainerType::ArtcraftSoundcraft.file_extension(), "soundcraft");
         assert_eq!(ContainerType::ArtcraftCadcraft.file_extension(), "cadcraft");
         assert_eq!(ContainerType::ArtcraftAnicraft.file_extension(), "anicraft");
+        assert_eq!(ContainerType::PostScriptEps.file_extension(), "eps");
 
         // Media kind mapping
         assert_eq!(ContainerType::AdobeInDesignIndd.media_kind(), MediaStreamKind::Document);
@@ -626,10 +632,17 @@ mod tests {
         assert_eq!(ContainerType::AdobeAfterEffectsAep.media_kind(), MediaStreamKind::MotionGraph);
         assert_eq!(ContainerType::AdobePremierePrproj.media_kind(), MediaStreamKind::ProjectTimeline);
         assert_eq!(ContainerType::AdobeAuditionSesx.media_kind(), MediaStreamKind::AudioOnly);
+        assert_eq!(ContainerType::PostScriptEps.media_kind(), MediaStreamKind::Vector2D);
     }
 
     #[test]
     fn test_container_type_valid_conversion_targets() {
+        let vector_targets = ContainerType::AdobeIllustratorAi.valid_conversion_targets();
+        assert!(vector_targets.contains(&ContainerType::ArtcraftVectorcraft));
+        assert!(vector_targets.contains(&ContainerType::Svg));
+        assert!(vector_targets.contains(&ContainerType::PostScriptEps));
+        assert!(vector_targets.contains(&ContainerType::Pdf));
+        assert!(vector_targets.contains(&ContainerType::AutocadDxf));
         let cad_targets = ContainerType::AutocadDxf.valid_conversion_targets();
         assert!(cad_targets.contains(&ContainerType::ArtcraftCadcraft));
         assert!(cad_targets.contains(&ContainerType::Svg));

@@ -532,8 +532,8 @@ flowchart LR
    - Ingest InDesign `.indd` via `storytold/indd-utils` into `DocumentCanvas` IR; bidirectional `.designcraft` <-> `IDML` / `PDF/X-4` / `EPUB 3` via `designcraft-idml` and `designcraft-pdf`.
 4. [x] **Layered Graphics & Photography Pipeline ([#73](https://github.com/el-j/encoderCraft/issues/73)) (Completed 2026-11-04):**
    - Ingest & write Photoshop `.psd` / `.psb` with full layer trees via `photocraft-psd`; bidirectional conversion with `.photocraft`, multi-channel OpenEXR, BigTIFF, and DDS GPU texture maps.
-5. [ ] **Vector Graphics & Illustration Pipeline ([#74](https://github.com/el-j/encoderCraft/issues/74)):**
-   - Ingest Illustrator `.ai` (PDF stream + PGF/AI5 layers) via `vectorcraft-ai`; bidirectional conversion with `.vectorcraft`, W3C SVG 2.0, and EPS.
+5. [x] **Vector Graphics & Illustration Pipeline ([#74](https://github.com/el-j/encoderCraft/issues/74)) (Completed 2026-11-04):**
+   - Ingest Illustrator `.ai` (PDF stream + PGF/AI5 layers) via clean-room parser; bidirectional conversion with `.vectorcraft` native binary container (`\x89CRAFT\x00\x01V`), W3C SVG 2.0, PostScript EPS, print PDF, text-to-outlines conversion, and AutoCAD DXF interop.
 6. **Motion Graphics & NLE Timeline Pipeline ([#75](https://github.com/el-j/encoderCraft/issues/75)):**
    - Ingest After Effects `.aep` RIFX chunk trees via `effectcraft-aep` (render to ProRes/H.264 or convert to `.effectcraft` / Lottie JSON).
    - Ingest Premiere Pro `.prproj` gzipped XML via `filmcraft-prproj` (batch render sequences or convert to `.filmcraft` / FCPXML / OTIO).

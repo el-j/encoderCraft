@@ -112,7 +112,9 @@ impl TranscodePipeline {
                     self.execute_animated_gif(target, start_time)?
                 }
             }
-            ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
+            ContainerType::Svg | ContainerType::PostScriptEps | ContainerType::AdobeIllustratorAi | ContainerType::ArtcraftVectorcraft => {
+                self.execute_vector_transcode(target, start_time)?
+            }
             ContainerType::Pdf | ContainerType::Docx => self.execute_document_pdf(target, start_time)?,
             ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
                 self.execute_document_publication(target, start_time)?
@@ -130,7 +132,6 @@ impl TranscodePipeline {
             ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => {
                 self.execute_layered_image(target, start_time)?
             }
-            ContainerType::AdobeIllustratorAi | ContainerType::ArtcraftVectorcraft => self.execute_vector_svg(target, start_time)?,
             ContainerType::AutocadDxf | ContainerType::AutocadDwg | ContainerType::HpglPlotter | ContainerType::ArtcraftCadcraft => {
                 self.execute_cad_transcode(target, start_time)?
             }
@@ -223,34 +224,158 @@ impl TranscodePipeline {
         Ok(())
     }
 
-    fn execute_vector_svg(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let content = match &self.spec.source {
+    fn execute_vector_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        // Direct SVG passthrough and CAD-to-SVG specialization
+        if target.container == ContainerType::Svg
+            && let SourceDescriptor::File { path, .. } = &self.spec.source
+            && let Ok(bytes) = std::fs::read(path)
+        {
+            if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                let svg = cad.to_svg();
+                std::fs::write(&target.output_path, svg.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+                self.progress.advance_frame(start_time);
+                self.progress.set_total_frames(1);
+                return Ok(());
+            } else if let Ok(text) = std::str::from_utf8(&bytes)
+                && text.contains("<svg")
+            {
+                std::fs::write(&target.output_path, text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+                self.progress.advance_frame(start_time);
+                self.progress.set_total_frames(1);
+                return Ok(());
+            }
+        }
+
+        let mut canvas = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
-                let bytes = std::fs::read(path)
-                    .map_err(|e| EncoderError::Io(format!("failed to read source vector file `{}`: {e}", path.display())))?;
-                if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
-                    cad.to_svg()
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source vector file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"\x89CRAFT\x00\x01V") {
+                    encodercraft_image_codecs::VectorCanvas::from_vectorcraft(&bytes)
+                        .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse .vectorcraft: {e}")))?
+                } else if bytes.starts_with(b"%PDF-") || bytes.starts_with(b"%AI") || bytes.windows(26).any(|w| w == b"Creator: Adobe Illustrator") {
+                    encodercraft_image_codecs::VectorCanvas::from_ai_or_pdf(&bytes)
+                        .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse Illustrator AI / PDF: {e}")))?
+                } else if bytes.starts_with(b"%!PS") {
+                    let text = String::from_utf8_lossy(&bytes);
+                    encodercraft_image_codecs::VectorCanvas::from_eps(&text)
+                        .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse EPS: {e}")))?
+                } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                    let (min_x, min_y, max_x, max_y) = cad.bounding_box();
+                    let w = if (max_x - min_x).is_finite() && (max_x - min_x) > 0.0 { max_x - min_x } else { 800.0 };
+                    let h = if (max_y - min_y).is_finite() && (max_y - min_y) > 0.0 { max_y - min_y } else { 600.0 };
+                    let mut c = encodercraft_image_codecs::VectorCanvas::new(w, h);
+                    for ent in &cad.entities {
+                        match ent {
+                            encodercraft_spatial_io::CadEntity::Line { start, end, .. } => {
+                                let mut path = encodercraft_image_codecs::VectorPath::new()
+                                    .with_stroke(encodercraft_image_codecs::VectorStroke::new(encodercraft_image_codecs::VectorColor::BLACK, 1.0));
+                                path.move_to(start.x, start.y);
+                                path.line_to(end.x, end.y);
+                                c.add_path(path);
+                            }
+                            encodercraft_spatial_io::CadEntity::Polyline { points, closed, .. } => {
+                                let mut path = encodercraft_image_codecs::VectorPath::new()
+                                    .with_stroke(encodercraft_image_codecs::VectorStroke::new(encodercraft_image_codecs::VectorColor::BLACK, 1.0));
+                                for (i, pt) in points.iter().enumerate() {
+                                    if i == 0 {
+                                        path.move_to(pt.x, pt.y);
+                                    } else {
+                                        path.line_to(pt.x, pt.y);
+                                    }
+                                }
+                                if *closed {
+                                    path.close();
+                                }
+                                c.add_path(path);
+                            }
+                            _ => {}
+                        }
+                    }
+                    c
                 } else if let Ok(text) = std::str::from_utf8(&bytes) {
                     if text.contains("<svg") {
-                        text.to_string()
+                        encodercraft_image_codecs::VectorCanvas::from_svg(text)
+                            .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse SVG: {e}")))?
                     } else {
-                        format!(
-                            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><!-- Converted from {} --><text x="50" y="100" font-family="sans-serif" font-size="24">{}</text></svg>"#,
-                            path.file_name().and_then(|n| n.to_str()).unwrap_or("vector"),
-                            quick_xml_escape(&path.display().to_string())
-                        )
+                        let mut c = encodercraft_image_codecs::VectorCanvas::new(1920.0, 1080.0);
+                        c.add_text(encodercraft_image_codecs::VectorText {
+                            text: path.file_name().and_then(|n| n.to_str()).unwrap_or("vector").to_string(),
+                            x: 50.0,
+                            y: 100.0,
+                            font_family: "sans-serif".to_string(),
+                            font_size: 24.0,
+                            fill: Some(encodercraft_image_codecs::VectorColor::BLACK),
+                            stroke: None,
+                        });
+                        c
                     }
                 } else {
-                    format!(
-                        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><!-- Converted from binary {} --></svg>"#,
-                        path.file_name().and_then(|n| n.to_str()).unwrap_or("vector")
-                    )
+                    encodercraft_image_codecs::VectorCanvas::new(1920.0, 1080.0)
                 }
             }
-            _ => r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><rect width="100%" height="100%" fill="#1a1a1a"/></svg>"##.to_string(),
+            _ => encodercraft_image_codecs::VectorCanvas::new(1920.0, 1080.0),
         };
 
-        std::fs::write(&target.output_path, content.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+        // Text preservation and outlines
+        canvas.text_to_outlines();
+
+        match target.container {
+            ContainerType::ArtcraftVectorcraft => {
+                let bytes = canvas.to_vectorcraft().map_err(|e| EncoderError::Io(format!("failed to serialize .vectorcraft: {e}")))?;
+                std::fs::write(&target.output_path, &bytes).map_err(|e| EncoderError::Io(format!("failed to write .vectorcraft file: {e}")))?;
+            }
+            ContainerType::AdobeIllustratorAi | ContainerType::Pdf => {
+                let ai_pdf = canvas.to_ai().map_err(|e| EncoderError::Io(format!("failed to serialize Illustrator AI/PDF: {e}")))?;
+                std::fs::write(&target.output_path, &ai_pdf).map_err(|e| EncoderError::Io(format!("failed to write Illustrator AI file: {e}")))?;
+            }
+            ContainerType::PostScriptEps => {
+                let eps = canvas.to_eps();
+                std::fs::write(&target.output_path, eps.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write EPS file: {e}")))?;
+            }
+            ContainerType::AutocadDxf => {
+                let mut cad = encodercraft_spatial_io::CadDrawing::new("VectorCraft Export");
+                for path in &canvas.paths {
+                    let mut cur_x = 0.0;
+                    let mut cur_y = 0.0;
+                    for cmd in &path.commands {
+                        match *cmd {
+                            encodercraft_image_codecs::PathCommand::MoveTo(x, y) => {
+                                cur_x = x;
+                                cur_y = y;
+                            }
+                            encodercraft_image_codecs::PathCommand::LineTo(x, y) => {
+                                cad.add_line(
+                                    encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                    encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                    "0",
+                                );
+                                cur_x = x;
+                                cur_y = y;
+                            }
+                            encodercraft_image_codecs::PathCommand::CubicTo(_, _, _, _, x, y)
+                            | encodercraft_image_codecs::PathCommand::QuadTo(_, _, x, y) => {
+                                cad.add_line(
+                                    encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                    encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                    "0",
+                                );
+                                cur_x = x;
+                                cur_y = y;
+                            }
+                            encodercraft_image_codecs::PathCommand::Close => {}
+                        }
+                    }
+                }
+                let dxf_str = cad.to_dxf_ascii();
+                std::fs::write(&target.output_path, dxf_str.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write DXF file: {e}")))?;
+            }
+            _ => {
+                // Default to standard SVG
+                let svg = canvas.to_svg();
+                std::fs::write(&target.output_path, svg.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+            }
+        }
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
@@ -261,7 +386,49 @@ impl TranscodePipeline {
         let drawing = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source CAD file `{}`: {e}", path.display())))?;
-                encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes)?
+                if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                    cad
+                } else if let Ok(canvas) = encodercraft_image_codecs::VectorCanvas::from_svg(&String::from_utf8_lossy(&bytes))
+                    .or_else(|_| encodercraft_image_codecs::VectorCanvas::from_vectorcraft(&bytes))
+                    .or_else(|_| encodercraft_image_codecs::VectorCanvas::from_ai_or_pdf(&bytes))
+                {
+                    let mut cad = encodercraft_spatial_io::CadDrawing::new("VectorCraft CAD Export");
+                    for path in &canvas.paths {
+                        let mut cur_x = 0.0;
+                        let mut cur_y = 0.0;
+                        for cmd in &path.commands {
+                            match *cmd {
+                                encodercraft_image_codecs::PathCommand::MoveTo(x, y) => {
+                                    cur_x = x;
+                                    cur_y = y;
+                                }
+                                encodercraft_image_codecs::PathCommand::LineTo(x, y) => {
+                                    cad.add_line(
+                                        encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                        encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                        "0",
+                                    );
+                                    cur_x = x;
+                                    cur_y = y;
+                                }
+                                encodercraft_image_codecs::PathCommand::CubicTo(_, _, _, _, x, y)
+                                | encodercraft_image_codecs::PathCommand::QuadTo(_, _, x, y) => {
+                                    cad.add_line(
+                                        encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                        encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                        "0",
+                                    );
+                                    cur_x = x;
+                                    cur_y = y;
+                                }
+                                encodercraft_image_codecs::PathCommand::Close => {}
+                            }
+                        }
+                    }
+                    cad
+                } else {
+                    encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes)?
+                }
             }
             _ => {
                 let mut cad = encodercraft_spatial_io::CadDrawing::new("Default Drawing");
@@ -1005,10 +1172,6 @@ impl TranscodePipeline {
 
         Ok(())
     }
-}
-
-fn quick_xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
 fn generate_minimal_pdf(title: &str) -> Vec<u8> {
@@ -1912,6 +2075,73 @@ mod tests {
         let mp4_info = encodercraft_demux::probe_file(&delivery_mp4).unwrap();
         assert_eq!(mp4_info.video_streams.len(), 1);
         assert_eq!(mp4_info.audio_streams.len(), 0, "a still source has no audio, so no audio track is written");
+    }
+
+    #[test]
+    fn test_vector_transcoding_pipeline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_svg = tmp.path().join("input.svg");
+        let out_vc = tmp.path().join("output.vectorcraft");
+        let out_ai = tmp.path().join("output.ai");
+        let out_eps = tmp.path().join("output.eps");
+        let out_dxf = tmp.path().join("output.dxf");
+
+        std::fs::write(
+            &src_svg,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
+  <path d="M 0.00 0.00 L 100.00 0.00 L 100.00 100.00 Z" fill="#ff0000" stroke="#000000" stroke-width="2" />
+</svg>"##,
+        )
+        .unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-vector-test".into(),
+            client_info: ClientInfo { app_name: "encoderCraft".into(), app_version: "1.0".into(), pid: 100, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: src_svg, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_vc".into(),
+                    container: ContainerType::ArtcraftVectorcraft,
+                    output_path: out_vc.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_ai".into(),
+                    container: ContainerType::AdobeIllustratorAi,
+                    output_path: out_ai.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_eps".into(),
+                    container: ContainerType::PostScriptEps,
+                    output_path: out_eps.clone(),
+                    ..Default::default()
+                },
+                OutputTarget { target_id: "t_dxf".into(), container: ContainerType::AutocadDxf, output_path: out_dxf.clone(), ..Default::default() },
+            ],
+        };
+
+        TranscodePipeline::new(spec).execute().unwrap();
+
+        assert!(out_vc.exists());
+        let vc_bytes = std::fs::read(&out_vc).unwrap();
+        assert!(vc_bytes.starts_with(b"\x89CRAFT\x00\x01V"));
+
+        assert!(out_ai.exists());
+        let ai_bytes = std::fs::read(&out_ai).unwrap();
+        assert!(ai_bytes.starts_with(b"%PDF-1.5"));
+        assert!(String::from_utf8_lossy(&ai_bytes).contains("Adobe Illustrator"));
+
+        assert!(out_eps.exists());
+        let eps_str = std::fs::read_to_string(&out_eps).unwrap();
+        assert!(eps_str.starts_with("%!PS-Adobe-3.0 EPSF-3.0"));
+
+        assert!(out_dxf.exists());
+        let dxf_str = std::fs::read_to_string(&out_dxf).unwrap();
+        assert!(dxf_str.contains("ENTITIES"));
     }
 }
 

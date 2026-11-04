@@ -190,6 +190,7 @@ pub fn default_preset_for_container(c: ContainerType) -> &'static str {
             "Print-Ready PDF/X-4"
         }
         ContainerType::Svg
+        | ContainerType::PostScriptEps
         | ContainerType::AdobeIllustratorAi
         | ContainerType::ArtcraftVectorcraft
         | ContainerType::AutocadDxf
@@ -248,6 +249,7 @@ pub fn presets_for_container(c: ContainerType) -> Vec<&'static str> {
             vec!["Print-Ready PDF/X-4"]
         }
         ContainerType::Svg
+        | ContainerType::PostScriptEps
         | ContainerType::AdobeIllustratorAi
         | ContainerType::ArtcraftVectorcraft
         | ContainerType::AutocadDxf

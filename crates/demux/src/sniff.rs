@@ -170,7 +170,7 @@ impl ContainerKind {
             Self::Psd => Some(ContainerType::AdobePhotoshopPsd),
             Self::Psb => Some(ContainerType::AdobePhotoshopPsb),
             Self::Bmp => Some(ContainerType::Bmp),
-            Self::Eps => Some(ContainerType::Svg),
+            Self::Eps => Some(ContainerType::PostScriptEps),
             Self::AdobeAfterEffectsAep => Some(ContainerType::AdobeAfterEffectsAep),
             Self::AdobePremierePrproj => Some(ContainerType::AdobePremierePrproj),
             Self::AdobeAuditionSesx => Some(ContainerType::AdobeAuditionSesx),
