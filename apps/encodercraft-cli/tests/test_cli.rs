@@ -156,3 +156,158 @@ fn test_cli_rejects_a_bad_frame_rate() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid frame rate"));
 }
+
+#[test]
+fn test_cli_convert_image_to_png_and_rejects_invalid_pairs() {
+    use encodercraft_source::MediaReader;
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src.bmp");
+    write_bmp(&src, 25);
+    let want = MediaReader::open(&src).expect("open source").frame_at_index(0).expect("decode source").data().to_vec();
+
+    let out = dir.path().join("out.png");
+    let run = Command::new(bin).arg("convert").arg(&src).args(["--to", "png", "-o"]).arg(&out).output().expect("run convert");
+    assert!(run.status.success(), "convert failed: {}", String::from_utf8_lossy(&run.stderr));
+    let got = MediaReader::open(&out).expect("open png").frame_at_index(0).expect("decode png").data().to_vec();
+    assert_eq!(got, want, "lossless PNG must keep the pixels");
+
+    // default output name follows the target extension
+    let default = Command::new(bin).current_dir(dir.path()).arg("convert").arg(&src).args(["--to", "tif"]).output().expect("run convert");
+    assert!(default.status.success(), "{}", String::from_utf8_lossy(&default.stderr));
+    assert!(dir.path().join("src_encoded.tif").exists());
+
+    // image -> audio is not a valid conversion and must not create output
+    let bad_out = dir.path().join("bad.wav");
+    let bad = Command::new(bin).arg("convert").arg(&src).args(["--to", "wav", "-o"]).arg(&bad_out).output().expect("run convert");
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("valid targets"));
+    assert!(!bad_out.exists());
+
+    // mismatched -o extension, unknown format and missing --to
+    let mismatch = Command::new(bin).arg("convert").arg(&src).args(["--to", "png", "-o"]).arg(dir.path().join("x.jpg")).output().expect("run");
+    assert!(!mismatch.status.success());
+    assert!(!Command::new(bin).arg("convert").arg(&src).args(["--to", "bogus"]).output().expect("run").status.success());
+    assert!(!Command::new(bin).arg("convert").arg(&src).output().expect("run").status.success());
+}
+
+#[test]
+fn test_cli_convert_session_to_soundcraft_and_flac() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wav = dir.path().join("tone.wav");
+    let samples: Vec<u8> = (0..48_000u32)
+        .flat_map(|i| {
+            let v = ((i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 12_000.0) as i16;
+            [v.to_le_bytes(), v.to_le_bytes()].concat()
+        })
+        .collect();
+    let mut w = Vec::new();
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + samples.len() as u32).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&48_000u32.to_le_bytes());
+    w.extend_from_slice(&(48_000u32 * 4).to_le_bytes());
+    w.extend_from_slice(&4u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+    w.extend_from_slice(&samples);
+    std::fs::write(&wav, w).expect("write wav");
+    let sesx = dir.path().join("mix.sesx");
+    std::fs::write(
+        &sesx,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<sesx version="1.0" audioRate="48000" bitDepth="24" sessionName="T">
+  <masterTrack volume="0.00" pan="0.00"/>
+  <tracks><audioTrack id="1" name="Tone" volume="0.00" pan="0.00" muted="false" solo="false"><trackClips>
+    <audioClip id="1" name="a" startPoint="0" endPoint="48000" sourceIn="0" gain="0.00"><filePath>tone.wav</filePath></audioClip>
+  </trackClips></audioTrack></tracks>
+</sesx>"#,
+    )
+    .expect("write sesx");
+
+    let sc = dir.path().join("mix.soundcraft");
+    let run = Command::new(bin).arg("convert").arg(&sesx).args(["--to", "soundcraft", "-o"]).arg(&sc).output().expect("run");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(std::fs::read(&sc).expect("read").starts_with(b"\x89CRAFT\x00\x01S"));
+
+    let flac = dir.path().join("mix.flac");
+    let run = Command::new(bin).arg("convert").arg(&sc).args(["--to", "flac", "-o"]).arg(&flac).output().expect("run");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(std::fs::read(&flac).expect("read").starts_with(b"fLaC"));
+
+    // sessions are audio documents: video targets are rejected
+    let bad = Command::new(bin).arg("convert").arg(&sesx).args(["--to", "mp4"]).current_dir(dir.path()).output().expect("run");
+    assert!(!bad.status.success());
+}
+
+#[test]
+fn test_cli_selects_sequence_pages_and_layers() {
+    use encodercraft_pipeline::{DocumentCanvas, TimelineProject, TimelineSequence, inspect_source};
+    use encodercraft_spatial_io::{CadDrawing, CadPoint3D};
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    // multi-sequence project: probe lists both, --sequence keeps one, unknown names fail
+    let mut project = TimelineProject::new("P");
+    project.add_sequence(TimelineSequence::new("Main", 1920, 1080, 25.0));
+    project.add_sequence(TimelineSequence::new("Social", 1080, 1920, 30.0));
+    let src = dir.path().join("show.prproj");
+    std::fs::write(&src, project.to_prproj()).expect("write project");
+    let probe = Command::new(bin).arg("probe").arg(&src).output().expect("run probe");
+    let text = String::from_utf8_lossy(&probe.stdout);
+    assert!(text.contains("sequence[0]: Main") && text.contains("sequence[1]: Social"), "{text}");
+
+    let out = dir.path().join("social.prproj");
+    let run = Command::new(bin).arg("encode").arg(&src).args(["--sequence", "1", "-o"]).arg(&out).output().expect("run encode");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let inv = inspect_source(&out);
+    assert_eq!(inv.sequences.len(), 1);
+    assert_eq!(inv.sequences[0].name, "Social");
+
+    let bad = dir.path().join("bad.prproj");
+    let run = Command::new(bin).arg("encode").arg(&src).args(["--sequence", "Missing", "-o"]).arg(&bad).output().expect("run encode");
+    assert!(!run.status.success());
+    assert!(!bad.exists());
+
+    // document pages
+    let mut doc = DocumentCanvas::new("Report");
+    doc.pages[0].add_text(54.0, 720.0, 100.0, 20.0, "PAGE-ONE", 14.0);
+    doc.add_page().add_text(54.0, 720.0, 100.0, 20.0, "PAGE-TWO", 14.0);
+    let doc_src = dir.path().join("report.designcraft");
+    std::fs::write(&doc_src, doc.to_designcraft_binary().expect("serialize")).expect("write doc");
+    let probe = Command::new(bin).arg("probe").arg(&doc_src).output().expect("run probe");
+    assert!(String::from_utf8_lossy(&probe.stdout).contains("pages: 2"));
+    let out = dir.path().join("p2.pdf");
+    let run = Command::new(bin).arg("convert").arg(&doc_src).args(["--to", "pdf", "--pages", "2", "-o"]).arg(&out).output().expect("run convert");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let pdf = String::from_utf8_lossy(&std::fs::read(&out).expect("read pdf")).to_string();
+    assert!(pdf.contains("PAGE-TWO") && !pdf.contains("PAGE-ONE"));
+    let run = Command::new(bin)
+        .arg("convert")
+        .arg(&doc_src)
+        .args(["--to", "pdf", "--pages", "7-9", "-o"])
+        .arg(dir.path().join("x.pdf"))
+        .output()
+        .expect("run");
+    assert!(!run.status.success());
+    let run = Command::new(bin).arg("convert").arg(&doc_src).args(["--to", "pdf", "--pages", "abc"]).output().expect("run");
+    assert!(!run.status.success());
+
+    // CAD layers
+    let mut cad = CadDrawing::new("Plan");
+    let origin = CadPoint3D::new(0.0, 0.0, 0.0);
+    cad.add_line(origin, CadPoint3D::new(10.0, 0.0, 0.0), "WALLS");
+    cad.add_line(origin, CadPoint3D::new(0.0, 10.0, 0.0), "FURNITURE");
+    let cad_src = dir.path().join("plan.cadcraft");
+    std::fs::write(&cad_src, cad.to_cadcraft_binary().expect("serialize")).expect("write cad");
+    let out = dir.path().join("walls.cadcraft");
+    let run = Command::new(bin).arg("encode").arg(&cad_src).args(["--layers", "WALLS", "-o"]).arg(&out).output().expect("run encode");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let back = CadDrawing::from_cadcraft_binary(&std::fs::read(&out).expect("read cad")).expect("parse cad");
+    assert_eq!(back.entities.len(), 1);
+}

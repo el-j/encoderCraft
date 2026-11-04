@@ -27,3 +27,4 @@ env_logger = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+encodercraft-spatial-io = { workspace = true }

@@ -463,6 +463,179 @@ impl LayeredImage {
     }
 }
 
+type Rgb = [f32; 3];
+
+fn lum(c: Rgb) -> f32 {
+    0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
+}
+
+fn clip_color(c: Rgb) -> Rgb {
+    let l = lum(c);
+    let n = c[0].min(c[1]).min(c[2]);
+    let x = c[0].max(c[1]).max(c[2]);
+    let mut out = c;
+    if n < 0.0 {
+        for v in &mut out {
+            *v = l + (*v - l) * l / (l - n);
+        }
+    }
+    if x > 1.0 {
+        for v in &mut out {
+            *v = l + (*v - l) * (1.0 - l) / (x - l);
+        }
+    }
+    out
+}
+
+fn set_lum(c: Rgb, l: f32) -> Rgb {
+    let d = l - lum(c);
+    clip_color([c[0] + d, c[1] + d, c[2] + d])
+}
+
+fn sat(c: Rgb) -> f32 {
+    c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2])
+}
+
+fn set_sat(c: Rgb, s: f32) -> Rgb {
+    let mut idx = [0usize, 1, 2];
+    idx.sort_by(|a, b| c[*a].partial_cmp(&c[*b]).unwrap_or(std::cmp::Ordering::Equal));
+    let (min, mid, max) = (idx[0], idx[1], idx[2]);
+    let mut out = [0.0f32; 3];
+    if c[max] > c[min] {
+        out[mid] = (c[mid] - c[min]) * s / (c[max] - c[min]);
+        out[max] = s;
+    }
+    out
+}
+
+fn blend_channel(mode: LayerBlendMode, cb: f32, cs: f32) -> f32 {
+    match mode {
+        LayerBlendMode::Multiply => cb * cs,
+        LayerBlendMode::Screen => cb + cs - cb * cs,
+        LayerBlendMode::Overlay => blend_channel(LayerBlendMode::HardLight, cs, cb),
+        LayerBlendMode::Darken => cb.min(cs),
+        LayerBlendMode::Lighten => cb.max(cs),
+        LayerBlendMode::ColorDodge => {
+            if cb == 0.0 {
+                0.0
+            } else if cs >= 1.0 {
+                1.0
+            } else {
+                (cb / (1.0 - cs)).min(1.0)
+            }
+        }
+        LayerBlendMode::ColorBurn => {
+            if cb >= 1.0 {
+                1.0
+            } else if cs <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - cb) / cs).min(1.0)
+            }
+        }
+        LayerBlendMode::HardLight => {
+            if cs <= 0.5 {
+                cb * 2.0 * cs
+            } else {
+                let s2 = 2.0 * cs - 1.0;
+                cb + s2 - cb * s2
+            }
+        }
+        LayerBlendMode::SoftLight => {
+            if cs <= 0.5 {
+                cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb)
+            } else {
+                let d = if cb <= 0.25 { ((16.0 * cb - 12.0) * cb + 4.0) * cb } else { cb.sqrt() };
+                cb + (2.0 * cs - 1.0) * (d - cb)
+            }
+        }
+        LayerBlendMode::Difference => (cb - cs).abs(),
+        LayerBlendMode::Exclusion => cb + cs - 2.0 * cb * cs,
+        _ => cs,
+    }
+}
+
+fn blend_rgb(mode: LayerBlendMode, cb: Rgb, cs: Rgb) -> Rgb {
+    match mode {
+        LayerBlendMode::Hue => set_lum(set_sat(cs, sat(cb)), lum(cb)),
+        LayerBlendMode::Saturation => set_lum(set_sat(cb, sat(cs)), lum(cb)),
+        LayerBlendMode::Color => set_lum(cs, lum(cb)),
+        LayerBlendMode::Luminosity => set_lum(cb, lum(cs)),
+        m => [blend_channel(m, cb[0], cs[0]), blend_channel(m, cb[1], cs[1]), blend_channel(m, cb[2], cs[2])],
+    }
+}
+
+impl LayeredImage {
+    /// Names of all layers, bottom to top.
+    pub fn layer_names(&self) -> Vec<String> {
+        self.layers.iter().map(|l| l.name.clone()).collect()
+    }
+
+    /// Keeps only the named layers visible and re-renders the flattened composite from them
+    /// (W3C compositing: per-layer opacity and all sixteen blend modes) over a transparent canvas.
+    /// Unknown names are an error so a typo can never silently export the wrong picture.
+    pub fn select_layers(&mut self, names: &[String]) -> Result<(), EncoderError> {
+        for name in names {
+            if !self.layers.iter().any(|l| &l.name == name) {
+                return Err(EncoderError::InvalidJobSpec(format!("layer '{name}' not found; available layers: {}", self.layer_names().join(", "))));
+            }
+        }
+        for layer in &mut self.layers {
+            layer.visible = names.contains(&layer.name);
+        }
+        self.composite_rgba = self.render_visible_layers();
+        Ok(())
+    }
+
+    /// Flattens the currently visible layers into straight-alpha RGBA8.
+    pub fn render_visible_layers(&self) -> Vec<u8> {
+        let (w, h) = (self.width as usize, self.height as usize);
+        let mut canvas = vec![[0.0f32; 4]; w.saturating_mul(h)];
+        for layer in self.layers.iter().filter(|l| l.visible) {
+            let (lw, lh) = (layer.width() as usize, layer.height() as usize);
+            if layer.rgba_data.len() < lw.saturating_mul(lh).saturating_mul(4) {
+                continue;
+            }
+            let layer_opacity = f32::from(layer.opacity) / 255.0;
+            for ly in 0..lh {
+                let cy = layer.top as i64 + ly as i64;
+                if cy < 0 || cy >= h as i64 {
+                    continue;
+                }
+                for lx in 0..lw {
+                    let cx = layer.left as i64 + lx as i64;
+                    if cx < 0 || cx >= w as i64 {
+                        continue;
+                    }
+                    let si = (ly * lw + lx) * 4;
+                    let Some(px) = layer.rgba_data.get(si..si + 4) else { continue };
+                    let a_s = f32::from(px[3]) / 255.0 * layer_opacity;
+                    if a_s <= 0.0 {
+                        continue;
+                    }
+                    let cs = [f32::from(px[0]) / 255.0, f32::from(px[1]) / 255.0, f32::from(px[2]) / 255.0];
+                    let Some(dst) = canvas.get_mut(cy as usize * w + cx as usize) else { continue };
+                    let a_b = dst[3];
+                    let cb = [dst[0], dst[1], dst[2]];
+                    let blended = blend_rgb(layer.blend_mode, cb, cs);
+                    let a_o = a_s + a_b * (1.0 - a_s);
+                    for ch in 0..3 {
+                        let mixed = (1.0 - a_b) * cs[ch] + a_b * blended[ch];
+                        let premul = a_s * mixed + (1.0 - a_s) * a_b * cb[ch];
+                        dst[ch] = if a_o > 0.0 { (premul / a_o).clamp(0.0, 1.0) } else { 0.0 };
+                    }
+                    dst[3] = a_o.clamp(0.0, 1.0);
+                }
+            }
+        }
+        let mut out = Vec::with_capacity(canvas.len() * 4);
+        for p in canvas {
+            out.extend(p.iter().map(|v| (v * 255.0).round() as u8));
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,5 +685,81 @@ mod tests {
         let psb_bytes = img.to_psd_bytes(true).expect("PSB export should succeed");
         assert!(psb_bytes.starts_with(b"8BPS"));
         assert_eq!(psb_bytes[4..6], [0, 2]); // Version 2
+    }
+
+    fn solid(name: &str, w: u32, h: u32, rgba: [u8; 4]) -> ImageLayer {
+        ImageLayer::new(name, w, h, rgba.iter().copied().cycle().take((w * h * 4) as usize).collect())
+    }
+
+    fn stack() -> LayeredImage {
+        let mut img = LayeredImage::new("t", 2, 2);
+        img.add_layer(solid("bg", 2, 2, [0, 0, 255, 255]));
+        let mut half = solid("red50", 2, 2, [255, 0, 0, 255]);
+        half.opacity = 128;
+        img.add_layer(half);
+        let mut mult = solid("mult", 2, 2, [128, 128, 128, 255]);
+        mult.blend_mode = LayerBlendMode::Multiply;
+        img.add_layer(mult);
+        img
+    }
+
+    #[test]
+    fn select_layers_recomposites_only_chosen_layers() {
+        let mut img = stack();
+        img.select_layers(&["bg".to_string()]).unwrap();
+        assert_eq!(&img.composite_rgba[..4], &[0, 0, 255, 255]);
+        assert!(img.layers.iter().find(|l| l.name == "bg").unwrap().visible);
+        assert!(!img.layers.iter().find(|l| l.name == "red50").unwrap().visible);
+
+        let mut img = stack();
+        img.select_layers(&["bg".to_string(), "red50".to_string()]).unwrap();
+        let px = &img.composite_rgba[..4];
+        assert!((i32::from(px[0]) - 128).abs() <= 1 && (i32::from(px[2]) - 127).abs() <= 1 && px[3] == 255, "{px:?}");
+
+        let mut img = stack();
+        img.select_layers(&["bg".to_string(), "red50".to_string(), "mult".to_string()]).unwrap();
+        let px = &img.composite_rgba[..4];
+        assert!((i32::from(px[0]) - 64).abs() <= 1 && (i32::from(px[2]) - 64).abs() <= 1, "multiply by 50% grey halves it: {px:?}");
+    }
+
+    #[test]
+    fn select_layers_rejects_unknown_names_and_handles_offsets() {
+        let mut img = stack();
+        let err = img.select_layers(&["nope".to_string()]).unwrap_err().to_string();
+        assert!(err.contains("nope") && err.contains("bg"), "{err}");
+
+        let mut img = LayeredImage::new("t", 4, 4);
+        let mut l = solid("dot", 2, 2, [10, 20, 30, 255]);
+        l.left = 3;
+        l.right = 5;
+        l.top = -1;
+        l.bottom = 1;
+        img.add_layer(l);
+        img.select_layers(&["dot".to_string()]).unwrap();
+        assert_eq!(&img.composite_rgba[(3) * 4..(3) * 4 + 4], &[10, 20, 30, 255]);
+        assert_eq!(&img.composite_rgba[..4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn non_separable_and_dodge_modes_stay_in_range() {
+        for mode in [
+            LayerBlendMode::Hue,
+            LayerBlendMode::Saturation,
+            LayerBlendMode::Color,
+            LayerBlendMode::Luminosity,
+            LayerBlendMode::ColorDodge,
+            LayerBlendMode::ColorBurn,
+            LayerBlendMode::SoftLight,
+            LayerBlendMode::Overlay,
+        ] {
+            let mut img = LayeredImage::new("t", 1, 1);
+            img.add_layer(solid("a", 1, 1, [200, 40, 90, 255]));
+            let mut b = solid("b", 1, 1, [30, 220, 120, 200]);
+            b.blend_mode = mode;
+            img.add_layer(b);
+            let out = img.render_visible_layers();
+            assert_eq!(out.len(), 4);
+            assert_eq!(out[3], 255, "{mode:?}");
+        }
     }
 }

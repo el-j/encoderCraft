@@ -125,6 +125,12 @@ cargo run --release -p encodercraft-cli -- encode input.mov -p "Avid Media Compo
 # Image sequence in: numbered files (%04d) become a video; --fps sets the rate (default 24)
 cargo run --release -p encodercraft-cli -- encode "shot_%04d.png" -p "YouTube 1080p" --fps 25 -o shot.mp4
 
+# Project, document and CAD sources: list what can be selected, then export just that part
+cargo run --release -p encodercraft-cli -- probe show.prproj
+cargo run --release -p encodercraft-cli -- encode show.prproj --sequence Social -o social.prproj
+cargo run --release -p encodercraft-cli -- convert report.designcraft --to pdf --pages 2-4 -o excerpt.pdf
+cargo run --release -p encodercraft-cli -- encode plan.dxf --layers WALLS,DOORS -o walls.dxf
+
 # Stills out: a %04d pattern in the output name exports one image per frame
 # (needs an image preset whose container is PNG/TIFF/etc.)
 

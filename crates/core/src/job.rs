@@ -256,6 +256,57 @@ pub enum ContainerType {
 }
 
 impl ContainerType {
+    /// Every container variant, for lookups and enumeration.
+    pub const ALL: &'static [ContainerType] = &[
+        Self::IsoBmffMp4,
+        Self::QuickTimeMov,
+        Self::MatroskaMkv,
+        Self::WebM,
+        Self::MxfOp1a,
+        Self::MxfOpAtom,
+        Self::Wave,
+        Self::Aiff,
+        Self::Flac,
+        Self::OggAudio,
+        Self::Mp3,
+        Self::StillSequence,
+        Self::AnimatedGif,
+        Self::Png,
+        Self::Jpeg,
+        Self::WebP,
+        Self::Tiff,
+        Self::OpenExr,
+        Self::Bmp,
+        Self::Svg,
+        Self::PostScriptEps,
+        Self::Gltf,
+        Self::Usdz,
+        Self::Obj,
+        Self::Stl,
+        Self::Ply,
+        Self::Pdf,
+        Self::Docx,
+        Self::Idml,
+        Self::AdobeInDesignIndd,
+        Self::AdobePhotoshopPsd,
+        Self::AdobePhotoshopPsb,
+        Self::AdobeIllustratorAi,
+        Self::AdobeAfterEffectsAep,
+        Self::AdobePremierePrproj,
+        Self::AdobeAuditionSesx,
+        Self::AutocadDxf,
+        Self::AutocadDwg,
+        Self::HpglPlotter,
+        Self::ArtcraftDesigncraft,
+        Self::ArtcraftPhotocraft,
+        Self::ArtcraftVectorcraft,
+        Self::ArtcraftEffectcraft,
+        Self::ArtcraftFilmcraft,
+        Self::ArtcraftSoundcraft,
+        Self::ArtcraftCadcraft,
+        Self::ArtcraftAnicraft,
+    ];
+
     /// Canonical file extension without leading dot.
     pub fn file_extension(&self) -> &'static str {
         match self {
@@ -306,6 +357,30 @@ impl ContainerType {
             Self::ArtcraftCadcraft => "cadcraft",
             Self::ArtcraftAnicraft => "anicraft",
         }
+    }
+
+    /// Resolves a container from a file extension (case-insensitive, with or without a leading dot) or a common alias.
+    pub fn from_extension(ext: &str) -> Option<ContainerType> {
+        let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+        let alias = match ext.as_str() {
+            "m4v" => Some(Self::IsoBmffMp4),
+            "aiff" => Some(Self::Aiff),
+            "jpeg" => Some(Self::Jpeg),
+            "tiff" => Some(Self::Tiff),
+            "gltf" => Some(Self::Gltf),
+            "oga" => Some(Self::OggAudio),
+            "ps" => Some(Self::PostScriptEps),
+            _ => None,
+        };
+        if alias.is_some() {
+            return alias;
+        }
+        Self::ALL.iter().copied().find(|c| c.file_extension() == ext && !matches!(c, Self::MxfOpAtom | Self::StillSequence))
+    }
+
+    /// Whether converting a `self` source into `target` is a supported conversion.
+    pub fn can_convert_to(&self, target: ContainerType) -> bool {
+        self.valid_conversion_targets().contains(&target)
     }
 
     /// User-friendly display name.
@@ -385,6 +460,9 @@ impl ContainerType {
     /// Returns valid, compatible target container types for transcode or export from this source container.
     pub fn valid_conversion_targets(&self) -> Vec<ContainerType> {
         match self.media_kind() {
+            MediaStreamKind::AudioOnly if matches!(self, Self::AdobeAuditionSesx | Self::ArtcraftSoundcraft) => {
+                vec![Self::Wave, Self::Aiff, Self::Flac, Self::AdobeAuditionSesx, Self::ArtcraftSoundcraft]
+            }
             MediaStreamKind::AudioOnly => vec![Self::Wave, Self::Aiff, Self::Flac, Self::Mp3, Self::OggAudio, Self::ArtcraftSoundcraft],
             MediaStreamKind::VideoWithAudio | MediaStreamKind::VideoOnly => vec![
                 Self::IsoBmffMp4,
@@ -451,6 +529,65 @@ impl ContainerType {
     }
 }
 
+/// Which part of a multi-item source a target exports. All-`None` exports the whole source.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSelection {
+    /// Sequence or composition of a project, by exact name or zero-based index.
+    #[serde(default)]
+    pub sequence: Option<String>,
+    /// Inclusive 1-based page range of a document.
+    #[serde(default)]
+    pub pages: Option<(u32, u32)>,
+    /// Names of the layers to keep (CAD and layered raster sources).
+    #[serde(default)]
+    pub layers: Option<Vec<String>>,
+}
+
+impl SourceSelection {
+    pub fn is_empty(&self) -> bool {
+        self.sequence.is_none() && self.pages.is_none() && self.layers.is_none()
+    }
+
+    /// Rejects selections that can never be satisfied.
+    pub fn validate(&self) -> Result<(), EncoderError> {
+        if let Some((first, last)) = self.pages
+            && (first == 0 || last < first)
+        {
+            return Err(EncoderError::InvalidJobSpec(format!(
+                "invalid page range {first}-{last}: pages are 1-based and the range must not be reversed"
+            )));
+        }
+        if let Some(layers) = &self.layers
+            && layers.is_empty()
+        {
+            return Err(EncoderError::InvalidJobSpec("layer selection must name at least one layer".into()));
+        }
+        if let Some(seq) = &self.sequence
+            && seq.trim().is_empty()
+        {
+            return Err(EncoderError::InvalidJobSpec("sequence selection cannot be empty".into()));
+        }
+        Ok(())
+    }
+
+    /// Parses `N` or `A-B` (1-based, inclusive).
+    pub fn parse_pages(text: &str) -> Result<(u32, u32), EncoderError> {
+        let bad = || EncoderError::InvalidJobSpec(format!("invalid page range '{text}' (use N or A-B, 1-based)"));
+        let (a, b) = match text.split_once('-') {
+            Some((a, b)) => (a.trim().parse::<u32>().map_err(|_| bad())?, b.trim().parse::<u32>().map_err(|_| bad())?),
+            None => {
+                let n = text.trim().parse::<u32>().map_err(|_| bad())?;
+                (n, n)
+            }
+        };
+        if a == 0 || b < a {
+            return Err(bad());
+        }
+        Ok((a, b))
+    }
+}
+
 /// Output target specifications.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -490,6 +627,9 @@ pub struct OutputTarget {
     /// Still-image quality 1..=100 (JPEG and lossy WebP); `None` uses the encoder default.
     #[serde(default)]
     pub image_quality: Option<u8>,
+    /// Sequence, page range or layers of the source to export.
+    #[serde(default)]
+    pub selection: SourceSelection,
 }
 
 impl Default for OutputTarget {
@@ -514,6 +654,7 @@ impl Default for OutputTarget {
             metadata: None,
             hardware_acceleration: false,
             image_quality: None,
+            selection: SourceSelection::default(),
         }
     }
 }
@@ -538,6 +679,9 @@ impl CraftJobSpec {
     pub fn validate(&self) -> Result<(), EncoderError> {
         if self.job_id.trim().is_empty() {
             return Err(EncoderError::InvalidJobSpec("jobId cannot be empty".into()));
+        }
+        for target in &self.targets {
+            target.selection.validate()?;
         }
 
         if self.targets.is_empty() {
@@ -655,6 +799,43 @@ mod tests {
         let psd_targets = ContainerType::AdobePhotoshopPsd.valid_conversion_targets();
         assert!(psd_targets.contains(&ContainerType::ArtcraftPhotocraft));
         assert!(psd_targets.contains(&ContainerType::OpenExr));
+    }
+
+    #[test]
+    fn test_container_from_extension_and_conversion_rules() {
+        assert_eq!(ContainerType::from_extension(".PSD"), Some(ContainerType::AdobePhotoshopPsd));
+        assert_eq!(ContainerType::from_extension("aiff"), Some(ContainerType::Aiff));
+        assert_eq!(ContainerType::from_extension("mxf"), Some(ContainerType::MxfOp1a));
+        assert_eq!(ContainerType::from_extension("png"), Some(ContainerType::Png));
+        assert_eq!(ContainerType::from_extension("nope"), None);
+        for c in ContainerType::ALL {
+            if !matches!(c, ContainerType::MxfOpAtom | ContainerType::StillSequence) {
+                assert_eq!(ContainerType::from_extension(c.file_extension()), Some(*c), "{c:?}");
+            }
+        }
+        assert!(ContainerType::AdobeInDesignIndd.can_convert_to(ContainerType::Pdf));
+        assert!(!ContainerType::AdobeInDesignIndd.can_convert_to(ContainerType::Wave));
+        assert!(!ContainerType::AutocadDwg.can_convert_to(ContainerType::IsoBmffMp4));
+        assert!(ContainerType::AdobeAuditionSesx.can_convert_to(ContainerType::ArtcraftSoundcraft));
+        assert!(ContainerType::ArtcraftSoundcraft.can_convert_to(ContainerType::AdobeAuditionSesx));
+    }
+
+    #[test]
+    fn test_source_selection_validation_and_page_parsing() {
+        assert_eq!(SourceSelection::parse_pages("3").ok(), Some((3, 3)));
+        assert_eq!(SourceSelection::parse_pages("2-5").ok(), Some((2, 5)));
+        for bad in ["0", "5-2", "a-b", "", "1-", "-3"] {
+            assert!(SourceSelection::parse_pages(bad).is_err(), "{bad}");
+        }
+        assert!(SourceSelection::default().is_empty());
+        assert!(SourceSelection { pages: Some((0, 1)), ..Default::default() }.validate().is_err());
+        assert!(SourceSelection { layers: Some(vec![]), ..Default::default() }.validate().is_err());
+        assert!(SourceSelection { sequence: Some(" ".into()), ..Default::default() }.validate().is_err());
+        assert!(SourceSelection { sequence: Some("Main".into()), pages: Some((1, 2)), layers: Some(vec!["a".into()]) }.validate().is_ok());
+        let json = serde_json::to_string(&OutputTarget::default()).unwrap_or_default();
+        let back: OutputTarget =
+            serde_json::from_str(&json.replace(",\"selection\":{\"sequence\":null,\"pages\":null,\"layers\":null}", "")).unwrap();
+        assert!(back.selection.is_empty(), "selection must default when absent from older job files");
     }
 
     #[test]

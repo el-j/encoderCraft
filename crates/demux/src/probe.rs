@@ -488,7 +488,24 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
         file.read(&mut header_buf).map_err(|e| EncoderError::Io(format!("failed to read media header from `{}`: {e}", path.display())))?;
     header_buf.truncate(bytes_read);
 
-    let mut info = probe_bytes(&header_buf)?;
+    let mut info = match probe_bytes(&header_buf) {
+        Ok(info) => info,
+        // Premiere project files are gzip-compressed XML, so the header carries no readable signature.
+        Err(_)
+            if header_buf.starts_with(&[0x1f, 0x8b])
+                && path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("prproj")) =>
+        {
+            MediaInfo {
+                container: ContainerKind::AdobePremierePrproj,
+                file_size_bytes: file_size,
+                duration_seconds: None,
+                video_streams: Vec::new(),
+                audio_streams: Vec::new(),
+                metadata: Default::default(),
+            }
+        }
+        Err(e) => return Err(e),
+    };
     info.file_size_bytes = file_size;
 
     // If streams were not found in the initial header chunk (e.g. `moov` at file end), open full file source
