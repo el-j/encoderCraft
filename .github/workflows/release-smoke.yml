@@ -23,7 +23,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         run: |
           v="${{ inputs.version }}"
@@ -44,7 +44,7 @@ jobs:
             asset: "cli-macos-universal.zip"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download the release artifact
         shell: bash
         env:
