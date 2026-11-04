@@ -7,12 +7,14 @@
 
 pub mod bmp;
 pub mod exr;
+pub mod layered;
 pub mod png;
 pub mod still;
 pub mod tiff;
 
 pub use bmp::{decode_bmp, encode_bmp};
 pub use exr::encode_exr_half;
+pub use layered::{ImageLayer, LayerBlendMode, LayeredColorMode, LayeredImage};
 pub use png::encode_png;
 pub use still::{StillFormat, StillOptions, encode_still};
 pub use tiff::encode_tiff;
