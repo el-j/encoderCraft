@@ -155,20 +155,20 @@ impl TranscodePipeline {
     fn is_daw_source(&self) -> bool {
         match &self.spec.source {
             SourceDescriptor::File { path, .. } => {
-                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                    if ext.eq_ignore_ascii_case("sesx") || ext.eq_ignore_ascii_case("soundcraft") {
-                        return true;
-                    }
+                if let Some(ext) = path.extension().and_then(|s| s.to_str())
+                    && (ext.eq_ignore_ascii_case("sesx") || ext.eq_ignore_ascii_case("soundcraft"))
+                {
+                    return true;
                 }
                 if let Ok(bytes) = std::fs::read(path) {
                     if bytes.starts_with(b"\x89CRAFT\x00\x01S") {
                         return true;
                     }
                     let check_len = bytes.len().min(512);
-                    if let Ok(s) = std::str::from_utf8(&bytes[..check_len]) {
-                        if s.contains("<sesx") || s.contains("<session") {
-                            return true;
-                        }
+                    if let Ok(s) = std::str::from_utf8(&bytes[..check_len])
+                        && (s.contains("<sesx") || s.contains("<session"))
+                    {
+                        return true;
                     }
                 }
                 false
@@ -911,19 +911,7 @@ impl TranscodePipeline {
                 }
             }
             _ => {
-                let mut fallback = encodercraft_audio_dsp::DawSession::new("Default Session", 48000, 24);
-                let mut track = encodercraft_audio_dsp::DawTrack::new(1, "Master", encodercraft_audio_dsp::DawTrackType::Audio);
-                track.clips.push(encodercraft_audio_dsp::DawClip {
-                    id: 1,
-                    name: "Tone Clip".to_string(),
-                    start_samples: 0,
-                    length_samples: 48000,
-                    source_in_samples: 0,
-                    source_path: None,
-                    gain_db: 0.0,
-                });
-                fallback.tracks.push(track);
-                fallback
+                return Err(EncoderError::InvalidJobSpec("DAW session source file is missing".into()));
             }
         };
 

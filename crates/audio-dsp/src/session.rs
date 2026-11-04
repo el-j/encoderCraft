@@ -13,6 +13,13 @@ use crate::loudness::normalize_loudness;
 
 /// Ceiling limit for decompressed SoundCraft JSON payloads to prevent decompression bombs.
 const MAX_DECOMPRESSED_SESSION_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
+const MAX_RENDER_SAMPLES: u64 = 60_000_000;
+const MIN_SAMPLE_RATE: u32 = 8_000;
+const MAX_SAMPLE_RATE: u32 = 384_000;
+
+fn parse_finite_f32(s: &str) -> Option<f32> {
+    s.trim().parse::<f32>().ok().filter(|v| v.is_finite())
+}
 
 /// Type of audio track within a DAW session.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -130,7 +137,7 @@ impl DawSession {
         let payload_len = u32::from_be_bytes([data[9], data[10], data[11], data[12]]) as usize;
         let payload = data.get(13..13 + payload_len).ok_or_else(|| EncoderError::InvalidJobSpec("truncated .soundcraft payload".into()))?;
 
-        let decompressed = miniz_oxide::inflate::decompress_to_vec_zlib(payload)
+        let decompressed = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(payload, MAX_DECOMPRESSED_SESSION_SIZE)
             .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to decompress .soundcraft payload: {e:?}")))?;
 
         if decompressed.len() > MAX_DECOMPRESSED_SESSION_SIZE {
@@ -153,7 +160,10 @@ impl DawSession {
         let root_end = root_slice.find('>').unwrap_or(root_slice.len().min(512));
         let header_slice = root_slice.get(..root_end).unwrap_or(root_slice);
 
-        let sample_rate = extract_attribute(header_slice, "audioRate").and_then(|s| s.parse::<u32>().ok()).unwrap_or(48000);
+        let sample_rate = extract_attribute(header_slice, "audioRate")
+            .and_then(|s| s.parse::<u32>().ok())
+            .filter(|r| (MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE).contains(r))
+            .unwrap_or(48000);
         let bit_depth = extract_attribute(header_slice, "bitDepth").and_then(|s| s.parse::<u16>().ok()).unwrap_or(24);
         let session_name = extract_attribute(header_slice, "sessionName")
             .or_else(|| extract_attribute(header_slice, "name"))
@@ -164,10 +174,10 @@ impl DawSession {
 
         // Parse master track settings if present
         if let Some(master_block) = extract_block(xml, "masterTrack") {
-            if let Some(vol) = extract_attribute(&master_block, "volume").and_then(|s| s.parse::<f32>().ok()) {
+            if let Some(vol) = extract_attribute(&master_block, "volume").and_then(|s| parse_finite_f32(&s)) {
                 session.master_volume_db = vol;
             }
-            if let Some(pan) = extract_attribute(&master_block, "pan").and_then(|s| s.parse::<f32>().ok()) {
+            if let Some(pan) = extract_attribute(&master_block, "pan").and_then(|s| parse_finite_f32(&s)) {
                 session.master_pan = pan;
             }
         }
@@ -181,8 +191,8 @@ impl DawSession {
                 .or_else(|| extract_tag_content(&track_block, "trackName"))
                 .unwrap_or_else(|| format!("Track {track_idx}"));
 
-            let volume_db = extract_attribute(&track_block, "volume").and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
-            let pan = extract_attribute(&track_block, "pan").and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
+            let volume_db = extract_attribute(&track_block, "volume").and_then(|s| parse_finite_f32(&s)).unwrap_or(0.0);
+            let pan = extract_attribute(&track_block, "pan").and_then(|s| parse_finite_f32(&s)).unwrap_or(0.0);
             let muted = extract_attribute(&track_block, "muted").map(|s| s == "true" || s == "1").unwrap_or(false);
             let solo = extract_attribute(&track_block, "solo").map(|s| s == "true" || s == "1").unwrap_or(false);
 
@@ -213,7 +223,7 @@ impl DawSession {
                     .unwrap_or(sample_rate as u64); // default to 1 second
 
                 let source_in = extract_attribute(&clip_block, "sourceIn").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                let gain = extract_attribute(&clip_block, "gain").and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
+                let gain = extract_attribute(&clip_block, "gain").and_then(|s| parse_finite_f32(&s)).unwrap_or(0.0);
                 let source_path = extract_tag_content(&clip_block, "filePath")
                     .or_else(|| extract_tag_content(&clip_block, "sourceFilePath"))
                     .or_else(|| extract_attribute(&clip_block, "filePath"));
@@ -327,9 +337,20 @@ impl DawSession {
         xml
     }
 
+    fn render_length(&self) -> Result<u64, EncoderError> {
+        if !(MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE).contains(&self.sample_rate) {
+            return Err(EncoderError::InvalidJobSpec(format!("unsupported session sample rate {}", self.sample_rate)));
+        }
+        let total = self.total_samples().max(self.sample_rate as u64);
+        if total > MAX_RENDER_SAMPLES {
+            return Err(EncoderError::InvalidJobSpec(format!("session length {total} samples exceeds the {MAX_RENDER_SAMPLES} sample render limit")));
+        }
+        Ok(total)
+    }
+
     /// Renders discrete audio stem buffers for each audio track in the session.
     pub fn render_stems(&self) -> Result<Vec<(String, AudioSampleBuffer)>, EncoderError> {
-        let total_samples = self.total_samples().max(self.sample_rate as u64); // at least 1 second
+        let total_samples = self.render_length()?;
         let mut stems = Vec::with_capacity(self.tracks.len());
 
         for track in &self.tracks {
@@ -361,15 +382,15 @@ impl DawSession {
                     let left_gain = pan_rad.cos();
                     let right_gain = pan_rad.sin();
 
-                    if let Ok(left) = buf.channel_mut(0) {
-                        if let Some(v) = left.get_mut(idx) {
-                            *v += sample_val * left_gain;
-                        }
+                    if let Ok(left) = buf.channel_mut(0)
+                        && let Some(v) = left.get_mut(idx)
+                    {
+                        *v += sample_val * left_gain;
                     }
-                    if let Ok(right) = buf.channel_mut(1) {
-                        if let Some(v) = right.get_mut(idx) {
-                            *v += sample_val * right_gain;
-                        }
+                    if let Ok(right) = buf.channel_mut(1)
+                        && let Some(v) = right.get_mut(idx)
+                    {
+                        *v += sample_val * right_gain;
                     }
                 }
             }
@@ -385,7 +406,7 @@ impl DawSession {
     /// Renders the complete multitrack session into a master stereo `AudioSampleBuffer`,
     /// summing active tracks with panning, and applying EBU R128 loudness normalization.
     pub fn render_master(&self, target_lufs: Option<f64>) -> Result<AudioSampleBuffer, EncoderError> {
-        let total_samples = self.total_samples().max(self.sample_rate as u64);
+        let total_samples = self.render_length()?;
         let mut master_buf = AudioSampleBuffer::new_silent(self.sample_rate, ChannelLayout::Stereo, total_samples as usize, 0)?;
 
         let has_solo = self.tracks.iter().any(|t| t.solo);
@@ -420,15 +441,15 @@ impl DawSession {
                     let left_gain = pan_rad.cos();
                     let right_gain = pan_rad.sin();
 
-                    if let Ok(left) = master_buf.channel_mut(0) {
-                        if let Some(v) = left.get_mut(idx) {
-                            *v += sample_val * left_gain;
-                        }
+                    if let Ok(left) = master_buf.channel_mut(0)
+                        && let Some(v) = left.get_mut(idx)
+                    {
+                        *v += sample_val * left_gain;
                     }
-                    if let Ok(right) = master_buf.channel_mut(1) {
-                        if let Some(v) = right.get_mut(idx) {
-                            *v += sample_val * right_gain;
-                        }
+                    if let Ok(right) = master_buf.channel_mut(1)
+                        && let Some(v) = right.get_mut(idx)
+                    {
+                        *v += sample_val * right_gain;
                     }
                 }
             }
@@ -609,5 +630,57 @@ mod tests {
         let master = session.render_master(Some(-23.0)).unwrap();
         assert_eq!(master.samples_per_channel(), 48000);
         assert_eq!(master.channel_count(), 2);
+    }
+
+    fn sample_is_clean(buf: &AudioSampleBuffer) -> bool {
+        (0..buf.channel_count()).all(|c| buf.channel(c).map(|ch| ch.iter().all(|v| v.is_finite() && v.abs() <= 1.0)).unwrap_or(false))
+    }
+
+    #[test]
+    fn test_hostile_sesx_values_never_produce_nan_or_clipping() {
+        let xml = r#"<sesx audioRate="0" bitDepth="24"><masterTrack volume="NaN" pan="inf"/>
+            <audioTrack name="A" volume="NaN" pan="NaN"><audioClip name="c" startPoint="0" endPoint="48000" gain="inf"/></audioTrack>
+            <audioTrack name="B" volume="1000" pan="-inf"><audioClip name="d" startPoint="0" endPoint="48000" gain="1000"/></audioTrack></sesx>"#;
+        let session = DawSession::from_sesx_xml(xml).unwrap();
+        assert_eq!(session.sample_rate, 48000);
+        assert!(session.master_volume_db.is_finite() && session.master_pan.is_finite());
+        for (_, stem) in session.render_stems().unwrap() {
+            assert!(sample_is_clean(&stem));
+        }
+        assert!(sample_is_clean(&session.render_master(Some(-23.0)).unwrap()));
+    }
+
+    #[test]
+    fn test_oversized_session_render_is_an_error() {
+        let mut session = DawSession::new("Huge", 48000, 24);
+        let mut t = DawTrack::new(1, "T", DawTrackType::Audio);
+        t.clips.push(DawClip {
+            id: 1,
+            name: "c".into(),
+            start_samples: u64::MAX - 10,
+            length_samples: u64::MAX,
+            source_in_samples: 0,
+            source_path: None,
+            gain_db: 0.0,
+        });
+        session.tracks.push(t);
+        assert!(session.render_stems().is_err());
+        assert!(session.render_master(None).is_err());
+    }
+
+    #[test]
+    fn test_soundcraft_decompression_bomb_is_rejected() {
+        let bomb = miniz_oxide::deflate::compress_to_vec_zlib(&vec![b' '; MAX_DECOMPRESSED_SESSION_SIZE + 1024], 9);
+        let mut data = b"\x89CRAFT\x00\x01S".to_vec();
+        data.extend_from_slice(&(bomb.len() as u32).to_be_bytes());
+        data.extend_from_slice(&bomb);
+        assert!(DawSession::from_soundcraft_binary(&data).is_err());
+    }
+
+    #[test]
+    fn test_truncated_and_garbage_inputs_are_errors() {
+        assert!(DawSession::from_soundcraft_binary(b"\x89CRAFT\x00\x01S\xff\xff\xff\xff").is_err());
+        assert!(DawSession::from_soundcraft_binary(b"short").is_err());
+        let _ = DawSession::from_sesx_xml("<sesx <<< \u{1F600}\u{0}");
     }
 }
