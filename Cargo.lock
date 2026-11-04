@@ -879,6 +879,7 @@ dependencies = [
  "encodercraft-presets",
  "encodercraft-source",
  "encodercraft-spatial-io",
+ "encodercraft-video-codecs",
  "encodercraft-watch",
  "env_logger",
  "log",
