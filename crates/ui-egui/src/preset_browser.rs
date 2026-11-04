@@ -299,7 +299,9 @@ fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<Qu
                     encodercraft_presets::MatchSourceOr::MatchSource => None,
                 };
                 target.target_bitrate_kbps = Some(v.target_bitrate_kbps);
+                target.video = preset.video_encode_settings();
             } else {
+                target.video = Default::default();
                 target.custom_width = None;
                 target.custom_height = None;
                 target.target_bitrate_kbps = None;
@@ -351,6 +353,7 @@ fn add_preset_target_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &A
             custom_frame_rate: None,
             target_bitrate_kbps: br,
             target_lufs: lufs,
+            video: preset.video_encode_settings(),
             ..Default::default()
         };
         let _ = queue_mgr.add_output_target(job_id, new_target);

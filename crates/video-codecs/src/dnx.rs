@@ -4,6 +4,7 @@ use craft_dnx::{ChromaFormat, ColorVolume, Encoder, EncoderConfig, Frame, Interl
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
+use crate::params::EncodeParams;
 use crate::yuv::frame_to_yuv420_8;
 
 /// Avid DNxHR video encoder wrapper.
@@ -19,6 +20,19 @@ impl DnxEncoderWrapper {
     /// Creates a new Avid DNxHR encoder instance (defaults to DNxHR HQ 8-bit).
     pub fn new(width: u32, height: u32, _fps: Rational64) -> Result<Self, EncoderError> {
         Self::with_profile(width, height, _fps, Profile::Hq)
+    }
+
+    /// Creates a DNxHR encoder from parameters; the profile selects LB, SQ, HQ or HQX (10-bit).
+    pub fn with_params(width: u32, height: u32, fps: Rational64, params: &EncodeParams) -> Result<Self, EncoderError> {
+        params.reject_unsupported("DNxHR", false, false, true)?;
+        let profile = match params.profile.as_deref().map(str::to_ascii_lowercase).as_deref() {
+            None | Some("hq") => Profile::Hq,
+            Some("lb") => Profile::Lb,
+            Some("sq") => Profile::Sq,
+            Some("hqx") => Profile::Hqx,
+            Some(other) => return Err(EncoderError::UnsupportedCodec(format!("DNxHR profile `{other}` is not available (LB, SQ, HQ, HQX)"))),
+        };
+        Self::with_profile(width, height, fps, profile)
     }
 
     /// Creates a new Avid DNxHR encoder instance with a specific profile (e.g. HQ or HQX).

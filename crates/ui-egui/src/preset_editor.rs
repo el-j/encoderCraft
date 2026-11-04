@@ -102,6 +102,10 @@ impl PresetEditorState {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: self.bitrate_kbps,
                 keyframe_interval: 48,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             })
         } else {
             None

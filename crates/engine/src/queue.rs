@@ -277,7 +277,12 @@ impl QueueManager {
     /// Executes a claimed job, mirrors live progress into the journal and records the outcome.
     fn run_job(&self, job_id: &str, spec: &CraftJobSpec) -> Result<(), EncoderError> {
         let start_time = std::time::Instant::now();
-        let pipeline = TranscodePipeline::new(spec.clone());
+        let mut resolved = spec.clone();
+        let registry = encodercraft_presets::PresetRegistry::default();
+        for target in &mut resolved.targets {
+            registry.apply_to_target(target);
+        }
+        let pipeline = TranscodePipeline::new(resolved);
         let progress = pipeline.progress();
         {
             let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);

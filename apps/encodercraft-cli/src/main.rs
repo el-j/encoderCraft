@@ -29,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("convert") => cmd_convert(&args[2..])?,
         Some("probe") => cmd_probe(&args[2..])?,
         Some("presets") => cmd_presets()?,
+        Some("--containers") | Some("containers") => print!("{}", encodercraft_video_codecs::capabilities::render_container_matrix_markdown()),
         Some("--formats") | Some("formats") => print!("{}", encodercraft_video_codecs::capabilities::render_text()),
         Some("queue") => cmd_queue(&args[2..])?,
         Some("watch") => cmd_watch(&args[2..])?,

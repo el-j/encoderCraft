@@ -37,6 +37,8 @@ pub fn evaluate_preset(preset: &EncodingPreset, source: &MediaInfo, output_path:
     // 2. Resolve audio settings
     let target_lufs = if let Some(ref a_set) = preset.audio { a_set.target_lufs.map(|l| l as f32) } else { None };
 
+    let video = preset.video_encode_settings();
+
     Ok(OutputTarget {
         target_id: format!("{}-target", preset.name.to_ascii_lowercase().replace(' ', "-")),
         output_path,
@@ -47,6 +49,7 @@ pub fn evaluate_preset(preset: &EncodingPreset, source: &MediaInfo, output_path:
         custom_frame_rate,
         target_bitrate_kbps,
         target_lufs,
+        video,
         ..Default::default()
     })
 }

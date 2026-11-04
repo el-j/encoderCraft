@@ -4,6 +4,7 @@ use craft_prores::{ChromaFormat, ColorInfo, Encoder, EncoderConfig, Frame, Inter
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
+use crate::params::EncodeParams;
 use crate::yuv::frame_to_yuv420_8;
 
 /// Apple ProRes encoder wrapper.
@@ -11,14 +12,33 @@ pub struct ProResEncoderWrapper {
     inner: Encoder,
     width: u32,
     height: u32,
+    profile: Profile,
 }
 
 impl ProResEncoderWrapper {
     /// Creates a new ProRes encoder instance (Standard 422 default).
     pub fn new(width: u32, height: u32, _fps: Rational64) -> Result<Self, EncoderError> {
-        let cfg = EncoderConfig::new(Profile::Standard, width, height);
+        Self::with_profile(width, height, Profile::Standard)
+    }
+
+    /// Creates a ProRes encoder for a 4:2:2 profile.
+    pub fn with_profile(width: u32, height: u32, profile: Profile) -> Result<Self, EncoderError> {
+        let cfg = EncoderConfig::new(profile, width, height);
         let inner = Encoder::with_config(cfg);
-        Ok(Self { inner, width, height })
+        Ok(Self { inner, width, height, profile })
+    }
+
+    /// Creates a ProRes encoder from parameters; the profile selects proxy, LT, 422 or HQ.
+    pub fn with_params(width: u32, height: u32, params: &EncodeParams) -> Result<Self, EncoderError> {
+        params.reject_unsupported("ProRes", false, false, true)?;
+        let profile = match params.profile.as_deref().map(str::to_ascii_lowercase).as_deref() {
+            None | Some("422") | Some("standard") => Profile::Standard,
+            Some("proxy") => Profile::Proxy,
+            Some("lt") => Profile::Lt,
+            Some("hq") | Some("422hq") => Profile::Hq,
+            Some(other) => return Err(EncoderError::UnsupportedCodec(format!("ProRes profile `{other}` is not available (4:2:2 profiles only)"))),
+        };
+        Self::with_profile(width, height, profile)
     }
 }
 
@@ -73,5 +93,9 @@ impl VideoEncoder for ProResEncoderWrapper {
 
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, EncoderError> {
         Ok(Vec::new())
+    }
+
+    fn fourcc(&self) -> Option<[u8; 4]> {
+        Some(self.profile.fourcc())
     }
 }

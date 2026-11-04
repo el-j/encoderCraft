@@ -26,4 +26,9 @@ pub trait VideoEncoder {
     fn config_record(&self) -> Vec<u8> {
         Vec::new()
     }
+
+    /// Sample-entry FourCC when it depends on the configured profile (ProRes); `None` means the codec default.
+    fn fourcc(&self) -> Option<[u8; 4]> {
+        None
+    }
 }

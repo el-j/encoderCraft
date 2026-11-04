@@ -24,6 +24,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: 12000,
                 keyframe_interval: 48,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -48,6 +52,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: 45000,
                 keyframe_interval: 60,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -72,6 +80,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: 12000,
                 keyframe_interval: 48,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -96,6 +108,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p10),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1, // Intra-frame
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -120,6 +136,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1, // Intra-frame
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -144,6 +164,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p10),
                 target_bitrate_kbps: 880000,
                 keyframe_interval: 1, // Intra-frame
+                profile: Some("hqx".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -168,6 +192,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1,
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -192,6 +220,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1,
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: None,
         },
@@ -210,6 +242,10 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: 8000,
                 keyframe_interval: 30,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),

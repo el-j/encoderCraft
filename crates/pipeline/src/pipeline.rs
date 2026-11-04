@@ -16,7 +16,8 @@ use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
 use encodercraft_muxers::{
     AudioSample, AudioStreamConfig, BextMetadata, BwfWavWriter, MkvMuxerBuilder, Mp4Muxer, MxfMuxer, VideoSample, VideoStreamConfig, WavFormatTag,
 };
-use encodercraft_video_codecs::{VideoCodecKind, create_video_encoder};
+use encodercraft_video_codecs::capabilities::container_accepts;
+use encodercraft_video_codecs::{EncodeParams, VideoCodecKind, create_video_encoder_with};
 
 use crate::input::{VideoInput, load_audio_required};
 use crate::progress::JobProgress;
@@ -1064,9 +1065,6 @@ impl TranscodePipeline {
         let fps = input.fps();
         let frame_ticks = u32::try_from(fps.den).map_err(|_| EncoderError::InvalidJobSpec("frame rate denominator is too large".into()))?;
 
-        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
-        let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
-
         if target.hardware_acceleration {
             let caps = encodercraft_platform::detect_hardware();
             log::info!(
@@ -1092,10 +1090,20 @@ impl TranscodePipeline {
         } else {
             VideoCodecKind::H264
         };
+        let codec_kind = resolve_codec(target, codec_kind)?;
 
-        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
+        let mut encoder = create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &encode_params(target))?;
+        // Faststart relocates `moov` and so must read the file back.
+        let out_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&target.output_path)
+            .map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
+        let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
         let v_cfg = VideoStreamConfig {
-            codec_fourcc: codec_kind.default_fourcc(),
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
             frame_rate: fps,
             pixel_format: PixelFormat::Yuv420p,
@@ -1193,7 +1201,7 @@ impl TranscodePipeline {
             }
         }
 
-        mp4_muxer.finish(false)?;
+        mp4_muxer.finish(!is_mov)?;
 
         // Append Adobe XMP UUID box if metadata is defined
         if let Some(ref meta) = target.metadata {
@@ -1213,9 +1221,6 @@ impl TranscodePipeline {
         let dims = input.dims();
         let fps = input.fps();
 
-        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MXF output file: {e}")))?;
-        let writer = BufWriter::new(out_file);
-
         let lower_preset = target.preset_name.to_ascii_lowercase();
         let codec_kind = if lower_preset.contains("prores") {
             VideoCodecKind::ProRes
@@ -1224,12 +1229,18 @@ impl TranscodePipeline {
         } else {
             VideoCodecKind::DnxHd
         };
+        let codec_kind = resolve_codec(target, codec_kind)?;
 
-        let bit_depth = if lower_preset.contains("hqx") || lower_preset.contains("10-bit") || codec_kind == VideoCodecKind::ProRes { 10 } else { 8 };
+        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MXF output file: {e}")))?;
+        let writer = BufWriter::new(out_file);
 
-        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
+        let hqx = target.video.profile.as_deref().is_some_and(|p| p.eq_ignore_ascii_case("hqx")) || lower_preset.contains("hqx");
+        let bit_depth = if hqx || lower_preset.contains("10-bit") || codec_kind == VideoCodecKind::ProRes { 10 } else { 8 };
+
+        let mut encoder =
+            create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &EncodeParams { annex_b: true, ..encode_params(target) })?;
         let v_cfg = VideoStreamConfig {
-            codec_fourcc: codec_kind.default_fourcc(),
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
             frame_rate: fps,
             pixel_format: if bit_depth >= 10 { PixelFormat::Yuv422p10 } else { PixelFormat::Yuv422p },
@@ -1308,9 +1319,6 @@ impl TranscodePipeline {
         let dims = input.dims();
         let fps = input.fps();
 
-        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
-        let writer = BufWriter::new(out_file);
-
         let lower_preset = target.preset_name.to_ascii_lowercase();
         let codec_kind = if is_webm {
             if lower_preset.contains("av1") { VideoCodecKind::Av1 } else { VideoCodecKind::Vp9 }
@@ -1323,10 +1331,14 @@ impl TranscodePipeline {
         } else {
             VideoCodecKind::H264
         };
+        let codec_kind = resolve_codec(target, codec_kind)?;
 
-        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
+        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
+        let writer = BufWriter::new(out_file);
+
+        let mut encoder = create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &encode_params(target))?;
         let v_cfg = VideoStreamConfig {
-            codec_fourcc: codec_kind.default_fourcc(),
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
             frame_rate: fps,
             pixel_format: PixelFormat::Yuv420p,
@@ -1522,6 +1534,23 @@ fn timecode_for_frame(f: u64, fps: Rational64) -> encodercraft_core::MediaTimeco
     let minutes = ((total_seconds / 60) % 60) as u8;
     let hours = ((total_seconds / 3600) % 100) as u8;
     encodercraft_core::MediaTimecode::new(hours, minutes, seconds, frames, false, fps)
+}
+
+/// Picks the video codec: an explicit target codec wins over the preset-name heuristic, and the
+/// container must be able to store it.
+fn resolve_codec(target: &OutputTarget, inferred: VideoCodecKind) -> Result<VideoCodecKind, EncoderError> {
+    let kind = match target.video.codec.as_deref() {
+        Some(id) => VideoCodecKind::parse(id).ok_or_else(|| EncoderError::UnsupportedCodec(format!("unknown video codec `{id}`")))?,
+        None => inferred,
+    };
+    if !container_accepts(target.container, kind) {
+        return Err(EncoderError::UnsupportedCodec(format!("{kind:?} video cannot be stored in {:?}", target.container)));
+    }
+    Ok(kind)
+}
+
+fn encode_params(target: &OutputTarget) -> EncodeParams {
+    EncodeParams::from_settings(&target.video, target.target_bitrate_kbps)
 }
 
 #[cfg(test)]

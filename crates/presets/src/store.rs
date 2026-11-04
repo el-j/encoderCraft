@@ -41,6 +41,27 @@ impl PresetRegistry {
         self.presets.iter().find(|p| p.name.to_ascii_lowercase() == needle)
     }
 
+    /// Fills the video settings and bitrate of `target` from the preset it names, when the target
+    /// does not set them itself and the preset writes the same container.
+    pub fn apply_to_target(&self, target: &mut encodercraft_core::OutputTarget) {
+        if target.video.codec.is_some() {
+            return;
+        }
+        let Some(preset) = self.find_by_name(&target.preset_name) else {
+            return;
+        };
+        let Some(video) = preset.video.as_ref() else {
+            return;
+        };
+        if preset.container != target.container {
+            return;
+        }
+        target.video = preset.video_encode_settings();
+        if target.target_bitrate_kbps.is_none() && video.target_bitrate_kbps > 0 {
+            target.target_bitrate_kbps = Some(video.target_bitrate_kbps);
+        }
+    }
+
     /// Returns a list of all currently registered presets.
     pub fn list(&self) -> &[EncodingPreset] {
         &self.presets

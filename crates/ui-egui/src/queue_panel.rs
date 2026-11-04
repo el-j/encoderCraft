@@ -205,8 +205,22 @@ pub fn default_preset_for_container(c: ContainerType) -> &'static str {
     }
 }
 
-/// Returns matching preset names for a container.
+/// Returns matching preset names for a container, offering only presets whose codec the container can store.
 pub fn presets_for_container(c: ContainerType) -> Vec<&'static str> {
+    let registry = encodercraft_presets::PresetRegistry::default();
+    candidate_presets_for_container(c)
+        .into_iter()
+        .filter(|name| {
+            let codec = registry.find_by_name(name).and_then(|p| p.video_encode_settings().codec);
+            codec.is_none_or(|id| {
+                encodercraft_video_codecs::VideoCodecKind::parse(&id)
+                    .is_some_and(|k| encodercraft_video_codecs::capabilities::container_accepts(c, k))
+            })
+        })
+        .collect()
+}
+
+fn candidate_presets_for_container(c: ContainerType) -> Vec<&'static str> {
     match c {
         ContainerType::IsoBmffMp4 => vec![
             "Match Source - High Bitrate",
