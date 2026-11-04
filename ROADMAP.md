@@ -212,6 +212,19 @@ Alpha 1 shipped with real defects; they are tracked as issues #6–#51 under epi
 - [x] **M28 Panels** – done: persistence of preferences/watch folders/favourites (#38, #39), sortable Preset Browser with import/export/delete (#35), Media Browser (#36), honest parity docs (#40). Queue table with sortable columns (Source, Format, Preset, Output File, Status), grouped parent sources and indented target child rows with inline format ComboBox, preset hyperlink selector, and output path dialog (#34). Comprehensive Export Settings dialog parity with Source/Output preview tabs, scrubber, real frame decoding, Match Source, and Video/Audio/Effects/Captions/Publish/Loudness/Metadata tabs (#37).
 - [~] **M29 Hardening and alpha.2** – done: panic guard around third-party decode (`MediaReader`), malformed-media corpus and random-byte property tests, nightly robustness workflow (#43 partly). CLI still-image round-trip QA checks decoded pixels against the source (#41 partly). Video QA matrix (5 source codecs x 4 presets, judged by ffprobe and PSNR) and a mixed-batch test (#41 partly); installer smoke script and `release-smoke` workflow (#42, untested until the next release); MPEG-TS sniffing and real frame-rate probing in CLI/watch folders. IPC: `queue.submit` honours the start policy and `queue.subscribe` streams job events (#1 partly; shared-memory frame transport and project ingestion remain). Open: per-crate fuzz targets, alpha.2 release (#44).
 
+## Milestone 30: Universal Format Expansion & ArtCraft Bidirectional Conversion
+
+Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Milestone 8](https://github.com/el-j/encoderCraft/milestone/8).
+
+- [x] **M30.1: Core & Demux Sniffer (#70)** – Universal `ContainerType` and `MediaStreamKind` variants for Adobe formats (`INDD`, `PSD`, `PSB`, `AEP`, `AI`, `PRPROJ`, `SESX`), CAD formats (`DXF`, `DWG`, `HPGL`), and native ArtCraft formats (`.designcraft`, `.photocraft`, `.vectorcraft`, `.effectcraft`, `.filmcraft`, `.soundcraft`, `.cadcraft`, `.anicraft`); magic-byte sniffing and `ContainerType::valid_conversion_targets` smart matrix.
+- [ ] **M30.2: CAD & Technical Drafting (#71)** – AutoCAD DXF/DWG and HPGL plotter ingest and conversion via `cadcraft`.
+- [ ] **M30.3: Prepress & Publication (#72)** – InDesign INDD/IDML and DesignCraft conversion via `designcraft` & `indd-utils`.
+- [ ] **M30.4: Layered Graphics & Photography (#73)** – Photoshop PSD/PSB and PhotoCraft conversion via `photocraft`.
+- [ ] **M30.5: Vector Graphics & Illustration (#74)** – Illustrator AI and VectorCraft conversion via `vectorcraft`.
+- [ ] **M30.6: Motion Graphics & NLE Timeline (#75)** – After Effects AEP and Premiere PRPROJ conversion via `effectcraft` & `filmcraft`.
+- [ ] **M30.7: Audio DAW & Multitrack (#76)** – Audition SESX and SoundCraft conversion via `soundcraft`.
+- [ ] **M30.8: UI Inspector & Headless CLI (#77)** – Conversion target filtering and `convert` subcommand.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).

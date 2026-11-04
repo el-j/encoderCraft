@@ -271,34 +271,7 @@ fn is_job_audio_only(job_id: &str, queue_mgr: &Arc<QueueManager>) -> bool {
 }
 
 fn container_to_extension(container: encodercraft_core::ContainerType) -> &'static str {
-    match container {
-        encodercraft_core::ContainerType::IsoBmffMp4 => "mp4",
-        encodercraft_core::ContainerType::QuickTimeMov => "mov",
-        encodercraft_core::ContainerType::MatroskaMkv => "mkv",
-        encodercraft_core::ContainerType::WebM => "webm",
-        encodercraft_core::ContainerType::Wave => "wav",
-        encodercraft_core::ContainerType::Aiff => "aiff",
-        encodercraft_core::ContainerType::Flac => "flac",
-        encodercraft_core::ContainerType::OggAudio => "ogg",
-        encodercraft_core::ContainerType::Mp3 => "mp3",
-        encodercraft_core::ContainerType::AnimatedGif => "gif",
-        encodercraft_core::ContainerType::Svg => "svg",
-        encodercraft_core::ContainerType::Gltf => "glb",
-        encodercraft_core::ContainerType::Usdz => "usdz",
-        encodercraft_core::ContainerType::Obj => "obj",
-        encodercraft_core::ContainerType::Stl => "stl",
-        encodercraft_core::ContainerType::Ply => "ply",
-        encodercraft_core::ContainerType::Pdf => "pdf",
-        encodercraft_core::ContainerType::Docx => "docx",
-        encodercraft_core::ContainerType::Idml => "idml",
-        encodercraft_core::ContainerType::MxfOp1a | encodercraft_core::ContainerType::MxfOpAtom => "mxf",
-        encodercraft_core::ContainerType::Png | encodercraft_core::ContainerType::StillSequence => "png",
-        encodercraft_core::ContainerType::Jpeg => "jpg",
-        encodercraft_core::ContainerType::WebP => "webp",
-        encodercraft_core::ContainerType::Tiff => "tif",
-        encodercraft_core::ContainerType::OpenExr => "exr",
-        encodercraft_core::ContainerType::Bmp => "bmp",
-    }
+    container.file_extension()
 }
 
 fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {

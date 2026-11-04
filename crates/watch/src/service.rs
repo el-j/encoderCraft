@@ -62,15 +62,8 @@ impl WatchFolderService {
             .find_by_name(&cfg.preset_name)
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("preset '{}' not found in registry", cfg.preset_name)))?;
 
-        // Extract container extension from preset or default to mp4
-        let ext = match preset.container {
-            encodercraft_core::ContainerType::IsoBmffMp4 => "mp4",
-            encodercraft_core::ContainerType::QuickTimeMov => "mov",
-            encodercraft_core::ContainerType::MatroskaMkv => "mkv",
-            encodercraft_core::ContainerType::Wave => "wav",
-            encodercraft_core::ContainerType::Gltf => "glb",
-            _ => "mp4",
-        };
+        // Extract container extension from preset
+        let ext = preset.container.file_extension();
 
         let file_stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
         let output_filename = format!("{file_stem}.{ext}");

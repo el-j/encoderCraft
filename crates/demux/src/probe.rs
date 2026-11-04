@@ -57,9 +57,14 @@ impl MediaInfo {
     /// Classifies the overall stream kind based on discovered elementary streams and container kind.
     pub fn stream_kind(&self) -> MediaStreamKind {
         match self.container {
-            ContainerKind::Wav | ContainerKind::Rf64Wav | ContainerKind::Aiff | ContainerKind::Flac | ContainerKind::Mp3 | ContainerKind::Ogg => {
-                MediaStreamKind::AudioOnly
-            }
+            ContainerKind::Wav
+            | ContainerKind::Rf64Wav
+            | ContainerKind::Aiff
+            | ContainerKind::Flac
+            | ContainerKind::Mp3
+            | ContainerKind::Ogg
+            | ContainerKind::AdobeAuditionSesx
+            | ContainerKind::ArtcraftSoundcraft => MediaStreamKind::AudioOnly,
             ContainerKind::GltfBinary
             | ContainerKind::GltfJson
             | ContainerKind::UsdBinary
@@ -75,16 +80,23 @@ impl MediaInfo {
             | ContainerKind::OpenExr
             | ContainerKind::RadianceHdr
             | ContainerKind::Dds
-            | ContainerKind::Psd
             | ContainerKind::Bmp => MediaStreamKind::StillImage,
-            ContainerKind::Svg | ContainerKind::IllustratorAi | ContainerKind::Eps => MediaStreamKind::Vector2D,
+            ContainerKind::Psd | ContainerKind::Psb | ContainerKind::ArtcraftPhotocraft => MediaStreamKind::LayeredComposite,
+            ContainerKind::Svg | ContainerKind::IllustratorAi | ContainerKind::Eps | ContainerKind::ArtcraftVectorcraft => MediaStreamKind::Vector2D,
+            ContainerKind::AutocadDxf | ContainerKind::AutocadDwg | ContainerKind::HpglPlotter | ContainerKind::ArtcraftCadcraft => {
+                MediaStreamKind::Cad2D
+            }
+            ContainerKind::AdobeAfterEffectsAep | ContainerKind::ArtcraftEffectcraft => MediaStreamKind::MotionGraph,
+            ContainerKind::AdobePremierePrproj | ContainerKind::ArtcraftFilmcraft => MediaStreamKind::ProjectTimeline,
+            ContainerKind::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
             ContainerKind::Pdf
             | ContainerKind::Docx
             | ContainerKind::Pptx
             | ContainerKind::Xlsx
             | ContainerKind::Idml
             | ContainerKind::Indd
-            | ContainerKind::Epub => MediaStreamKind::Document,
+            | ContainerKind::Epub
+            | ContainerKind::ArtcraftDesigncraft => MediaStreamKind::Document,
             _ => {
                 let has_video = !self.video_streams.is_empty();
                 let has_audio = !self.audio_streams.is_empty();
@@ -116,11 +128,18 @@ pub fn classify_stream_kind(path: &Path) -> MediaStreamKind {
     // Fallback based on extension if probe failed or file is headless/mock
     if let Some(ext) = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()) {
         match ext.as_str() {
-            "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" | "alac" | "wma" => MediaStreamKind::AudioOnly,
+            "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" | "alac" | "wma" | "sesx" | "soundcraft" => {
+                MediaStreamKind::AudioOnly
+            }
             "glb" | "gltf" | "obj" | "stl" | "ply" | "usda" | "usdc" | "usdz" => MediaStreamKind::Spatial3D,
-            "svg" | "ai" | "eps" => MediaStreamKind::Vector2D,
-            "pdf" | "docx" | "idml" | "indd" | "epub" | "pptx" | "xlsx" | "rtf" => MediaStreamKind::Document,
-            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "hdr" | "dds" | "bmp" | "psd" => MediaStreamKind::StillImage,
+            "svg" | "ai" | "eps" | "vectorcraft" => MediaStreamKind::Vector2D,
+            "dxf" | "dwg" | "plt" | "hpgl" | "cadcraft" => MediaStreamKind::Cad2D,
+            "psd" | "psb" | "photocraft" => MediaStreamKind::LayeredComposite,
+            "aep" | "aet" | "effectcraft" => MediaStreamKind::MotionGraph,
+            "prproj" | "filmcraft" => MediaStreamKind::ProjectTimeline,
+            "anicraft" => MediaStreamKind::ImageSequence,
+            "pdf" | "docx" | "idml" | "indd" | "epub" | "pptx" | "xlsx" | "rtf" | "designcraft" => MediaStreamKind::Document,
+            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "hdr" | "dds" | "bmp" => MediaStreamKind::StillImage,
             "mp4" | "mov" | "mkv" | "webm" | "mxf" | "avi" | "m4v" | "mpg" | "mpeg" | "ts" => MediaStreamKind::VideoWithAudio,
             _ => MediaStreamKind::Unknown,
         }
@@ -536,11 +555,23 @@ mod tests {
         assert_eq!(classify_stream_kind(Path::new("model.glb")), MediaStreamKind::Spatial3D);
         assert_eq!(classify_stream_kind(Path::new("scene.gltf")), MediaStreamKind::Spatial3D);
         assert_eq!(classify_stream_kind(Path::new("picture.png")), MediaStreamKind::StillImage);
-        assert_eq!(classify_stream_kind(Path::new("photo.psd")), MediaStreamKind::StillImage);
+        assert_eq!(classify_stream_kind(Path::new("photo.psd")), MediaStreamKind::LayeredComposite);
+        assert_eq!(classify_stream_kind(Path::new("graphic.photocraft")), MediaStreamKind::LayeredComposite);
         assert_eq!(classify_stream_kind(Path::new("icon.svg")), MediaStreamKind::Vector2D);
         assert_eq!(classify_stream_kind(Path::new("logo.ai")), MediaStreamKind::Vector2D);
-        assert_eq!(classify_stream_kind(Path::new("drawing.eps")), MediaStreamKind::Vector2D);
+        assert_eq!(classify_stream_kind(Path::new("drawing.vectorcraft")), MediaStreamKind::Vector2D);
+        assert_eq!(classify_stream_kind(Path::new("blueprint.dwg")), MediaStreamKind::Cad2D);
+        assert_eq!(classify_stream_kind(Path::new("floorplan.dxf")), MediaStreamKind::Cad2D);
+        assert_eq!(classify_stream_kind(Path::new("machine.cadcraft")), MediaStreamKind::Cad2D);
+        assert_eq!(classify_stream_kind(Path::new("comp.aep")), MediaStreamKind::MotionGraph);
+        assert_eq!(classify_stream_kind(Path::new("motion.effectcraft")), MediaStreamKind::MotionGraph);
+        assert_eq!(classify_stream_kind(Path::new("sequence.prproj")), MediaStreamKind::ProjectTimeline);
+        assert_eq!(classify_stream_kind(Path::new("timeline.filmcraft")), MediaStreamKind::ProjectTimeline);
+        assert_eq!(classify_stream_kind(Path::new("multitrack.sesx")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("mix.soundcraft")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("animation.anicraft")), MediaStreamKind::ImageSequence);
         assert_eq!(classify_stream_kind(Path::new("document.pdf")), MediaStreamKind::Document);
+        assert_eq!(classify_stream_kind(Path::new("layout.designcraft")), MediaStreamKind::Document);
         assert_eq!(classify_stream_kind(Path::new("proposal.docx")), MediaStreamKind::Document);
         assert_eq!(classify_stream_kind(Path::new("catalog.idml")), MediaStreamKind::Document);
         assert_eq!(classify_stream_kind(Path::new("book.epub")), MediaStreamKind::Document);

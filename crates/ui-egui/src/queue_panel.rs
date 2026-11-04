@@ -186,6 +186,20 @@ pub fn default_preset_for_container(c: ContainerType) -> &'static str {
         ContainerType::WebP => "Still Image WebP (Lossless)",
         ContainerType::Tiff => "Broadcast TIFF (16-bit RGB)",
         ContainerType::OpenExr => "VFX OpenEXR (Half Float)",
+        ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
+            "Print-Ready PDF/X-4"
+        }
+        ContainerType::Svg
+        | ContainerType::AdobeIllustratorAi
+        | ContainerType::ArtcraftVectorcraft
+        | ContainerType::AutocadDxf
+        | ContainerType::AutocadDwg
+        | ContainerType::HpglPlotter
+        | ContainerType::ArtcraftCadcraft => "Web Vector SVG (Optimized)",
+        ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => "Broadcast TIFF (16-bit RGB)",
+        ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => "Apple ProRes 422 HQ",
+        ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => "Broadcast MXF OP1a (DNxHD / PCM)",
+        ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => "Broadcast Wave BWF (-23 LUFS)",
         _ => "Match Source - High Bitrate",
     }
 }
@@ -202,13 +216,27 @@ pub fn presets_for_container(c: ContainerType) -> Vec<&'static str> {
         ],
         ContainerType::QuickTimeMov => vec!["Apple ProRes 422 HQ", "Apple ProRes 422", "Apple ProRes 4444", "Avid DNxHR HQ 1080p"],
         ContainerType::MxfOp1a | ContainerType::MxfOpAtom => vec!["Broadcast MXF OP1a (DNxHD / PCM)"],
-        ContainerType::Wave | ContainerType::Aiff | ContainerType::Flac | ContainerType::Mp3 | ContainerType::OggAudio => vec![
+        ContainerType::Wave
+        | ContainerType::Aiff
+        | ContainerType::Flac
+        | ContainerType::Mp3
+        | ContainerType::OggAudio
+        | ContainerType::AdobeAuditionSesx
+        | ContainerType::ArtcraftSoundcraft => vec![
             "Broadcast Wave BWF (-23 LUFS)",
             "Lossless Audio Master (AIFF 24-bit)",
             "Archival Audio FLAC (Lossless 24-bit)",
             "Podcast MP3 (192 kbps)",
         ],
-        ContainerType::Png | ContainerType::Jpeg | ContainerType::WebP | ContainerType::Tiff | ContainerType::OpenExr | ContainerType::Bmp => vec![
+        ContainerType::Png
+        | ContainerType::Jpeg
+        | ContainerType::WebP
+        | ContainerType::Tiff
+        | ContainerType::OpenExr
+        | ContainerType::Bmp
+        | ContainerType::AdobePhotoshopPsd
+        | ContainerType::AdobePhotoshopPsb
+        | ContainerType::ArtcraftPhotocraft => vec![
             "Still Image PNG (Lossless)",
             "Still Image JPEG",
             "Still Image WebP (Lossless)",
@@ -216,6 +244,22 @@ pub fn presets_for_container(c: ContainerType) -> Vec<&'static str> {
             "VFX OpenEXR (Half Float)",
             "Windows Bitmap BMP (Uncompressed)",
         ],
+        ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
+            vec!["Print-Ready PDF/X-4"]
+        }
+        ContainerType::Svg
+        | ContainerType::AdobeIllustratorAi
+        | ContainerType::ArtcraftVectorcraft
+        | ContainerType::AutocadDxf
+        | ContainerType::AutocadDwg
+        | ContainerType::HpglPlotter
+        | ContainerType::ArtcraftCadcraft => vec!["Web Vector SVG (Optimized)"],
+        ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => {
+            vec!["Apple ProRes 422 HQ", "YouTube 1080p Full HD"]
+        }
+        ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => {
+            vec!["Broadcast MXF OP1a (DNxHD / PCM)", "Apple ProRes 422 HQ"]
+        }
         _ => vec!["Match Source - High Bitrate"],
     }
 }

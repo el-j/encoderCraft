@@ -118,6 +118,14 @@ pub enum MediaStreamKind {
     Document,
     /// 3D spatial asset (glTF, GLB, OBJ, STL, PLY).
     Spatial3D,
+    /// 2D CAD blueprint or technical drawing (AutoCAD DXF, DWG, HPGL).
+    Cad2D,
+    /// Multi-layer composite image with masks, layers, and adjustment channels (PSD, PSB, PhotoCraft).
+    LayeredComposite,
+    /// Procedural motion graphics, composition DAG, keyframed curves (After Effects AEP, EffectCraft).
+    MotionGraph,
+    /// Non-linear editing video timeline with cuts, tracks, and transitions (Premiere Pro PRPROJ, FilmCraft).
+    ProjectTimeline,
     /// Unknown or unprobed format.
     #[default]
     Unknown,
@@ -126,7 +134,7 @@ pub enum MediaStreamKind {
 impl MediaStreamKind {
     /// Returns true if this media kind contains a video stream.
     pub fn has_video(&self) -> bool {
-        matches!(self, Self::VideoWithAudio | Self::VideoOnly | Self::StillImage | Self::ImageSequence)
+        matches!(self, Self::VideoWithAudio | Self::VideoOnly | Self::StillImage | Self::ImageSequence | Self::MotionGraph | Self::ProjectTimeline)
     }
 
     /// Returns true if this media kind is strictly audio.
@@ -147,6 +155,26 @@ impl MediaStreamKind {
     /// Returns true if this media kind is a 3D asset.
     pub fn is_spatial_3d(&self) -> bool {
         matches!(self, Self::Spatial3D)
+    }
+
+    /// Returns true if this media kind is a 2D CAD technical drawing.
+    pub fn is_cad(&self) -> bool {
+        matches!(self, Self::Cad2D)
+    }
+
+    /// Returns true if this media kind is a layered image composite.
+    pub fn is_layered_composite(&self) -> bool {
+        matches!(self, Self::LayeredComposite)
+    }
+
+    /// Returns true if this media kind is a motion graphics composition.
+    pub fn is_motion_graph(&self) -> bool {
+        matches!(self, Self::MotionGraph)
+    }
+
+    /// Returns true if this media kind is an NLE project timeline.
+    pub fn is_project_timeline(&self) -> bool {
+        matches!(self, Self::ProjectTimeline)
     }
 }
 
@@ -203,6 +231,219 @@ pub enum ContainerType {
     Pdf,
     Docx,
     Idml,
+    // Adobe proprietary formats
+    AdobeInDesignIndd,
+    AdobePhotoshopPsd,
+    AdobePhotoshopPsb,
+    AdobeIllustratorAi,
+    AdobeAfterEffectsAep,
+    AdobePremierePrproj,
+    AdobeAuditionSesx,
+    // CAD & Technical drafting formats
+    AutocadDxf,
+    AutocadDwg,
+    HpglPlotter,
+    // Native ArtCraft creative formats
+    ArtcraftDesigncraft,
+    ArtcraftPhotocraft,
+    ArtcraftVectorcraft,
+    ArtcraftEffectcraft,
+    ArtcraftFilmcraft,
+    ArtcraftSoundcraft,
+    ArtcraftCadcraft,
+    ArtcraftAnicraft,
+}
+
+impl ContainerType {
+    /// Canonical file extension without leading dot.
+    pub fn file_extension(&self) -> &'static str {
+        match self {
+            Self::IsoBmffMp4 => "mp4",
+            Self::QuickTimeMov => "mov",
+            Self::MatroskaMkv => "mkv",
+            Self::WebM => "webm",
+            Self::MxfOp1a | Self::MxfOpAtom => "mxf",
+            Self::Wave => "wav",
+            Self::Aiff => "aif",
+            Self::Flac => "flac",
+            Self::OggAudio => "ogg",
+            Self::Mp3 => "mp3",
+            Self::StillSequence => "png",
+            Self::AnimatedGif => "gif",
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::WebP => "webp",
+            Self::Tiff => "tif",
+            Self::OpenExr => "exr",
+            Self::Bmp => "bmp",
+            Self::Svg => "svg",
+            Self::Gltf => "glb",
+            Self::Usdz => "usdz",
+            Self::Obj => "obj",
+            Self::Stl => "stl",
+            Self::Ply => "ply",
+            Self::Pdf => "pdf",
+            Self::Docx => "docx",
+            Self::Idml => "idml",
+            Self::AdobeInDesignIndd => "indd",
+            Self::AdobePhotoshopPsd => "psd",
+            Self::AdobePhotoshopPsb => "psb",
+            Self::AdobeIllustratorAi => "ai",
+            Self::AdobeAfterEffectsAep => "aep",
+            Self::AdobePremierePrproj => "prproj",
+            Self::AdobeAuditionSesx => "sesx",
+            Self::AutocadDxf => "dxf",
+            Self::AutocadDwg => "dwg",
+            Self::HpglPlotter => "plt",
+            Self::ArtcraftDesigncraft => "designcraft",
+            Self::ArtcraftPhotocraft => "photocraft",
+            Self::ArtcraftVectorcraft => "vectorcraft",
+            Self::ArtcraftEffectcraft => "effectcraft",
+            Self::ArtcraftFilmcraft => "filmcraft",
+            Self::ArtcraftSoundcraft => "soundcraft",
+            Self::ArtcraftCadcraft => "cadcraft",
+            Self::ArtcraftAnicraft => "anicraft",
+        }
+    }
+
+    /// User-friendly display name.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::IsoBmffMp4 => "MP4 (ISO BMFF)",
+            Self::QuickTimeMov => "QuickTime Movie (MOV)",
+            Self::MatroskaMkv => "Matroska Video (MKV)",
+            Self::WebM => "WebM",
+            Self::MxfOp1a => "MXF OP1a Broadcast",
+            Self::MxfOpAtom => "MXF OP-Atom",
+            Self::Wave => "Waveform Audio (WAV / BWF)",
+            Self::Aiff => "Audio Interchange (AIFF)",
+            Self::Flac => "Free Lossless Audio Codec (FLAC)",
+            Self::OggAudio => "Ogg Vorbis Audio",
+            Self::Mp3 => "MPEG Audio Layer 3 (MP3)",
+            Self::StillSequence => "Numbered Image Sequence",
+            Self::AnimatedGif => "Animated GIF",
+            Self::Png => "Portable Network Graphics (PNG)",
+            Self::Jpeg => "JPEG Image",
+            Self::WebP => "WebP Image",
+            Self::Tiff => "Tagged Image File Format (TIFF)",
+            Self::OpenExr => "ILM OpenEXR (Float)",
+            Self::Bmp => "Windows Bitmap (BMP)",
+            Self::Svg => "Scalable Vector Graphics (SVG)",
+            Self::Gltf => "glTF 2.0 Binary (GLB)",
+            Self::Usdz => "Apple AR Quick Look (USDZ)",
+            Self::Obj => "Wavefront 3D (OBJ)",
+            Self::Stl => "Stereolithography 3D (STL)",
+            Self::Ply => "Stanford Polygon 3D (PLY)",
+            Self::Pdf => "Portable Document Format (PDF)",
+            Self::Docx => "Microsoft Word Document (DOCX)",
+            Self::Idml => "InDesign Markup Language (IDML)",
+            Self::AdobeInDesignIndd => "Adobe InDesign Document (INDD)",
+            Self::AdobePhotoshopPsd => "Adobe Photoshop Document (PSD)",
+            Self::AdobePhotoshopPsb => "Adobe Photoshop Large Document (PSB)",
+            Self::AdobeIllustratorAi => "Adobe Illustrator Artwork (AI)",
+            Self::AdobeAfterEffectsAep => "Adobe After Effects Project (AEP)",
+            Self::AdobePremierePrproj => "Adobe Premiere Pro Project (PRPROJ)",
+            Self::AdobeAuditionSesx => "Adobe Audition Session (SESX)",
+            Self::AutocadDxf => "AutoCAD Drawing Exchange (DXF)",
+            Self::AutocadDwg => "AutoCAD Drawing (DWG)",
+            Self::HpglPlotter => "HPGL / PLT Plotter Stream",
+            Self::ArtcraftDesigncraft => "DesignCraft Publication (.designcraft)",
+            Self::ArtcraftPhotocraft => "PhotoCraft Composite (.photocraft)",
+            Self::ArtcraftVectorcraft => "VectorCraft Artwork (.vectorcraft)",
+            Self::ArtcraftEffectcraft => "EffectCraft Composition (.effectcraft)",
+            Self::ArtcraftFilmcraft => "FilmCraft Timeline (.filmcraft)",
+            Self::ArtcraftSoundcraft => "SoundCraft Session (.soundcraft)",
+            Self::ArtcraftCadcraft => "CadCraft Blueprint (.cadcraft)",
+            Self::ArtcraftAnicraft => "AniCraft Animation (.anicraft)",
+        }
+    }
+
+    /// Primary media domain for this container.
+    pub fn media_kind(&self) -> MediaStreamKind {
+        match self {
+            Self::IsoBmffMp4 | Self::QuickTimeMov | Self::MatroskaMkv | Self::WebM | Self::MxfOp1a | Self::MxfOpAtom | Self::AnimatedGif => {
+                MediaStreamKind::VideoWithAudio
+            }
+            Self::Wave | Self::Aiff | Self::Flac | Self::OggAudio | Self::Mp3 | Self::AdobeAuditionSesx | Self::ArtcraftSoundcraft => {
+                MediaStreamKind::AudioOnly
+            }
+            Self::Png | Self::Jpeg | Self::WebP | Self::Tiff | Self::OpenExr | Self::Bmp => MediaStreamKind::StillImage,
+            Self::StillSequence | Self::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
+            Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft => MediaStreamKind::Vector2D,
+            Self::Pdf | Self::Docx | Self::Idml | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => MediaStreamKind::Document,
+            Self::Gltf | Self::Usdz | Self::Obj | Self::Stl | Self::Ply => MediaStreamKind::Spatial3D,
+            Self::AutocadDxf | Self::AutocadDwg | Self::HpglPlotter | Self::ArtcraftCadcraft => MediaStreamKind::Cad2D,
+            Self::AdobePhotoshopPsd | Self::AdobePhotoshopPsb | Self::ArtcraftPhotocraft => MediaStreamKind::LayeredComposite,
+            Self::AdobeAfterEffectsAep | Self::ArtcraftEffectcraft => MediaStreamKind::MotionGraph,
+            Self::AdobePremierePrproj | Self::ArtcraftFilmcraft => MediaStreamKind::ProjectTimeline,
+        }
+    }
+
+    /// Returns valid, compatible target container types for transcode or export from this source container.
+    pub fn valid_conversion_targets(&self) -> Vec<ContainerType> {
+        match self.media_kind() {
+            MediaStreamKind::AudioOnly => vec![Self::Wave, Self::Aiff, Self::Flac, Self::Mp3, Self::OggAudio, Self::ArtcraftSoundcraft],
+            MediaStreamKind::VideoWithAudio | MediaStreamKind::VideoOnly => vec![
+                Self::IsoBmffMp4,
+                Self::QuickTimeMov,
+                Self::WebM,
+                Self::MatroskaMkv,
+                Self::MxfOp1a,
+                Self::MxfOpAtom,
+                Self::AnimatedGif,
+                Self::StillSequence,
+                Self::Wave,
+                Self::Aiff,
+                Self::Flac,
+                Self::Mp3,
+            ],
+            MediaStreamKind::StillImage => {
+                vec![Self::Png, Self::Jpeg, Self::WebP, Self::Tiff, Self::OpenExr, Self::Bmp, Self::AdobePhotoshopPsd, Self::ArtcraftPhotocraft]
+            }
+            MediaStreamKind::LayeredComposite => vec![
+                Self::ArtcraftPhotocraft,
+                Self::AdobePhotoshopPsd,
+                Self::AdobePhotoshopPsb,
+                Self::OpenExr,
+                Self::Tiff,
+                Self::Png,
+                Self::Jpeg,
+                Self::WebP,
+                Self::Bmp,
+            ],
+            MediaStreamKind::Vector2D => vec![Self::ArtcraftVectorcraft, Self::Svg, Self::Pdf, Self::AutocadDxf, Self::Png, Self::AdobeIllustratorAi],
+            MediaStreamKind::Document => vec![Self::ArtcraftDesigncraft, Self::Pdf, Self::Idml, Self::Docx, Self::Png, Self::Tiff],
+            MediaStreamKind::Spatial3D => vec![Self::Gltf, Self::Usdz, Self::Obj, Self::Stl, Self::Ply],
+            MediaStreamKind::Cad2D => {
+                vec![Self::ArtcraftCadcraft, Self::AutocadDxf, Self::AutocadDwg, Self::Svg, Self::Pdf, Self::HpglPlotter, Self::Png]
+            }
+            MediaStreamKind::MotionGraph => vec![
+                Self::ArtcraftEffectcraft,
+                Self::IsoBmffMp4,
+                Self::QuickTimeMov,
+                Self::WebM,
+                Self::MatroskaMkv,
+                Self::AnimatedGif,
+                Self::StillSequence,
+                Self::Svg,
+            ],
+            MediaStreamKind::ProjectTimeline => {
+                vec![Self::ArtcraftFilmcraft, Self::IsoBmffMp4, Self::QuickTimeMov, Self::MxfOp1a, Self::MatroskaMkv, Self::Wave]
+            }
+            MediaStreamKind::ImageSequence => vec![
+                Self::IsoBmffMp4,
+                Self::QuickTimeMov,
+                Self::WebM,
+                Self::MatroskaMkv,
+                Self::AnimatedGif,
+                Self::Png,
+                Self::Tiff,
+                Self::OpenExr,
+                Self::ArtcraftAnicraft,
+            ],
+            MediaStreamKind::Unknown => vec![Self::IsoBmffMp4, Self::QuickTimeMov, Self::Wave, Self::Png],
+        }
+    }
 }
 
 /// Output target specifications.
@@ -355,5 +596,64 @@ mod tests {
         let json = spec.to_json().unwrap();
         let deserialized = CraftJobSpec::from_json(&json).unwrap();
         assert_eq!(spec, deserialized);
+    }
+
+    #[test]
+    fn test_container_type_extensions_and_media_kinds() {
+        assert_eq!(ContainerType::AdobeInDesignIndd.file_extension(), "indd");
+        assert_eq!(ContainerType::AdobePhotoshopPsd.file_extension(), "psd");
+        assert_eq!(ContainerType::AdobePhotoshopPsb.file_extension(), "psb");
+        assert_eq!(ContainerType::AdobeIllustratorAi.file_extension(), "ai");
+        assert_eq!(ContainerType::AdobeAfterEffectsAep.file_extension(), "aep");
+        assert_eq!(ContainerType::AdobePremierePrproj.file_extension(), "prproj");
+        assert_eq!(ContainerType::AdobeAuditionSesx.file_extension(), "sesx");
+        assert_eq!(ContainerType::AutocadDxf.file_extension(), "dxf");
+        assert_eq!(ContainerType::AutocadDwg.file_extension(), "dwg");
+        assert_eq!(ContainerType::HpglPlotter.file_extension(), "plt");
+        assert_eq!(ContainerType::ArtcraftDesigncraft.file_extension(), "designcraft");
+        assert_eq!(ContainerType::ArtcraftPhotocraft.file_extension(), "photocraft");
+        assert_eq!(ContainerType::ArtcraftVectorcraft.file_extension(), "vectorcraft");
+        assert_eq!(ContainerType::ArtcraftEffectcraft.file_extension(), "effectcraft");
+        assert_eq!(ContainerType::ArtcraftFilmcraft.file_extension(), "filmcraft");
+        assert_eq!(ContainerType::ArtcraftSoundcraft.file_extension(), "soundcraft");
+        assert_eq!(ContainerType::ArtcraftCadcraft.file_extension(), "cadcraft");
+        assert_eq!(ContainerType::ArtcraftAnicraft.file_extension(), "anicraft");
+
+        // Media kind mapping
+        assert_eq!(ContainerType::AdobeInDesignIndd.media_kind(), MediaStreamKind::Document);
+        assert_eq!(ContainerType::AdobePhotoshopPsd.media_kind(), MediaStreamKind::LayeredComposite);
+        assert_eq!(ContainerType::AutocadDxf.media_kind(), MediaStreamKind::Cad2D);
+        assert_eq!(ContainerType::AdobeAfterEffectsAep.media_kind(), MediaStreamKind::MotionGraph);
+        assert_eq!(ContainerType::AdobePremierePrproj.media_kind(), MediaStreamKind::ProjectTimeline);
+        assert_eq!(ContainerType::AdobeAuditionSesx.media_kind(), MediaStreamKind::AudioOnly);
+    }
+
+    #[test]
+    fn test_container_type_valid_conversion_targets() {
+        let cad_targets = ContainerType::AutocadDxf.valid_conversion_targets();
+        assert!(cad_targets.contains(&ContainerType::ArtcraftCadcraft));
+        assert!(cad_targets.contains(&ContainerType::Svg));
+
+        let doc_targets = ContainerType::AdobeInDesignIndd.valid_conversion_targets();
+        assert!(doc_targets.contains(&ContainerType::ArtcraftDesigncraft));
+        assert!(doc_targets.contains(&ContainerType::Pdf));
+        assert!(doc_targets.contains(&ContainerType::Idml));
+
+        let psd_targets = ContainerType::AdobePhotoshopPsd.valid_conversion_targets();
+        assert!(psd_targets.contains(&ContainerType::ArtcraftPhotocraft));
+        assert!(psd_targets.contains(&ContainerType::OpenExr));
+    }
+
+    #[test]
+    fn test_media_stream_kind_classification() {
+        assert!(MediaStreamKind::Cad2D.is_cad());
+        assert!(!MediaStreamKind::Cad2D.has_video());
+
+        assert!(MediaStreamKind::LayeredComposite.is_layered_composite());
+        assert!(MediaStreamKind::MotionGraph.is_motion_graph());
+        assert!(MediaStreamKind::MotionGraph.has_video());
+
+        assert!(MediaStreamKind::ProjectTimeline.is_project_timeline());
+        assert!(MediaStreamKind::ProjectTimeline.has_video());
     }
 }
