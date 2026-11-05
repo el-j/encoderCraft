@@ -4,9 +4,12 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(unix)]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 
 use encodercraft_core::EncoderError;
@@ -27,6 +30,7 @@ pub trait IpcHandler: Send + Sync + 'static {
 pub struct IpcServer {
     is_running: Arc<AtomicBool>,
     worker_thread: Option<JoinHandle<()>>,
+    #[cfg(unix)]
     socket_path: Option<PathBuf>,
     #[cfg(unix)]
     socket_identity: Option<(u64, u64)>,
@@ -63,6 +67,7 @@ impl IpcServer {
         Ok(Self {
             is_running,
             worker_thread: Some(handle),
+            #[cfg(unix)]
             socket_path: None,
             #[cfg(unix)]
             socket_identity: None,
