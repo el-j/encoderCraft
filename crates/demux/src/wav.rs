@@ -221,8 +221,14 @@ pub fn decode_wav_samples(header: &WavHeaderInfo, bytes: &[u8], max_samples: usi
     let sample_data = bytes.get(header.data_offset..).ok_or_else(|| EncoderError::InvalidContainer("data chunk offset out of range".into()))?;
 
     let bytes_per_sample = (header.bits_per_sample / 8) as usize;
+    if bytes_per_sample == 0 {
+        return Err(EncoderError::InvalidContainer(format!("unsupported WAV sample size of {} bits", header.bits_per_sample)));
+    }
     let frame_bytes =
         (header.channels as usize).checked_mul(bytes_per_sample).ok_or(EncoderError::Internal("arithmetic overflow in frame bytes".into()))?;
+    if frame_bytes == 0 {
+        return Err(EncoderError::InvalidContainer("WAV declares no channels".into()));
+    }
 
     let available_frames = sample_data.len() / frame_bytes.max(1);
     let frames_to_read = available_frames.min(max_samples);
