@@ -56,7 +56,7 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 | Queue table column customisation, in-table context menus | Partial | #34 |
 | ICC, image sequences, 16-bit pipelines | Missing | #22–#24 |
 | Bounded video/audio streaming, frame transforms, progress ETA, and encoder configuration depth | Implemented | #17, #18 |
-| Installer smoke tests, fuzzing, E2E QA | Partial: real-media QA is enforced in CI; all seven bounded libFuzzer targets built and passed a local seeded smoke run, while installer execution and sustained fuzzing await clean-runner CI | #41–#43 |
+| Installer smoke tests, fuzzing, E2E QA | Partial: CI checks FFmpeg-generated media, not actual phone/screen recordings; human checks are tracked in [manual-release-qa.md](./manual-release-qa.md). All seven bounded libFuzzer targets built and passed a local seeded smoke run; installer execution and sustained fuzzing await clean-runner CI | #41–#43 |
 
 ---
 

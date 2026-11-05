@@ -1,8 +1,9 @@
-//! Real-media QA matrix: sources made by an independent encoder (ffmpeg) are converted through the
+//! Generated-media QA matrix: deterministic sources made by FFmpeg are converted through the
 //! CLI and the queue, and the outputs are judged by an independent decoder (ffprobe/ffmpeg):
 //! frame count, frame rate, size, audio presence and picture similarity.
 //!
-//! The matrix needs `ffmpeg` and `ffprobe` on `PATH`; it is skipped (loudly) when they are absent.
+//! This is not a substitute for checking actual phone or screen recordings. The matrix needs
+//! `ffmpeg` and `ffprobe` on `PATH`; it is skipped (loudly) when they are absent.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

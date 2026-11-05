@@ -45,6 +45,7 @@ jobs:
               stream.setframerate(48000)
               stream.writeframes(b"\0\0" * 2048)
           PY
+          python3 fuzz/seed_corpus.py "$RUNNER_TEMP/encodercraft-corpus"
       - name: Run bounded decoder, parser and state fuzz targets
         run: |
           set -euo pipefail

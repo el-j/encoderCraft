@@ -30,7 +30,11 @@ User-facing names say **EncoderCraft**. Files, binaries and ids stay lowercase
    *Actions > release-smoke > Run workflow*. The workflow reads the draft by its tag, so if it
    cannot find the draft, download the assets and run the matching script under
    `packaging/smoke/`.
-5. **Publish** the draft in the GitHub UI. Publishing creates the tag. A version with a suffix
+5. **Complete manual QA.** Run the human-only checks in
+   [manual-release-qa.md](./manual-release-qa.md) against the exact candidate and retain the
+   results with the release record. Synthetic CI fixtures do not replace testing phone footage or
+   screen recordings.
+6. **Publish** the draft in the GitHub UI. Publishing creates the tag. A version with a suffix
    (`-alpha.1`, `-rc.1`) is marked as a pre-release.
 
 Pushing to `release` again before publishing rebuilds the same draft. Once published, bump the
@@ -38,8 +42,9 @@ version before releasing again.
 
 **Test runs:** *Actions > Release > Run workflow* with an optional `version` override. On any
 branch other than `release` it is a dry run: the signing jobs are refused by the `release`
-environment and no draft is created. Download unsigned workflow artifacts and run the matching
-smoke scripts locally; `release-smoke` downloads assets attached to a draft release.
+environment and no draft is created. Download unsigned workflow artifacts and either run the
+matching smoke scripts locally or dispatch `release-smoke` with the Release run ID and version.
+The workflow downloads that run's unsigned artifacts without requiring a draft.
 
 ## What gets built
 

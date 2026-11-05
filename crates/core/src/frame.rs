@@ -247,4 +247,11 @@ mod tests {
         assert_eq!(u_stride, 960);
         assert_eq!(u_slice.len(), 960 * 540);
     }
+
+    #[test]
+    fn rejects_frame_dimensions_over_the_allocation_limit() {
+        let dim = Dimensions::new(16_000, 9_000).unwrap();
+        let error = VideoFrame::new_allocated(dim, PixelFormat::Rgba8, ColorSpaceTag::REC709, 0, 1, Rational64::FPS_30);
+        assert!(error.is_err());
+    }
 }

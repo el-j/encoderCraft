@@ -12,13 +12,18 @@ on:
         description: "Version to check, e.g. 0.1.0-alpha.2 (empty: Cargo.toml)"
         type: string
         default: ""
+      artifact_run_id:
+        description: "Release workflow run ID to test unsigned artifacts before attaching or publishing"
+        type: string
+        default: ""
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   media-qa:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'release')
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
@@ -39,7 +44,7 @@ jobs:
         run: cargo test -p encodercraft-cli --test qa_matrix -- --nocapture
 
   version:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'release')
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -48,8 +53,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
       - id: v
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
-          v="${{ inputs.version }}"
+          v="$VERSION_INPUT"
+          run_id="$ARTIFACT_RUN_ID"
+          if [ -n "$run_id" ] && [ -z "$v" ]; then
+            echo "version is required when testing artifacts from a workflow run" >&2
+            exit 2
+          fi
           [ -n "$v" ] || v="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml | head -n 1)"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
@@ -61,21 +74,27 @@ jobs:
         include:
           - os: ubuntu-24.04
             asset: "linux-x86_64.tar.gz"
+            artifact: "release-linux-x86_64"
           - os: windows-latest
             asset: "windows-x64-portable.zip"
+            artifact: "release-windows-x64"
           - os: macos-latest
             asset: "cli-macos-universal.zip"
+            artifact: "release-macos"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
-      - name: Download the release artifact
+      - id: download
+        name: Download the release artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
           ASSET: ${{ matrix.asset }}
+          ARTIFACT: ${{ matrix.artifact }}
+          RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           mkdir -p dl
           if [ "$ASSET" = "cli-macos-universal.zip" ]; then
@@ -83,13 +102,21 @@ jobs:
           else
             pattern="encodercraft-${VERSION}-${ASSET}"
           fi
-          gh release download "v${VERSION}" --repo "${{ github.repository }}" --pattern "$pattern" --dir dl
-          ls -l dl
+          if [ -n "$RUN_ID" ]; then
+            case "$RUN_ID" in *[!0-9]*) echo "invalid artifact_run_id: $RUN_ID" >&2; exit 2 ;; esac
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT" --dir dl
+          else
+            gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$pattern" --dir dl
+          fi
+          archive="$(find dl -type f -name "$pattern" -print -quit)"
+          [ -n "$archive" ] || { echo "FAIL: artifact $pattern not found" >&2; exit 1; }
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
       - name: Smoke test
         shell: bash
         env:
           VERSION: ${{ needs.version.outputs.version }}
-        run: packaging/smoke/smoke-release.sh dl/* "$VERSION"
+          ARCHIVE: ${{ steps.download.outputs.archive }}
+        run: packaging/smoke/smoke-release.sh "$ARCHIVE" "$VERSION"
 
   install-linux:
     needs: version
@@ -108,20 +135,31 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
-      - name: Download package
+      - id: download
+        name: Download package
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
           EXTENSION: ${{ matrix.extension }}
+          RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           mkdir -p dl
-          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
-            --pattern "encodercraft-${VERSION}-linux-x86_64.${EXTENSION}" --dir dl
+          pattern="encodercraft-${VERSION}-linux-x86_64.${EXTENSION}"
+          if [ -n "$RUN_ID" ]; then
+            case "$RUN_ID" in *[!0-9]*) echo "invalid artifact_run_id: $RUN_ID" >&2; exit 2 ;; esac
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name release-linux-x86_64 --dir dl
+          else
+            gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$pattern" --dir dl
+          fi
+          package="$(find dl -type f -name "$pattern" -print -quit)"
+          [ -n "$package" ] || { echo "FAIL: package $pattern not found" >&2; exit 1; }
+          echo "package=$package" >> "$GITHUB_OUTPUT"
       - name: Install and smoke-test package
         env:
           KIND: ${{ matrix.kind }}
           VERSION: ${{ needs.version.outputs.version }}
-        run: bash packaging/smoke/smoke-installed-linux.sh "$KIND" dl/* "$VERSION" packaging/smoke/smoke.bmp
+          PACKAGE: ${{ steps.download.outputs.package }}
+        run: bash packaging/smoke/smoke-installed-linux.sh "$KIND" "$PACKAGE" "$VERSION" packaging/smoke/smoke.bmp
 
   install-macos:
     needs: version
@@ -130,20 +168,34 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
-      - name: Download DMG and CLI package
+      - id: download
+        name: Download DMG and CLI package
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           mkdir -p dl
-          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
-            --pattern "encodercraft-${VERSION}-macos-universal.dmg" --dir dl
-          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
-            --pattern "encodercraft-cli-${VERSION}-macos-universal.zip" --dir dl
+          if [ -n "$RUN_ID" ]; then
+            case "$RUN_ID" in *[!0-9]*) echo "invalid artifact_run_id: $RUN_ID" >&2; exit 2 ;; esac
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name release-macos --dir dl
+          else
+            gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" \
+              --pattern "encodercraft-${VERSION}-macos-universal.dmg" --dir dl
+            gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" \
+              --pattern "encodercraft-cli-${VERSION}-macos-universal.zip" --dir dl
+          fi
+          dmg="$(find dl -type f -name "encodercraft-${VERSION}-macos-universal.dmg" -print -quit)"
+          cli="$(find dl -type f -name "encodercraft-cli-${VERSION}-macos-universal.zip" -print -quit)"
+          [ -n "$dmg" ] && [ -n "$cli" ] || { echo "FAIL: macOS release artifacts not found" >&2; exit 1; }
+          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+          echo "cli=$cli" >> "$GITHUB_OUTPUT"
       - name: Install and smoke-test DMG
         env:
           VERSION: ${{ needs.version.outputs.version }}
-        run: bash packaging/smoke/smoke-installed-macos.sh dl/*.dmg dl/*cli*.zip "$VERSION" packaging/smoke/smoke.bmp
+          DMG: ${{ steps.download.outputs.dmg }}
+          CLI: ${{ steps.download.outputs.cli }}
+        run: bash packaging/smoke/smoke-installed-macos.sh "$DMG" "$CLI" "$VERSION" packaging/smoke/smoke.bmp
 
   install-windows:
     needs: version
@@ -152,17 +204,28 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
-      - name: Download MSI
+      - id: download
+        name: Download MSI
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           mkdir -p dl
-          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
-            --pattern "encodercraft-${VERSION}-windows-x64.msi" --dir dl
+          pattern="encodercraft-${VERSION}-windows-x64.msi"
+          if [ -n "$RUN_ID" ]; then
+            case "$RUN_ID" in *[!0-9]*) echo "invalid artifact_run_id: $RUN_ID" >&2; exit 2 ;; esac
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name release-windows-x64 --dir dl
+          else
+            gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$pattern" --dir dl
+          fi
+          msi="$(find dl -type f -name "$pattern" -print -quit)"
+          [ -n "$msi" ] || { echo "FAIL: MSI $pattern not found" >&2; exit 1; }
+          echo "msi=$msi" >> "$GITHUB_OUTPUT"
       - name: Install and smoke-test MSI
         shell: pwsh
         env:
           VERSION: ${{ needs.version.outputs.version }}
-        run: ./packaging/smoke/smoke-installed-windows.ps1 -MsiPath (Get-ChildItem dl/*.msi).FullName -Version $env:VERSION -Fixture packaging/smoke/smoke.bmp
+          MSI: ${{ steps.download.outputs.msi }}
+        run: ./packaging/smoke/smoke-installed-windows.ps1 -MsiPath $env:MSI -Version $env:VERSION -Fixture packaging/smoke/smoke.bmp
