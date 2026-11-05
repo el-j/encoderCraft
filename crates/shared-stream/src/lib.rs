@@ -1,4 +1,17 @@
 //! Bounded zero-copy media packets over a local shared-memory service.
+//!
+//! This is a **push/subscribe** contract: a producer publishes timestamped packets and a consumer
+//! reads them in order. It is not a request-by-time frame API (a consumer cannot ask for frame N),
+//! so it does not replace the frame-request direction discussed in storytold/filmcraft#1024.
+//!
+//! The crate is deliberately self-contained and stays in encoderCraft until a second application
+//! links it, so the header and producer protocol may still change. `pts` and `duration` are plain
+//! integers in the stream's own units and are expected to move to the shared rational time type
+//! (storytold/craft-libs#15) rather than grow a second time type.
+//!
+//! Producer protocol: [`SharedStreamPublisher::wait_for_subscriber`], then
+//! [`SharedStreamPublisher::publish_with`] for each packet, then [`SharedStreamPublisher::finish`].
+//! Skipping the first or last step loses packets (see `publish_with`).
 
 use std::fmt::Display;
 

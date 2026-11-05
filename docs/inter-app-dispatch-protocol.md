@@ -78,6 +78,8 @@ producer.send_audio(&interleaved_f32)?;                // whole frames of `chann
 producer.finish(Duration::from_secs(60))?;             // end-of-stream, then wait for the receiver
 ```
 
+**Scope and status of this contract.** It is push/subscribe, not request-by-time, so it does not replace the frame-request direction in storytold/filmcraft#1024. It is local, CPU RGBA/f32 only, and has no clock-domain, capability negotiation, GPU-surface or reconnect semantics. It lives in encoderCraft (`crates/shared-stream`, `crates/source/src/pipe.rs`) and will move to craft-libs only once a second application links it (maintainer guidance on storytold/craft-libs#230); until then the header and protocol may change. The control channel for job hand-off is intended to ride on `craft-ipc` (storytold/craft-libs#433).
+
 **Trying it from the command line.** In one terminal run the receiving job, in another a synthetic producer:
 
 ```sh
