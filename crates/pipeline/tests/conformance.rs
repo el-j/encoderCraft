@@ -458,7 +458,7 @@ fn shared_memory_stream_encodes_to_a_real_mp4() {
     let endpoint = format!("encodercraft/conformance-{}", std::process::id());
     let producer_endpoint = endpoint.clone();
     let producer = std::thread::spawn(move || {
-        let publisher = SharedStreamPublisher::create(&producer_endpoint).unwrap();
+        let publisher = SharedStreamPublisher::create(&producer_endpoint, 48_000 * 2 * 4).unwrap();
         assert!(publisher.wait_for_subscriber(std::time::Duration::from_secs(30)));
         for i in 0..FRAMES {
             let frame = test_frame(i);

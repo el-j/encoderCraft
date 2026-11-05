@@ -16,6 +16,8 @@ use filmcraft_frame::{AudioBuffer, VideoFrame};
 use filmcraft_media::{FrameRequest, MediaError, MediaInfo, MediaKind, MediaSource, VideoStreamInfo};
 use filmcraft_time::{FrameRate, TICKS_PER_SECOND, Tick};
 
+/// Largest audio payload published in one packet; longer buffers are split.
+const AUDIO_PACKET_BYTES: usize = 1024 * 1024;
 /// Largest declared picture edge.
 const MAX_EDGE: u32 = 16_384;
 /// Default cap on received frame and sample bytes held for one stream.
@@ -292,7 +294,9 @@ impl PipeProducer {
     /// Declares the stream. The format must match the `Pipe` source of the job that consumes it.
     pub fn create(format: PipeFormat) -> Result<Self, EncoderError> {
         validate(&format)?;
-        let publisher = encodercraft_shared_stream::SharedStreamPublisher::create(&format.endpoint)?;
+        let picture = if format.width > 0 { frame_bytes(&format)? } else { 0 };
+        let capacity = picture.max(AUDIO_PACKET_BYTES);
+        let publisher = encodercraft_shared_stream::SharedStreamPublisher::create(&format.endpoint, capacity)?;
         Ok(Self { format, publisher, frames_sent: 0 })
     }
 
@@ -342,21 +346,24 @@ impl PipeProducer {
         if interleaved.iter().any(|sample| !sample.is_finite()) {
             return Err(EncoderError::InvalidJobSpec(format!("pipe `{}`: audio contains a non-finite sample", self.format.endpoint)));
         }
-        let bytes = interleaved.len().saturating_mul(4);
-        self.publisher.publish_with(
-            encodercraft_shared_stream::SharedStreamHeader {
-                kind: SharedStreamKind::AudioSamples,
-                pts: 0,
-                duration: (interleaved.len() / channels) as i64,
-                payload_bytes: bytes as u64,
-            },
-            |payload| {
-                for (chunk, sample) in payload.as_chunks_mut::<4>().0.iter_mut().zip(interleaved) {
-                    *chunk = sample.to_le_bytes();
-                }
-                Ok(())
-            },
-        )
+        let frames_per_packet = (AUDIO_PACKET_BYTES / (channels * 4)).max(1);
+        for packet in interleaved.chunks(frames_per_packet * channels) {
+            self.publisher.publish_with(
+                encodercraft_shared_stream::SharedStreamHeader {
+                    kind: SharedStreamKind::AudioSamples,
+                    pts: 0,
+                    duration: (packet.len() / channels) as i64,
+                    payload_bytes: (packet.len() * 4) as u64,
+                },
+                |payload| {
+                    for (chunk, sample) in payload.as_chunks_mut::<4>().0.iter_mut().zip(packet) {
+                        *chunk = sample.to_le_bytes();
+                    }
+                    Ok(())
+                },
+            )?;
+        }
+        Ok(())
     }
 
     /// Ends the stream and waits for the receiver to finish reading it.
@@ -391,7 +398,7 @@ mod tests {
 
     fn produce(name: String, video: &'static [u8], frames: u8, audio_samples: usize, extra_video: Option<Vec<u8>>) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
-            let publisher = SharedStreamPublisher::create(&name).unwrap();
+            let publisher = SharedStreamPublisher::create(&name, 4096).unwrap();
             assert!(publisher.wait_for_subscriber(Duration::from_secs(10)));
             for i in 0..frames {
                 let pixels: Vec<u8> = video.iter().map(|b| b.wrapping_add(i)).collect();
@@ -460,7 +467,7 @@ mod tests {
     fn silent_producer_times_out() {
         let name = endpoint();
         let format = format(name.clone());
-        let _publisher = SharedStreamPublisher::create(&name).unwrap();
+        let _publisher = SharedStreamPublisher::create(&name, 4096).unwrap();
         let limits = PipeLimits { idle_timeout: Duration::from_millis(100), ..PipeLimits::default() };
         let error = PipeSource::receive(&format, limits).err().unwrap();
         assert!(matches!(error, EncoderError::Io(_)), "{error:?}");
@@ -525,5 +532,23 @@ mod tests {
             PipeFormat { endpoint: endpoint(), width: 0, height: 0, frame_rate: Rational64 { num: 1, den: 1 }, sample_rate: 8_000, channels: 1 };
         let mut audio_only = PipeProducer::create(no_video).unwrap();
         assert!(audio_only.send_video(&[]).is_err());
+    }
+
+    #[test]
+    fn audio_larger_than_one_packet_is_split_and_received_whole() {
+        let format =
+            PipeFormat { endpoint: endpoint(), width: 0, height: 0, frame_rate: Rational64 { num: 1, den: 1 }, sample_rate: 48_000, channels: 2 };
+        let mut producer = PipeProducer::create(format.clone()).unwrap();
+        let reader = std::thread::spawn({
+            let format = format.clone();
+            move || PipeSource::receive(&format, PipeLimits::default())
+        });
+        assert!(producer.wait_for_receiver(Duration::from_secs(10)));
+        let samples = 2 * (AUDIO_PACKET_BYTES / 4) * 3 + 2;
+        producer.send_audio(&vec![0.1; samples]).unwrap();
+        assert!(producer.finish(Duration::from_secs(10)).unwrap());
+        let source = reader.join().unwrap().unwrap();
+        let audio = source.audio(0, samples / 2, 48_000).unwrap();
+        assert_eq!(audio.frames(), samples / 2);
     }
 }
