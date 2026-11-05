@@ -4,13 +4,16 @@ use std::fmt::Display;
 
 use encodercraft_core::EncoderError;
 use iceoryx2::node::{Node, NodeBuilder};
+use iceoryx2::port::update_connections::UpdateConnections as _;
 use iceoryx2::port::{backpressure_strategy::BackpressureStrategy, publisher::Publisher, subscriber::Subscriber};
+use iceoryx2::prelude::PortFactory as _;
 use iceoryx2::service::{ipc, port_factory::publish_subscribe::PortFactory, service_name::ServiceName};
 
 const HEADER_SIZE: usize = 32;
 const HEADER_MAGIC: &[u8; 4] = b"ECST";
 const HEADER_VERSION: u16 = 1;
 const STREAM_BUFFER_DEPTH: usize = 2;
+const ATTACH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Maximum media payload accepted in a single shared-memory packet.
 pub const MAX_SHARED_STREAM_PAYLOAD_BYTES: usize = 512 * 1024 * 1024;
@@ -76,11 +79,41 @@ impl SharedStreamPublisher {
         Ok(Self { _node: node, _service: service, publisher })
     }
 
+    /// Blocks until a receiver is attached or `timeout` elapses. Packets published while no
+    /// receiver is attached are dropped, so producers call this before the first packet.
+    pub fn wait_for_subscriber(&self, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self._service.dynamic_config().number_of_subscribers() > 0 && self.publisher.update_connections().is_ok() {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Publishes the end-of-stream packet, then keeps the stream alive until every receiver has
+    /// detached or `timeout` elapses. Packets live in the publisher's shared memory, so dropping a
+    /// publisher while receivers still hold unread packets would discard them.
+    pub fn finish(self, timeout: std::time::Duration) -> Result<bool, EncoderError> {
+        self.publish_with(SharedStreamHeader { kind: SharedStreamKind::EndOfStream, pts: 0, duration: 0, payload_bytes: 0 }, |_| Ok(()))?;
+        let deadline = std::time::Instant::now() + timeout;
+        while self._service.dynamic_config().number_of_subscribers() > 0 {
+            if std::time::Instant::now() >= deadline {
+                return Ok(false);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        Ok(true)
+    }
+
     /// Loans shared memory to the caller, which fills it in place before publication.
     ///
     /// The callback writes directly into the shared sample; media bytes are not copied into a
     /// socket buffer or serialized `Vec`.
-    pub fn publish_with(&self, header: SharedStreamHeader, fill: impl FnOnce(&mut [u8]) -> Result<(), EncoderError>) -> Result<(), EncoderError> {
+    pub fn publish_with(&self, header: SharedStreamHeader, mut fill: impl FnMut(&mut [u8]) -> Result<(), EncoderError>) -> Result<(), EncoderError> {
         if header.payload_bytes > MAX_SHARED_STREAM_PAYLOAD_BYTES as u64 {
             return Err(EncoderError::InvalidJobSpec(format!(
                 "shared stream payload ({} bytes) exceeds the {} byte limit",
@@ -95,13 +128,27 @@ impl SharedStreamPublisher {
             .map_err(|_| EncoderError::InvalidJobSpec("shared stream payload length exceeds this platform's address space".into()))?;
         let sample_len =
             HEADER_SIZE.checked_add(payload_len).ok_or_else(|| EncoderError::InvalidJobSpec("shared stream packet size overflow".into()))?;
-        let mut sample = self.publisher.loan_slice(sample_len).map_err(|error| io_error("loan shared stream sample", error))?;
-        let bytes = sample.payload_mut();
-        let (header_bytes, media_bytes) = bytes.split_at_mut(HEADER_SIZE);
-        encode_header(header, header_bytes)?;
-        fill(media_bytes)?;
-        sample.send().map_err(|error| io_error("publish shared stream sample", error))?;
-        Ok(())
+
+        // A receiver that has registered but not finished connecting drops packets once the
+        // connection buffer is full, and `send` reports that as zero deliveries. Retry until it is
+        // connected, or give up when it detaches or never connects.
+        let deadline = std::time::Instant::now() + ATTACH_TIMEOUT;
+        loop {
+            let mut sample = self.publisher.loan_slice(sample_len).map_err(|error| io_error("loan shared stream sample", error))?;
+            let bytes = sample.payload_mut();
+            let (header_bytes, media_bytes) = bytes.split_at_mut(HEADER_SIZE);
+            encode_header(header, header_bytes)?;
+            fill(media_bytes)?;
+            let delivered = sample.send().map_err(|error| io_error("publish shared stream sample", error))?;
+            if delivered > 0 || self._service.dynamic_config().number_of_subscribers() == 0 {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(EncoderError::Io("shared stream receiver attached but never connected".into()));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            self.publisher.update_connections().map_err(|error| io_error("update shared stream connections", error))?;
+        }
     }
 }
 
@@ -166,8 +213,8 @@ fn stream_service(node: &Node<IpcService>, name: &ServiceName) -> Result<SharedS
     node.service_builder(name)
         .publish_subscribe::<[u8]>()
         .enable_safe_overflow(false)
-        .subscriber_max_borrowed_samples(1)
-        .history_size(STREAM_BUFFER_DEPTH)
+        .subscriber_max_borrowed_samples(STREAM_BUFFER_DEPTH)
+        .history_size(0)
         .subscriber_max_buffer_size(STREAM_BUFFER_DEPTH)
         .open_or_create()
         .map_err(|error| io_error("open shared stream service", error))

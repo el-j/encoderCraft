@@ -38,7 +38,16 @@ pub(crate) fn open_reader_at(source: &SourceDescriptor, sequence_rate: Option<Ra
     match source {
         SourceDescriptor::File { path, .. } => MediaReader::open_with_rate(path, sequence_rate),
         SourceDescriptor::StitchedClips { .. } => Err(EncoderError::UnsupportedCodec("stitched sources are processed by the clip stitcher".into())),
-        SourceDescriptor::Pipe { .. } => Err(EncoderError::UnsupportedCodec("pipe sources are not supported by file transcoding".into())),
+        SourceDescriptor::Pipe { endpoint, width, height, frame_rate, sample_rate, channels } => {
+            MediaReader::open_pipe(&encodercraft_source::pipe::PipeFormat {
+                endpoint: endpoint.clone(),
+                width: *width,
+                height: *height,
+                frame_rate: *frame_rate,
+                sample_rate: *sample_rate,
+                channels: *channels,
+            })
+        }
         SourceDescriptor::ProjectReference { .. } => {
             Err(EncoderError::UnsupportedCodec("project references must be rendered by their host application first".into()))
         }

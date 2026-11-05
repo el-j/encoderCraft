@@ -10,6 +10,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod pipe;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -335,6 +337,13 @@ impl MediaReader {
             file_size: Some(meta.len()),
         };
         Ok(Some(Self { source: None, still: Some(StillPixels { width, height, rgba }), probe }))
+    }
+
+    /// Opens the media streamed by a sibling application over shared memory, receiving it on first
+    /// use. Call [`pipe::release`] when the job that owns the stream has finished.
+    pub fn open_pipe(format: &pipe::PipeFormat) -> Result<Self, EncoderError> {
+        let source = pipe::open_shared(format, pipe::PipeLimits::default())?;
+        Ok(Self::from_source(source))
     }
 
     /// Wraps an already opened filmcraft media source.
