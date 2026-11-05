@@ -15,6 +15,7 @@ encodercraft-core = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-engine = { workspace = true }
 encodercraft-ipc = { workspace = true }
+encodercraft-dispatch = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-ui-egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "x11", "wayland"] }

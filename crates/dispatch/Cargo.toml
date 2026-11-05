@@ -11,9 +11,13 @@ workspace = true
 
 [dependencies]
 encodercraft-core = { workspace = true }
+encodercraft-shared-stream = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["process", "std"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

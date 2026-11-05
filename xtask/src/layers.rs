@@ -35,6 +35,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("color", Class::Layer(0)),
     ("core", Class::Layer(1)),
     ("demux", Class::Layer(2)),
+    ("shared-stream", Class::Layer(2)),
     ("video-codecs", Class::Layer(3)),
     ("audio-dsp", Class::Layer(3)),
     ("image-codecs", Class::Layer(3)),
@@ -50,7 +51,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-egui", Class::Layer(6)),
     ("mcp", Class::Layer(6)),
     ("testkit", Class::Testkit),
-    ("dispatch", Class::Layer(1)),
+    ("dispatch", Class::Layer(4)),
     // Binaries and tooling (Exempt)
     ("encodercraft", Class::Exempt),
     ("cli", Class::Exempt),

@@ -52,8 +52,7 @@ fn main() -> Result<(), eframe::Error> {
     // Bind Unix domain socket on Unix platforms
     #[cfg(unix)]
     let ipc_unix = {
-        let sock_path = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-        let sock_file = PathBuf::from(sock_path).join("encodercraft.sock");
+        let sock_file = encodercraft_dispatch::default_socket_path();
         let _ = std::fs::remove_file(&sock_file);
         IpcServer::bind_unix(&sock_file, handler).ok()
     };

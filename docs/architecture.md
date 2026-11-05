@@ -48,7 +48,8 @@ The repository is structured as a Cargo workspace with distinct architectural la
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ L4: Pipeline & Automation                                                        │
 │     crates/pipeline (Transcode Graph)    crates/watch (Folder Monitoring)        │
-│     crates/ipc (Unix Sockets & RPC)      crates/presets (Preset Registry)        │
+│     crates/ipc (Unix Sockets & RPC)      crates/dispatch (Inter-App Dispatch)    │
+│     crates/presets (Preset Registry)                                               │
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ L3: Encoders, Muxers & DSP Filters                                               │
 │     crates/video-codecs                  crates/audio-dsp (EBU R128 Loudness)    │
@@ -57,6 +58,7 @@ The repository is structured as a Cargo workspace with distinct architectural la
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ L2: Ingestion & Demuxers                                                         │
 │     crates/demux (Parsers, Stream Extractors, Bitstream Probers)                 │
+│     crates/shared-stream (Bounded local zero-copy media transport)                │
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ L1: Core Data Models & Job Specifications                                        │
 │     crates/core (JobSpec, Timecode, MediaDescriptor, FrameBuffers, Rational)     │
@@ -75,6 +77,7 @@ The repository is structured as a Cargo workspace with distinct architectural la
 | **L0** | `color` | `crates/color` | Pixel format definitions (RGBA8, RGBA16, RGBAF32, YUV420p, YUV422p10, YUV444p12), matrix transforms (Rec.709, Rec.2020, Display P3), and `craft-cms` ICC integration. |
 | **L1** | `core` | `crates/core` | Core domain models: `CraftJobSpec`, `OutputTarget`, `MediaTimecode`, `Rational64`, `AudioSampleBuffer`, `VideoFrame`, `MetadataSet`. |
 | **L2** | `demux` | `crates/demux` | Container demuxing and format probing: ISO BMFF (MP4/MOV), Matroska (MKV/WebM), MXF, WAV/BWF, AIFF, OpenEXR, TIFF, PNG, glTF, USD. |
+| **L2** | `shared-stream` | `crates/shared-stream` | Versioned packet framing and bounded local shared-memory publisher/receiver primitives. |
 | **L3** | `video-codecs` | `crates/video-codecs` | Video encoders: Pure-Rust H.264, ProRes 422/4444, DNxHD/HR, APV, Motion-JPEG, animated GIF, and bridge to `effectcraft` HEVC/AV1/VP9. |
 | **L3** | `audio-dsp` | `crates/audio-dsp` | Audio processing: Polyphase sample-rate resampler, channel mapping matrix, ITU-R BS.1770 / EBU R128 loudness normalization, True-Peak limiter. |
 | **L3** | `image-codecs` | `crates/image-codecs` | Raster encoders: PNG, JPEG, WebP, AVIF, TIFF, OpenEXR (deep/layers), Radiance HDR, DDS (BC1–BC7), DPX. |
@@ -84,7 +87,8 @@ The repository is structured as a Cargo workspace with distinct architectural la
 | **L4** | `pipeline` | `crates/pipeline` | Transcoding graph: connects demuxer → filters/scalers → encoder → muxer. Handles parallel frame pipelines with backpressure. |
 | **L4** | `presets` | `crates/presets` | Preset manager: loads built-in factory presets, parses user JSON presets, evaluates dynamic "Match Source" rules. |
 | **L4** | `watch` | `crates/watch` | Watch folder daemon: monitors directories, stabilizes incoming files, auto-dispatches jobs. |
-| **L4** | `ipc` | `crates/ipc` | Inter-process communication: Unix domain socket, Windows named pipe, loopback JSON-RPC server (`127.0.0.1:8998`). |
+| **L4** | `ipc` | `crates/ipc` | Inter-process communication: Unix domain socket (`/tmp/encodercraft-$UID.sock`, mode `0600`), loopback JSON-RPC server (`127.0.0.1:8998`). |
+| **L4** | `dispatch` | `crates/dispatch` | Client API for submitting jobs; re-exports the lower-layer shared-memory stream API. |
 | **L5** | `engine` | `crates/engine` | Central engine: `Session` state, queue management, job prioritization, command registry (`cmd/*`), persistent state journaling. |
 | **L6** | `ui-egui` | `crates/ui-egui` | Desktop graphical interface: Queue table, Preset browser, Preview canvas, Inspector panels, theme tokens, localization. |
 | **L6** | `mcp` | `crates/mcp` | Model Context Protocol server exposing encoding tools to AI agents. |
