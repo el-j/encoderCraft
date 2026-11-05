@@ -13,6 +13,7 @@ use encodercraft_core::{
 use encodercraft_geom::Dimensions;
 use encodercraft_muxers::{AudioSample, AudioStreamConfig, Mp4Muxer, VideoSample, VideoStreamConfig};
 use encodercraft_pipeline::TranscodePipeline;
+use encodercraft_shared_stream::{SharedStreamHeader, SharedStreamKind, SharedStreamPublisher};
 use encodercraft_source::MediaReader;
 use encodercraft_video_codecs::{VideoCodecKind, create_video_encoder};
 use tempfile::tempdir;
@@ -448,4 +449,52 @@ fn video_exports_a_numbered_still_sequence_for_the_trimmed_range() {
         let (lo, hi) = mean_luma_spread(&frame);
         assert!(hi - lo > 40, "{name} is flat");
     }
+}
+
+/// A sibling application streams raw frames and PCM over shared memory; the job encodes them.
+#[test]
+fn shared_memory_stream_encodes_to_a_real_mp4() {
+    let dir = tempdir().unwrap();
+    let endpoint = format!("encodercraft/conformance-{}", std::process::id());
+    let producer_endpoint = endpoint.clone();
+    let producer = std::thread::spawn(move || {
+        let publisher = SharedStreamPublisher::create(&producer_endpoint, 48_000 * 2 * 4).unwrap();
+        assert!(publisher.wait_for_subscriber(std::time::Duration::from_secs(30)));
+        for i in 0..FRAMES {
+            let frame = test_frame(i);
+            let (pixels, _) = frame.plane(0).unwrap();
+            publisher
+                .publish_with(
+                    SharedStreamHeader { kind: SharedStreamKind::VideoFrame, pts: i as i64, duration: 1, payload_bytes: pixels.len() as u64 },
+                    |payload| {
+                        payload.copy_from_slice(pixels);
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        }
+        let mut pcm = Vec::with_capacity(48_000 * 2 * 4);
+        for i in 0..48_000 {
+            let sample = (i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 0.5;
+            pcm.extend_from_slice(&sample.to_le_bytes());
+            pcm.extend_from_slice(&sample.to_le_bytes());
+        }
+        publisher
+            .publish_with(
+                SharedStreamHeader { kind: SharedStreamKind::AudioSamples, pts: 0, duration: 48_000, payload_bytes: pcm.len() as u64 },
+                |payload| {
+                    payload.copy_from_slice(&pcm);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert!(publisher.finish(std::time::Duration::from_secs(30)).unwrap());
+    });
+
+    let mut spec = job(Path::new("unused"), target(&dir.path().join("piped.mp4"), ContainerType::IsoBmffMp4, "H.264"));
+    spec.source = SourceDescriptor::Pipe { endpoint, width: W, height: H, frame_rate: fps(), sample_rate: 48_000, channels: 2 };
+    TranscodePipeline::new(spec).execute().unwrap();
+    producer.join().unwrap();
+
+    assert_real_video(&dir.path().join("piped.mp4"), FRAMES, true);
 }

@@ -38,6 +38,7 @@ thiserror = { workspace = true }
 log = { workspace = true }
 
 [dev-dependencies]
+encodercraft-shared-stream = { workspace = true }
 photocraft-codecs = { workspace = true }
 encodercraft-presets = { workspace = true }
 proptest = { workspace = true }

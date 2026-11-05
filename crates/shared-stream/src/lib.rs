@@ -1,16 +1,32 @@
 //! Bounded zero-copy media packets over a local shared-memory service.
+//!
+//! This is a **push/subscribe** contract: a producer publishes timestamped packets and a consumer
+//! reads them in order. It is not a request-by-time frame API (a consumer cannot ask for frame N),
+//! so it does not replace the frame-request direction discussed in storytold/filmcraft#1024.
+//!
+//! The crate is deliberately self-contained and stays in encoderCraft until a second application
+//! links it, so the header and producer protocol may still change. `pts` and `duration` are plain
+//! integers in the stream's own units and are expected to move to the shared rational time type
+//! (storytold/craft-libs#15) rather than grow a second time type.
+//!
+//! Producer protocol: [`SharedStreamPublisher::wait_for_subscriber`], then
+//! [`SharedStreamPublisher::publish_with`] for each packet, then [`SharedStreamPublisher::finish`].
+//! Skipping the first or last step loses packets (see `publish_with`).
 
 use std::fmt::Display;
 
 use encodercraft_core::EncoderError;
 use iceoryx2::node::{Node, NodeBuilder};
+use iceoryx2::port::update_connections::UpdateConnections as _;
 use iceoryx2::port::{backpressure_strategy::BackpressureStrategy, publisher::Publisher, subscriber::Subscriber};
+use iceoryx2::prelude::PortFactory as _;
 use iceoryx2::service::{ipc, port_factory::publish_subscribe::PortFactory, service_name::ServiceName};
 
 const HEADER_SIZE: usize = 32;
 const HEADER_MAGIC: &[u8; 4] = b"ECST";
 const HEADER_VERSION: u16 = 1;
 const STREAM_BUFFER_DEPTH: usize = 2;
+const ATTACH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Maximum media payload accepted in a single shared-memory packet.
 pub const MAX_SHARED_STREAM_PAYLOAD_BYTES: usize = 512 * 1024 * 1024;
@@ -57,34 +73,74 @@ pub struct SharedStreamPublisher {
     _node: Node<IpcService>,
     _service: SharedService,
     publisher: SharedPublisher,
+    max_payload_bytes: usize,
 }
 
 impl SharedStreamPublisher {
     /// Creates or opens a local stream service. `service_name` must be a valid iceoryx2 name.
-    pub fn create(service_name: &str) -> Result<Self, EncoderError> {
+    ///
+    /// `max_payload_bytes` is the largest packet this publisher will send. Shared memory is
+    /// reserved for it up front (and committed immediately on Windows), so size it to the stream
+    /// rather than to [`MAX_SHARED_STREAM_PAYLOAD_BYTES`].
+    pub fn create(service_name: &str, max_payload_bytes: usize) -> Result<Self, EncoderError> {
+        if max_payload_bytes == 0 || max_payload_bytes > MAX_SHARED_STREAM_PAYLOAD_BYTES {
+            return Err(EncoderError::InvalidJobSpec(format!(
+                "shared stream capacity {max_payload_bytes} must be between 1 and {MAX_SHARED_STREAM_PAYLOAD_BYTES} bytes"
+            )));
+        }
         let node = NodeBuilder::new().create::<IpcService>().map_err(|error| io_error("create shared stream node", error))?;
         let name = ServiceName::new(service_name).map_err(|error| EncoderError::InvalidJobSpec(format!("invalid shared stream name: {error}")))?;
         let service = stream_service(&node, &name)?;
         let publisher = service
             .publisher_builder()
-            .initial_max_slice_len(MAX_SHARED_STREAM_PAYLOAD_BYTES + HEADER_SIZE)
+            .initial_max_slice_len(max_payload_bytes.saturating_add(HEADER_SIZE))
             .max_loaned_samples(STREAM_BUFFER_DEPTH)
             .backpressure_strategy(BackpressureStrategy::RetryUntilDelivered)
             .create()
             .map_err(|error| io_error("create shared stream publisher", error))?;
 
-        Ok(Self { _node: node, _service: service, publisher })
+        Ok(Self { _node: node, _service: service, publisher, max_payload_bytes })
+    }
+
+    /// Blocks until a receiver is attached or `timeout` elapses. Packets published while no
+    /// receiver is attached are dropped, so producers call this before the first packet.
+    pub fn wait_for_subscriber(&self, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self._service.dynamic_config().number_of_subscribers() > 0 && self.publisher.update_connections().is_ok() {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Publishes the end-of-stream packet, then keeps the stream alive until every receiver has
+    /// detached or `timeout` elapses. Packets live in the publisher's shared memory, so dropping a
+    /// publisher while receivers still hold unread packets would discard them.
+    pub fn finish(self, timeout: std::time::Duration) -> Result<bool, EncoderError> {
+        self.publish_with(SharedStreamHeader { kind: SharedStreamKind::EndOfStream, pts: 0, duration: 0, payload_bytes: 0 }, |_| Ok(()))?;
+        let deadline = std::time::Instant::now() + timeout;
+        while self._service.dynamic_config().number_of_subscribers() > 0 {
+            if std::time::Instant::now() >= deadline {
+                return Ok(false);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        Ok(true)
     }
 
     /// Loans shared memory to the caller, which fills it in place before publication.
     ///
     /// The callback writes directly into the shared sample; media bytes are not copied into a
     /// socket buffer or serialized `Vec`.
-    pub fn publish_with(&self, header: SharedStreamHeader, fill: impl FnOnce(&mut [u8]) -> Result<(), EncoderError>) -> Result<(), EncoderError> {
-        if header.payload_bytes > MAX_SHARED_STREAM_PAYLOAD_BYTES as u64 {
+    pub fn publish_with(&self, header: SharedStreamHeader, mut fill: impl FnMut(&mut [u8]) -> Result<(), EncoderError>) -> Result<(), EncoderError> {
+        if header.payload_bytes > self.max_payload_bytes as u64 {
             return Err(EncoderError::InvalidJobSpec(format!(
-                "shared stream payload ({} bytes) exceeds the {} byte limit",
-                header.payload_bytes, MAX_SHARED_STREAM_PAYLOAD_BYTES
+                "shared stream payload ({} bytes) exceeds this stream's {} byte capacity",
+                header.payload_bytes, self.max_payload_bytes
             )));
         }
         if header.kind == SharedStreamKind::EndOfStream && header.payload_bytes != 0 {
@@ -95,13 +151,27 @@ impl SharedStreamPublisher {
             .map_err(|_| EncoderError::InvalidJobSpec("shared stream payload length exceeds this platform's address space".into()))?;
         let sample_len =
             HEADER_SIZE.checked_add(payload_len).ok_or_else(|| EncoderError::InvalidJobSpec("shared stream packet size overflow".into()))?;
-        let mut sample = self.publisher.loan_slice(sample_len).map_err(|error| io_error("loan shared stream sample", error))?;
-        let bytes = sample.payload_mut();
-        let (header_bytes, media_bytes) = bytes.split_at_mut(HEADER_SIZE);
-        encode_header(header, header_bytes)?;
-        fill(media_bytes)?;
-        sample.send().map_err(|error| io_error("publish shared stream sample", error))?;
-        Ok(())
+
+        // A receiver that has registered but not finished connecting drops packets once the
+        // connection buffer is full, and `send` reports that as zero deliveries. Retry until it is
+        // connected, or give up when it detaches or never connects.
+        let deadline = std::time::Instant::now() + ATTACH_TIMEOUT;
+        loop {
+            let mut sample = self.publisher.loan_slice(sample_len).map_err(|error| io_error("loan shared stream sample", error))?;
+            let bytes = sample.payload_mut();
+            let (header_bytes, media_bytes) = bytes.split_at_mut(HEADER_SIZE);
+            encode_header(header, header_bytes)?;
+            fill(media_bytes)?;
+            let delivered = sample.send().map_err(|error| io_error("publish shared stream sample", error))?;
+            if delivered > 0 || self._service.dynamic_config().number_of_subscribers() == 0 {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(EncoderError::Io("shared stream receiver attached but never connected".into()));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            self.publisher.update_connections().map_err(|error| io_error("update shared stream connections", error))?;
+        }
     }
 }
 
@@ -166,8 +236,8 @@ fn stream_service(node: &Node<IpcService>, name: &ServiceName) -> Result<SharedS
     node.service_builder(name)
         .publish_subscribe::<[u8]>()
         .enable_safe_overflow(false)
-        .subscriber_max_borrowed_samples(1)
-        .history_size(STREAM_BUFFER_DEPTH)
+        .subscriber_max_borrowed_samples(STREAM_BUFFER_DEPTH)
+        .history_size(0)
         .subscriber_max_buffer_size(STREAM_BUFFER_DEPTH)
         .open_or_create()
         .map_err(|error| io_error("open shared stream service", error))
@@ -261,7 +331,7 @@ mod tests {
     #[test]
     fn packet_payload_borrows_received_sample_without_copying() {
         let name = service_name();
-        let publisher = SharedStreamPublisher::create(&name).unwrap();
+        let publisher = SharedStreamPublisher::create(&name, 64).unwrap();
         let receiver = SharedStreamReceiver::open(&name).unwrap();
 
         publisher
@@ -280,17 +350,21 @@ mod tests {
 
     #[test]
     fn oversized_payload_is_rejected_before_a_shared_sample_is_loaned() {
-        let publisher = SharedStreamPublisher::create(&service_name()).unwrap();
+        let publisher = SharedStreamPublisher::create(&service_name(), 64).unwrap();
         let fill_called = Cell::new(false);
-        let result = publisher.publish_with(
-            SharedStreamHeader { kind: SharedStreamKind::VideoFrame, pts: 0, duration: 1, payload_bytes: MAX_SHARED_STREAM_PAYLOAD_BYTES as u64 + 1 },
-            |_| {
+        let result =
+            publisher.publish_with(SharedStreamHeader { kind: SharedStreamKind::VideoFrame, pts: 0, duration: 1, payload_bytes: 65 }, |_| {
                 fill_called.set(true);
                 Ok(())
-            },
-        );
+            });
 
         assert!(result.is_err());
         assert!(!fill_called.get());
+    }
+
+    #[test]
+    fn capacity_must_be_between_one_byte_and_the_protocol_limit() {
+        assert!(SharedStreamPublisher::create(&service_name(), 0).is_err());
+        assert!(SharedStreamPublisher::create(&service_name(), MAX_SHARED_STREAM_PAYLOAD_BYTES + 1).is_err());
     }
 }

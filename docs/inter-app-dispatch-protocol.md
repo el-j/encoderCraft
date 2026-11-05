@@ -66,7 +66,28 @@ To accommodate different media types, file sizes, and hardware constraints, the 
 
 The encoderCraft-local transport primitive uses an iceoryx2 shared-memory service. Its versioned `ECST` packet header carries the packet kind, PTS, duration, and payload length; payloads are capped at 512 MiB and the service applies two-sample bounded buffering with retry-until-delivered backpressure. A received packet borrows its payload from the shared-memory sample rather than copying it into a `Vec`.
 
-This is transport support only, not a completed Mode B pipeline: the wire format does not yet identify pixel/sample formats, `SourceDescriptor::Pipe` is not consumed by the transcode pipeline, and project-reference rendering is not connected. Do not treat raw frame/audio streaming as delivered until those paths have end-to-end coverage.
+`SourceDescriptor::Pipe` is consumed by the transcode pipeline (`encodercraft_source::pipe::PipeSource`). The producer declares the format in the job (`width`, `height`, `frame_rate`, `sample_rate`, `channels`) and follows this protocol: create the publisher, `wait_for_subscriber`, publish packets, then `finish` (publishes end-of-stream and waits for the receiver to detach so unread packets are not discarded). Video packets carry tightly packed RGBA8 (`width * height * 4` bytes); audio packets carry interleaved little-endian f32 frames. Wrong-sized packets, non-finite samples, invalid declarations, streams above 1 GiB and streams idle for 30 s are rejected with typed errors. A stream is consumed once; the pipeline holds it open for the whole job and releases it afterwards. `crates/pipeline/tests/conformance.rs` encodes a streamed source to a decodable MP4. Project-reference rendering (`SourceDescriptor::ProjectReference`) is not connected yet.
+
+**Producing a stream.** Rust applications use `encodercraft_source::pipe::PipeProducer`, which performs the protocol and validates every packet before it is published:
+
+```rust
+let mut producer = PipeProducer::create(format)?;     // same fields as the job's Pipe source
+assert!(producer.wait_for_receiver(Duration::from_secs(60)));
+producer.send_video(&rgba_frame)?;                     // width * height * 4 bytes
+producer.send_audio(&interleaved_f32)?;                // whole frames of `channels` samples
+producer.finish(Duration::from_secs(60))?;             // end-of-stream, then wait for the receiver
+```
+
+**Scope and status of this contract.** It is push/subscribe, not request-by-time, so it does not replace the frame-request direction in storytold/filmcraft#1024. It is local, CPU RGBA/f32 only, and has no clock-domain, capability negotiation, GPU-surface or reconnect semantics. It lives in encoderCraft (`crates/shared-stream`, `crates/source/src/pipe.rs`) and will move to craft-libs only once a second application links it (maintainer guidance on storytold/craft-libs#230); until then the header and protocol may change. The control channel for job hand-off is intended to ride on `craft-ipc` (storytold/craft-libs#433).
+
+**Trying it from the command line.** In one terminal run the receiving job, in another a synthetic producer:
+
+```sh
+encodercraft-cli stream-encode --endpoint encodercraft/demo --size 1280x720 --fps 30 --audio 48000:2 -o out.mp4
+encodercraft-cli stream-test   --endpoint encodercraft/demo --size 1280x720 --fps 30 --audio 48000:2 --seconds 5
+```
+
+`stream-encode` accepts `-p <preset>` (default `Match Source - High Bitrate`). Both sides must pass the same declaration.
 
 ### Mode C: Headless Project Delegation (Deferred Rendering)
 - **Use Case:** The user queues a complex project in `encoderCraft` and closes the host application completely (freeing GPU/RAM).

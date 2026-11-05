@@ -34,6 +34,26 @@ pub struct TranscodePipeline {
     stats: Mutex<Option<StreamStats>>,
 }
 
+/// Frees a received shared-memory stream when the job that consumed it ends, whatever the outcome.
+struct PipeStreamGuard(Option<String>);
+
+impl PipeStreamGuard {
+    fn new(source: &SourceDescriptor) -> Self {
+        Self(match source {
+            SourceDescriptor::Pipe { endpoint, .. } => Some(endpoint.clone()),
+            _ => None,
+        })
+    }
+}
+
+impl Drop for PipeStreamGuard {
+    fn drop(&mut self) {
+        if let Some(endpoint) = &self.0 {
+            encodercraft_source::pipe::release(endpoint);
+        }
+    }
+}
+
 fn prepare_audio_for_target(mut audio: AudioSampleBuffer, target: &OutputTarget) -> Result<AudioSampleBuffer, EncoderError> {
     let settings = target.audio.as_ref();
     let layout = settings.and_then(|settings| settings.layout).unwrap_or(encodercraft_core::ChannelLayout::Stereo);
@@ -220,6 +240,7 @@ impl TranscodePipeline {
             return Err(EncoderError::InvalidJobSpec("job contains no output targets".into()));
         }
 
+        let _pipe_stream = PipeStreamGuard::new(&self.spec.source);
         let count = self.spec.targets.len();
         self.progress.set_target_count(count as u64);
         for (index, target) in self.spec.targets.iter().enumerate() {
