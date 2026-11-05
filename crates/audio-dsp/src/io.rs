@@ -8,7 +8,10 @@ use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError};
 
 /// Decodes any supported audio container and format into a planar `AudioSampleBuffer`.
 pub fn decode_audio(bytes: &[u8]) -> Result<AudioSampleBuffer, EncoderError> {
-    let (_info, buf) = craft_audio_io::decode(bytes, None).map_err(|e| EncoderError::Internal(format!("audio decoding failed: {e}")))?;
+    // The third-party demuxers can panic on hostile headers; that must be an error, never a crash.
+    let decoded = std::panic::catch_unwind(|| craft_audio_io::decode(bytes, None))
+        .map_err(|_| EncoderError::InvalidContainer("audio decoding failed: the file is malformed".into()))?;
+    let (_info, buf) = decoded.map_err(|e| EncoderError::Internal(format!("audio decoding failed: {e}")))?;
 
     let layout = match buf.channels.len() {
         1 => ChannelLayout::Mono,
