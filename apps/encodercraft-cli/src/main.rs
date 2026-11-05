@@ -3,6 +3,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod stream;
+
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -43,6 +45,8 @@ fn run() -> Result<(), EncoderError> {
         Some("command") => cmd_command(&args[2..])?,
         Some("watch") => cmd_watch(&args[2..])?,
         Some("daemon") => cmd_daemon(&args[2..])?,
+        Some("stream-encode") => stream::cmd_stream_encode(&args[2..], &default_preset_registry())?,
+        Some("stream-test") => stream::cmd_stream_test(&args[2..])?,
         Some("mcp") => cmd_mcp()?,
         Some("--version") | Some("-V") => println!("encodercraft-cli {}", env!("CARGO_PKG_VERSION")),
         Some("--help") | Some("-h") | Some("help") => print_usage(),
@@ -60,6 +64,10 @@ fn print_usage() {
     println!("encoderCraft CLI — Pure-Rust Universal Media Transcoding & Batch Queue Engine");
     println!("\nUsage: encodercraft <command> [options]");
     println!("\nCommands:");
+    println!("  stream-encode --endpoint <name> --size WxH [--fps N|N/D] [--audio RATE:CH] -o <file> [-p <preset>]");
+    println!("                                          Encode frames and audio another app streams over shared memory");
+    println!("  stream-test --endpoint <name> --size WxH [--fps N|N/D] [--audio RATE:CH] [--seconds N]");
+    println!("                                          Stream a synthetic test pattern to a waiting stream-encode");
     println!("  encode <input> [options]                Transcode an input file directly");
     println!("      -p, --preset <name>                 Encoding preset (default: Match Source - High Bitrate)");
     println!("      -o, --output <file>                 Output file path");

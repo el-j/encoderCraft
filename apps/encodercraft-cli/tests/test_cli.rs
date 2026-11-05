@@ -353,3 +353,35 @@ fn test_cli_selects_sequence_pages_and_layers() {
     let back = CadDrawing::from_cadcraft_binary(&std::fs::read(&out).expect("read cad")).expect("parse cad");
     assert_eq!(back.entities.len(), 1);
 }
+
+#[test]
+fn test_cli_stream_test_hands_a_stream_to_stream_encode() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("streamed.mp4");
+    let endpoint = format!("encodercraft/cli-test-{}", std::process::id());
+    let options = ["--endpoint", endpoint.as_str(), "--size", "128x72", "--fps", "30", "--audio", "48000:2"];
+
+    let mut encoder = Command::new(bin).arg("stream-encode").args(options).arg("-o").arg(&out).spawn().unwrap();
+    let producer = Command::new(bin).arg("stream-test").args(options).args(["--seconds", "1"]).output().unwrap();
+    let status = encoder.wait().unwrap();
+
+    assert!(producer.status.success(), "producer: {}", String::from_utf8_lossy(&producer.stderr));
+    assert!(status.success());
+    let probe = Command::new(bin).arg("probe").arg(&out).output().unwrap();
+    let info: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+    assert_eq!(info["video_streams"][0]["dimensions"]["width"], 128);
+    assert_eq!(info["video_streams"][0]["dimensions"]["height"], 72);
+    assert_eq!(info["audio_streams"].as_array().map(Vec::len), Some(1));
+    let seconds = info["duration_seconds"].as_f64().unwrap();
+    assert!((seconds - 1.0).abs() < 0.1, "duration {seconds}");
+}
+
+#[test]
+fn test_cli_stream_commands_reject_bad_options() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    for args in [&["stream-encode"][..], &["stream-test", "--endpoint", "e"][..], &["stream-encode", "--endpoint", "e", "--size", "64x64"][..]] {
+        let output = Command::new(bin).args(args).output().unwrap();
+        assert!(!output.status.success(), "{args:?}");
+    }
+}

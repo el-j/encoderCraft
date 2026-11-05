@@ -180,6 +180,14 @@ fn charge(held: usize, add: usize, max: usize, endpoint: &str) -> Result<usize, 
         .ok_or_else(|| EncoderError::InvalidJobSpec(format!("pipe `{endpoint}` delivered more than the {} MiB limit", max >> 20)))
 }
 
+fn frame_bytes(format: &PipeFormat) -> Result<usize, EncoderError> {
+    (format.width as usize)
+        .checked_mul(format.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|bytes| *bytes > 0)
+        .ok_or_else(|| EncoderError::InvalidJobSpec(format!("pipe `{}` declares no video", format.endpoint)))
+}
+
 fn validate(format: &PipeFormat) -> Result<(), EncoderError> {
     let has_video = format.width > 0 || format.height > 0;
     if has_video && (format.width == 0 || format.height == 0 || format.width > MAX_EDGE || format.height > MAX_EDGE) {
@@ -270,6 +278,91 @@ pub fn open_shared(format: &PipeFormat, limits: PipeLimits) -> Result<Arc<PipeSo
 /// Frees the stream held for `endpoint` once its job has finished.
 pub fn release(endpoint: &str) {
     registry().lock().unwrap_or_else(PoisonError::into_inner).remove(endpoint);
+}
+
+/// Producer side of a pipe stream: the supported way for an application to hand frames and
+/// audio to encoderCraft, following the protocol the receiver expects.
+pub struct PipeProducer {
+    format: PipeFormat,
+    publisher: encodercraft_shared_stream::SharedStreamPublisher,
+    frames_sent: i64,
+}
+
+impl PipeProducer {
+    /// Declares the stream. The format must match the `Pipe` source of the job that consumes it.
+    pub fn create(format: PipeFormat) -> Result<Self, EncoderError> {
+        validate(&format)?;
+        let publisher = encodercraft_shared_stream::SharedStreamPublisher::create(&format.endpoint)?;
+        Ok(Self { format, publisher, frames_sent: 0 })
+    }
+
+    /// Waits until the receiving job has attached. Call this before sending anything.
+    pub fn wait_for_receiver(&self, timeout: Duration) -> bool {
+        self.publisher.wait_for_subscriber(timeout)
+    }
+
+    /// Sends one straight-alpha RGBA8 picture of exactly the declared size.
+    pub fn send_video(&mut self, rgba: &[u8]) -> Result<(), EncoderError> {
+        let expected = frame_bytes(&self.format)?;
+        if rgba.len() != expected {
+            return Err(EncoderError::InvalidJobSpec(format!(
+                "pipe `{}`: video frame is {} bytes, expected {expected} for {}x{} RGBA8",
+                self.format.endpoint,
+                rgba.len(),
+                self.format.width,
+                self.format.height
+            )));
+        }
+        self.publisher.publish_with(
+            encodercraft_shared_stream::SharedStreamHeader {
+                kind: SharedStreamKind::VideoFrame,
+                pts: self.frames_sent,
+                duration: 1,
+                payload_bytes: expected as u64,
+            },
+            |payload| {
+                payload.copy_from_slice(rgba);
+                Ok(())
+            },
+        )?;
+        self.frames_sent = self.frames_sent.saturating_add(1);
+        Ok(())
+    }
+
+    /// Sends interleaved `f32` samples; the length must be a whole number of declared-channel frames.
+    pub fn send_audio(&mut self, interleaved: &[f32]) -> Result<(), EncoderError> {
+        let channels = self.format.channels as usize;
+        if channels == 0 || interleaved.is_empty() || !interleaved.len().is_multiple_of(channels) {
+            return Err(EncoderError::InvalidJobSpec(format!(
+                "pipe `{}`: {} samples are not a whole number of {channels}-channel frames",
+                self.format.endpoint,
+                interleaved.len()
+            )));
+        }
+        if interleaved.iter().any(|sample| !sample.is_finite()) {
+            return Err(EncoderError::InvalidJobSpec(format!("pipe `{}`: audio contains a non-finite sample", self.format.endpoint)));
+        }
+        let bytes = interleaved.len().saturating_mul(4);
+        self.publisher.publish_with(
+            encodercraft_shared_stream::SharedStreamHeader {
+                kind: SharedStreamKind::AudioSamples,
+                pts: 0,
+                duration: (interleaved.len() / channels) as i64,
+                payload_bytes: bytes as u64,
+            },
+            |payload| {
+                for (chunk, sample) in payload.as_chunks_mut::<4>().0.iter_mut().zip(interleaved) {
+                    *chunk = sample.to_le_bytes();
+                }
+                Ok(())
+            },
+        )
+    }
+
+    /// Ends the stream and waits for the receiver to finish reading it.
+    pub fn finish(self, timeout: Duration) -> Result<bool, EncoderError> {
+        self.publisher.finish(timeout)
+    }
 }
 
 #[cfg(test)]
@@ -398,5 +491,39 @@ mod tests {
         let second = open_shared(&format, PipeLimits::default()).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         release(&name);
+    }
+
+    #[test]
+    fn producer_round_trips_through_the_receiver() {
+        let format =
+            PipeFormat { endpoint: endpoint(), width: 4, height: 2, frame_rate: Rational64 { num: 10, den: 1 }, sample_rate: 8_000, channels: 1 };
+        let mut producer = PipeProducer::create(format.clone()).unwrap();
+        let reader = std::thread::spawn({
+            let format = format.clone();
+            move || PipeSource::receive(&format, PipeLimits::default())
+        });
+        assert!(producer.wait_for_receiver(Duration::from_secs(10)));
+        for i in 0..3u8 {
+            producer.send_video(&[i; 4 * 2 * 4]).unwrap();
+        }
+        producer.send_audio(&[0.25; 800]).unwrap();
+        assert!(producer.finish(Duration::from_secs(10)).unwrap());
+        let source = reader.join().unwrap().unwrap();
+        assert_eq!(source.info().video.as_ref().map(|v| (v.width, v.height)), Some((4, 2)));
+    }
+
+    #[test]
+    fn producer_rejects_malformed_input_before_publishing() {
+        let format =
+            PipeFormat { endpoint: endpoint(), width: 4, height: 2, frame_rate: Rational64 { num: 10, den: 1 }, sample_rate: 8_000, channels: 2 };
+        let mut producer = PipeProducer::create(format).unwrap();
+        assert!(producer.send_video(&[0; 7]).is_err());
+        assert!(producer.send_audio(&[0.0; 3]).is_err());
+        assert!(producer.send_audio(&[]).is_err());
+        assert!(producer.send_audio(&[f32::NAN, 0.0]).is_err());
+        let no_video =
+            PipeFormat { endpoint: endpoint(), width: 0, height: 0, frame_rate: Rational64 { num: 1, den: 1 }, sample_rate: 8_000, channels: 1 };
+        let mut audio_only = PipeProducer::create(no_video).unwrap();
+        assert!(audio_only.send_video(&[]).is_err());
     }
 }
