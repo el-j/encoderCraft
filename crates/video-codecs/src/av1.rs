@@ -25,6 +25,7 @@ impl Av1EncoderWrapper {
         let fps_num = if fps.num > 0 { fps.num as u32 } else { 30 };
         let fps_den = if fps.den > 0 { fps.den as u32 } else { 1 };
         let mut cfg = EncoderConfig::new(width, height, fps_num, fps_den);
+        cfg.bit_depth = 10;
         cfg.rate = match (params.rate_mode, params.bitrate_kbps) {
             (RateMode::ConstantQuality, _) | (_, None) => RateControl::ConstantQ(100),
             (_, Some(kbps)) => RateControl::Bitrate { kbps },

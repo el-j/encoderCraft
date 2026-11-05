@@ -10,18 +10,54 @@ use crate::theme::Tokens;
 pub struct PrefsDialogState {
     pub is_open: bool,
     pub prefs: AppPreferences,
+    pub shortcut_recording: Option<crate::commands::AppCommand>,
+    pub shortcut_message: Option<String>,
 }
 
 /// Renders the Preferences modal window.
-pub fn render_prefs_dialog(ctx: &egui::Context, state: &mut PrefsDialogState, tokens: &Tokens, on_theme_change: &mut Option<String>) {
+pub fn render_prefs_dialog(
+    ctx: &egui::Context,
+    state: &mut PrefsDialogState,
+    shortcuts: &mut crate::settings::WorkspaceShortcuts,
+    tokens: &Tokens,
+    on_theme_change: &mut Option<String>,
+) {
     if !state.is_open {
         return;
+    }
+
+    if let Some(command) = state.shortcut_recording
+        && let Some((key, modifiers, event)) = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } => Some((*key, *modifiers, event.clone())),
+                _ => None,
+            })
+        })
+    {
+        ctx.input_mut(|input| {
+            let _ = input.consume_key(modifiers, key);
+        });
+        state.shortcut_recording = None;
+        if key == egui::Key::Escape && !modifiers.any() {
+            state.shortcut_message = Some("Shortcut recording cancelled.".into());
+        } else if let Some(binding) = crate::settings::WorkspaceShortcuts::capture(&event) {
+            match shortcuts.set_command_binding(command, binding) {
+                Ok(()) => {
+                    let label = command.info().map_or("Command", |info| info.label);
+                    let shortcut = shortcuts.command_display(command).unwrap_or_else(|| "Not assigned".into());
+                    state.shortcut_message = Some(format!("{label} set to {shortcut}."));
+                }
+                Err(error) => state.shortcut_message = Some(error),
+            }
+        } else {
+            state.shortcut_message = Some("That key cannot be used as a shortcut.".into());
+        }
     }
 
     let mut is_open = state.is_open;
     let mut close_requested = false;
 
-    egui::Window::new("Preferences").open(&mut is_open).resizable(false).default_size(egui::vec2(520.0, 380.0)).collapsible(false).show(ctx, |ui| {
+    egui::Window::new("Preferences").open(&mut is_open).resizable(true).default_size(egui::vec2(620.0, 560.0)).collapsible(false).show(ctx, |ui| {
         ui.heading(RichText::new("encoderCraft Preferences").size(16.0));
         ui.add_space(8.0);
 
@@ -77,17 +113,52 @@ pub fn render_prefs_dialog(ctx: &egui::Context, state: &mut PrefsDialogState, to
             ui.horizontal(|ui| {
                 ui.label("Interface Theme:");
                 let is_dark = state.prefs.theme == "Dark";
+                let is_light = state.prefs.theme == "Light";
                 let is_hc = state.prefs.theme == "High Contrast";
 
                 if ui.selectable_label(is_dark, "Dark").clicked() {
                     state.prefs.theme = "Dark".into();
                     *on_theme_change = Some("Dark".into());
                 }
+                if ui.selectable_label(is_light, "Light").clicked() {
+                    state.prefs.theme = "Light".into();
+                    *on_theme_change = Some("Light".into());
+                }
                 if ui.selectable_label(is_hc, "High Contrast").clicked() {
                     state.prefs.theme = "High Contrast".into();
                     *on_theme_change = Some("High Contrast".into());
                 }
             });
+        });
+
+        ui.add_space(8.0);
+        egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
+            ui.label(RichText::new("Keyboard Shortcuts").strong());
+            ui.label(RichText::new("Select Change, then press the shortcut you want.").small().color(tokens.text_secondary));
+            egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                for info in crate::commands::COMMANDS.iter().filter(|info| info.shortcut_configurable) {
+                    let command = info.command;
+                    let display = shortcuts.command_display(command).unwrap_or_else(|| "Not assigned".into());
+                    ui.horizontal(|ui| {
+                        ui.label(info.label);
+                        ui.label(RichText::new(display).color(tokens.text_secondary));
+                        if state.shortcut_recording == Some(command) {
+                            ui.label(RichText::new("Press a key...").color(tokens.accent_primary));
+                        } else if ui.button("Change").clicked() {
+                            state.shortcut_recording = Some(command);
+                            state.shortcut_message = None;
+                        }
+                    });
+                }
+            });
+            if ui.button("Reset Keyboard Shortcuts").clicked() {
+                *shortcuts = crate::settings::WorkspaceShortcuts::default();
+                state.shortcut_recording = None;
+                state.shortcut_message = Some("Keyboard shortcuts restored to defaults.".into());
+            }
+            if let Some(message) = &state.shortcut_message {
+                ui.label(RichText::new(message).small().color(tokens.text_secondary));
+            }
         });
 
         ui.add_space(12.0);

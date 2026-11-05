@@ -24,12 +24,41 @@ jobs:
     with:
       os: '["ubuntu-24.04", "windows-latest"]'
       timeout-minutes: 90
-      # encoderCraft embeds no fonts, runs plain `cargo test` (not nextest) and has no wasm build.
-      craft-fonts-ref: ""
-      require-craft-fonts: false
+      # Use the suite-pinned font assets without adding them as a Cargo dependency or committing binaries.
+      craft-fonts-ref: aced4137c022f1f587624d48e81ec77e1914a9cc
+      require-craft-fonts: true
       tools: ""
       targets: ""
       packages: >-
         pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
         libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
         libgl1-mesa-dev
+
+  media-qa:
+    name: Real-media QA (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install FFmpeg tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+      - name: Install FFmpeg tools
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress
+      - name: Verify independent media tools
+        run: |
+          ffmpeg -version
+          ffprobe -version
+      - name: Run real-media CLI and queue QA
+        env:
+          ENCODERCRAFT_REQUIRE_FULL_QA: "1"
+        run: cargo test -p encodercraft-cli --test qa_matrix -- --nocapture

@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use encodercraft_core::{CraftJobSpec, EncoderError, JobPriority, JobStatus};
-use encodercraft_pipeline::{JobProgress, TranscodePipeline};
+use encodercraft_pipeline::{JobProgress, PipelineLimits, TranscodePipeline};
 
-use crate::state::{LogEntry, QueueJournal, QueuedJob, load_journal, save_journal_atomic};
+use crate::conversion::{ConversionDecision, LossyConversion, LossyConversionKey, assess_lossy_conversions};
+use crate::state::{AppPreferences, LogEntry, QueueJournal, QueuedJob, load_journal, load_preferences, save_journal_atomic, save_preferences_atomic};
 
 /// Upper bound for concurrently running jobs.
 const MAX_PARALLELISM: usize = 16;
@@ -16,6 +17,7 @@ const MAX_PARALLELISM: usize = 16;
 /// Central queue manager orchestrating job submission, priority scheduling, and persistence.
 pub struct QueueManager {
     journal_path: Option<PathBuf>,
+    conversion_preferences_path: Mutex<Option<PathBuf>>,
     state: Mutex<QueueJournal>,
     active_progress: Mutex<HashMap<String, Arc<JobProgress>>>,
     parallelism: AtomicUsize,
@@ -23,13 +25,20 @@ pub struct QueueManager {
     is_worker_running: Arc<AtomicBool>,
     stop_worker_signal: Arc<AtomicBool>,
     paused: AtomicBool,
+    pipeline_limits: PipelineLimits,
 }
 
 impl QueueManager {
     /// Creates an in-memory queue manager without filesystem persistence.
     pub fn new_in_memory() -> Self {
+        Self::new_in_memory_with_limits(PipelineLimits::default())
+    }
+
+    /// Creates an in-memory queue manager with explicit per-pipeline memory limits.
+    pub fn new_in_memory_with_limits(pipeline_limits: PipelineLimits) -> Self {
         Self {
             journal_path: None,
+            conversion_preferences_path: Mutex::new(None),
             state: Mutex::new(QueueJournal::default()),
             active_progress: Mutex::new(HashMap::new()),
             parallelism: AtomicUsize::new(MAX_PARALLELISM.min(2)),
@@ -37,6 +46,7 @@ impl QueueManager {
             is_worker_running: Arc::new(AtomicBool::new(false)),
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
             paused: AtomicBool::new(false),
+            pipeline_limits,
         }
     }
 
@@ -48,11 +58,14 @@ impl QueueManager {
             if matches!(job.status, JobStatus::Processing) {
                 job.status = JobStatus::Queued;
                 job.progress_percent = 0.0;
+                job.current_fps = 0.0;
+                job.target_eta_seconds = None;
             }
         }
         let parallelism = journal.active_parallelism.clamp(1, MAX_PARALLELISM);
         Ok(Self {
             journal_path: Some(journal_path),
+            conversion_preferences_path: Mutex::new(None),
             state: Mutex::new(journal),
             active_progress: Mutex::new(HashMap::new()),
             parallelism: AtomicUsize::new(parallelism),
@@ -60,6 +73,7 @@ impl QueueManager {
             is_worker_running: Arc::new(AtomicBool::new(false)),
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
             paused: AtomicBool::new(false),
+            pipeline_limits: PipelineLimits::default(),
         })
     }
 
@@ -78,9 +92,16 @@ impl QueueManager {
 
     /// Adds a new job to the queue, ordering by priority.
     pub fn submit_job(&self, spec: CraftJobSpec) -> Result<String, EncoderError> {
+        self.submit_job_with_approvals(spec, &[])
+    }
+
+    /// Adds a job after one-time approval of the listed exact conversion pairs.
+    pub fn submit_job_with_approvals(&self, spec: CraftJobSpec, approved: &[LossyConversionKey]) -> Result<String, EncoderError> {
         spec.validate()?;
+        self.check_conversion_consent(&spec, approved)?;
         let job_id = spec.job_id.clone();
-        let queued = QueuedJob::new(spec);
+        let mut queued = QueuedJob::new(spec);
+        queued.conversion_approvals = approved.to_vec();
 
         let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -95,6 +116,125 @@ impl QueueManager {
 
         self.persist_state()?;
         Ok(job_id)
+    }
+
+    /// Path to the shared preferences file used for saved conversion decisions.
+    pub fn set_conversion_preferences_path(&self, path: PathBuf) {
+        *self.conversion_preferences_path.lock().unwrap_or_else(PoisonError::into_inner) = Some(path);
+    }
+
+    /// Resolves an application configuration file beneath the configured per-user directory.
+    pub fn config_file_path(&self, file_name: &str) -> Result<PathBuf, EncoderError> {
+        let name = std::path::Path::new(file_name);
+        if name.components().count() != 1 || name.file_name().and_then(|part| part.to_str()) != Some(file_name) {
+            return Err(EncoderError::InvalidJobSpec("configuration file name must be a single path component".into()));
+        }
+        let config_dir = self
+            .conversion_preferences_path
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|path| path.parent().map(PathBuf::from))
+            .or_else(crate::state::default_config_dir)
+            .ok_or_else(|| EncoderError::Io("no per-user configuration directory is available".into()))?;
+        Ok(config_dir.join(name))
+    }
+
+    /// Loads shared application preferences, using defaults when no preferences file exists.
+    pub fn app_preferences(&self) -> Result<AppPreferences, EncoderError> {
+        match self.preferences_file_path() {
+            Some(path) => load_preferences(&path),
+            None => Ok(AppPreferences::default()),
+        }
+    }
+
+    /// Saves preferences while preserving conversion decisions written by other engine commands.
+    pub fn save_app_preferences(&self, mut preferences: AppPreferences) -> Result<(), EncoderError> {
+        let path = self.preferences_file_path().ok_or_else(|| EncoderError::Io("no per-user preferences file is available".into()))?;
+        let existing = load_preferences(&path)?;
+        for decision in existing.lossy_conversion_decisions {
+            if !preferences.lossy_conversion_decisions.iter().any(|saved| saved.key == decision.key) {
+                preferences.lossy_conversion_decisions.push(decision);
+            }
+        }
+        preferences.migrate();
+        save_preferences_atomic(&path, &preferences)
+    }
+
+    fn preferences_file_path(&self) -> Option<PathBuf> {
+        self.conversion_preferences_path.lock().unwrap_or_else(PoisonError::into_inner).clone().or_else(crate::state::default_preferences_path)
+    }
+
+    /// Lossy conversions in `spec` that do not yet have a saved allow/deny decision.
+    pub fn conversion_review(&self, spec: &CraftJobSpec) -> Result<Vec<LossyConversion>, EncoderError> {
+        let resolved = self.resolve_presets(spec);
+        let decisions = self.conversion_preferences()?;
+        let conversions = assess_lossy_conversions(&resolved)?;
+        for conversion in &conversions {
+            if decisions.iter().any(|decision| decision.key == conversion.key && !decision.allowed) {
+                return Err(EncoderError::InvalidJobSpec(format!("this lossy conversion was previously declined: {}", conversion.description())));
+            }
+        }
+        Ok(conversions
+            .into_iter()
+            .filter(|conversion| !decisions.iter().any(|decision| decision.key == conversion.key && decision.allowed))
+            .collect())
+    }
+
+    /// Saves an allow or deny choice for one exact source-to-target conversion pair.
+    pub fn save_conversion_decision(&self, key: LossyConversionKey, allowed: bool) -> Result<(), EncoderError> {
+        let path = self
+            .preferences_file_path()
+            .ok_or_else(|| EncoderError::InvalidJobSpec("cannot save a conversion decision without a preferences file".into()))?;
+        let mut preferences = load_preferences(&path)?;
+        if let Some(decision) = preferences.lossy_conversion_decisions.iter_mut().find(|decision| decision.key == key) {
+            decision.allowed = allowed;
+        } else {
+            preferences.lossy_conversion_decisions.push(ConversionDecision { key, allowed });
+        }
+        save_preferences_atomic(&path, &preferences)
+    }
+
+    fn conversion_preferences(&self) -> Result<Vec<ConversionDecision>, EncoderError> {
+        let path = self.conversion_preferences_path.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        match path {
+            Some(path) => Ok(load_preferences(&path)?.lossy_conversion_decisions),
+            None => Ok(AppPreferences::default().lossy_conversion_decisions),
+        }
+    }
+
+    fn conversion_approvals_for_job(&self, job_id: &str) -> Result<Vec<LossyConversionKey>, EncoderError> {
+        let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        lock.jobs
+            .iter()
+            .find(|job| job.spec.job_id == job_id)
+            .map(|job| job.conversion_approvals.clone())
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))
+    }
+
+    fn resolve_presets(&self, spec: &CraftJobSpec) -> CraftJobSpec {
+        let mut resolved = spec.clone();
+        let registry = encodercraft_presets::PresetRegistry::default();
+        for target in &mut resolved.targets {
+            registry.apply_to_target(target);
+        }
+        resolved
+    }
+
+    fn check_conversion_consent(&self, spec: &CraftJobSpec, approved: &[LossyConversionKey]) -> Result<(), EncoderError> {
+        let resolved = self.resolve_presets(spec);
+        let decisions = self.conversion_preferences()?;
+        for conversion in assess_lossy_conversions(&resolved)? {
+            match decisions.iter().find(|decision| decision.key == conversion.key) {
+                Some(decision) if decision.allowed => {}
+                Some(_) => {
+                    return Err(EncoderError::InvalidJobSpec(format!("this lossy conversion was previously declined: {}", conversion.description())));
+                }
+                None if approved.contains(&conversion.key) => {}
+                None => return Err(EncoderError::ConversionApprovalRequired(conversion.description())),
+            }
+        }
+        Ok(())
     }
 
     /// Removes a job from the queue.
@@ -127,6 +267,7 @@ impl QueueManager {
         if matches!(job.status, JobStatus::Queued | JobStatus::Paused | JobStatus::Processing) {
             self.with_active(job_id, |p| p.cancel());
             job.status = JobStatus::Cancelled;
+            job.target_eta_seconds = None;
         }
         drop(lock);
 
@@ -178,6 +319,11 @@ impl QueueManager {
 
     /// Duplicates an existing job with a new generated ID.
     pub fn duplicate_job(&self, job_id: &str) -> Result<String, EncoderError> {
+        self.submit_job(self.duplicate_job_spec(job_id)?)
+    }
+
+    /// Builds a duplicate job specification without submitting it.
+    pub fn duplicate_job_spec(&self, job_id: &str) -> Result<CraftJobSpec, EncoderError> {
         let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let job = lock
             .jobs
@@ -187,9 +333,7 @@ impl QueueManager {
 
         let mut new_spec = job.spec.clone();
         new_spec.job_id = format!("{}-copy", job.spec.job_id);
-        drop(lock);
-
-        self.submit_job(new_spec)
+        Ok(new_spec)
     }
 
     /// Reorders the queue to match the given list of job IDs.
@@ -256,6 +400,7 @@ impl QueueManager {
         job.status = JobStatus::Processing;
         job.progress_percent = 0.0;
         job.current_fps = 0.0;
+        job.target_eta_seconds = None;
         job.error_message = None;
         job.completed_at_unix_ms = None;
         Some((job.spec.job_id.clone(), job.spec.clone()))
@@ -277,12 +422,9 @@ impl QueueManager {
     /// Executes a claimed job, mirrors live progress into the journal and records the outcome.
     fn run_job(&self, job_id: &str, spec: &CraftJobSpec) -> Result<(), EncoderError> {
         let start_time = std::time::Instant::now();
-        let mut resolved = spec.clone();
-        let registry = encodercraft_presets::PresetRegistry::default();
-        for target in &mut resolved.targets {
-            registry.apply_to_target(target);
-        }
-        let pipeline = TranscodePipeline::new(resolved);
+        let resolved = self.resolve_presets(spec);
+        let approvals = self.conversion_approvals_for_job(job_id)?;
+        let pipeline = TranscodePipeline::with_limits(resolved, self.pipeline_limits);
         let progress = pipeline.progress();
         {
             let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);
@@ -301,16 +443,18 @@ impl QueueManager {
                     }
                     let pct = progress.percent_complete();
                     let fps = progress.current_fps();
+                    let target_eta_seconds = progress.eta_seconds();
                     let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
                     if let Some(j) = lock.jobs.iter_mut().find(|j| j.spec.job_id == job_id)
                         && matches!(j.status, JobStatus::Processing | JobStatus::Paused)
                     {
                         j.progress_percent = pct;
                         j.current_fps = fps;
+                        j.target_eta_seconds = target_eta_seconds;
                     }
                 }
             });
-            let result = pipeline.execute();
+            let result = self.check_conversion_consent(spec, &approvals).and_then(|()| pipeline.execute());
             stop_monitor.store(true, Ordering::Release);
             result
         });
@@ -338,17 +482,20 @@ impl QueueManager {
                 Ok(()) if !already_cancelled => {
                     j.status = JobStatus::Completed;
                     j.progress_percent = 100.0;
+                    j.target_eta_seconds = None;
                     j.completed_at_unix_ms = Some(now_unix);
                 }
                 Ok(()) => status_str = "Cancelled".to_string(),
                 Err(EncoderError::Cancelled) => {
                     j.status = JobStatus::Cancelled;
+                    j.target_eta_seconds = None;
                     j.completed_at_unix_ms = Some(now_unix);
                     status_str = "Cancelled".to_string();
                 }
                 Err(err) if !already_cancelled => {
                     j.status = JobStatus::Failed(err.to_string());
                     j.error_message = Some(err.to_string());
+                    j.target_eta_seconds = None;
                     j.completed_at_unix_ms = Some(now_unix);
                     status_str = "Failed".to_string();
                     err_msg = Some(err.to_string());
@@ -528,6 +675,7 @@ impl QueueManager {
         job.progress_percent = 0.0;
         job.error_message = None;
         job.current_fps = 0.0;
+        job.target_eta_seconds = None;
         drop(lock);
 
         self.persist_state()?;
@@ -536,6 +684,19 @@ impl QueueManager {
 
     /// Adds an additional output target to an existing job in the queue.
     pub fn add_output_target(&self, job_id: &str, target: encodercraft_core::OutputTarget) -> Result<(), EncoderError> {
+        let mut updated_spec = {
+            let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            lock.jobs
+                .iter()
+                .find(|job| job.spec.job_id == job_id)
+                .map(|job| job.spec.clone())
+                .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?
+        };
+        updated_spec.targets.push(target.clone());
+        updated_spec.validate()?;
+        let approvals = self.conversion_approvals_for_job(job_id)?;
+        self.check_conversion_consent(&updated_spec, &approvals)?;
+
         let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let job = lock
             .jobs
@@ -627,6 +788,19 @@ impl QueueManager {
 
     /// Updates the job specification in-place for `job_id`.
     pub fn update_job_spec(&self, job_id: &str, spec: CraftJobSpec) -> Result<(), EncoderError> {
+        self.update_job_spec_with_approvals(job_id, spec, &[])
+    }
+
+    /// Updates a job after one-time approval of the listed exact conversion pairs.
+    pub fn update_job_spec_with_approvals(&self, job_id: &str, spec: CraftJobSpec, approved: &[LossyConversionKey]) -> Result<(), EncoderError> {
+        if spec.job_id != job_id {
+            return Err(EncoderError::InvalidJobSpec(format!("updated job ID '{}' does not match '{job_id}'", spec.job_id)));
+        }
+        spec.validate()?;
+        let mut approvals = self.conversion_approvals_for_job(job_id)?;
+        approvals.extend_from_slice(approved);
+        self.check_conversion_consent(&spec, &approvals)?;
+
         let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let job = lock
             .jobs
@@ -635,6 +809,11 @@ impl QueueManager {
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
 
         job.spec = spec;
+        for key in approved {
+            if !job.conversion_approvals.contains(key) {
+                job.conversion_approvals.push(key.clone());
+            }
+        }
         drop(lock);
 
         self.persist_state()?;
@@ -655,6 +834,11 @@ impl QueueManager {
 
     /// Submits a multi-clip stitched sequence as a single batch job.
     pub fn stitch_sources_into_job(&self, paths: Vec<PathBuf>, output_path: PathBuf, preset_name: String) -> Result<String, EncoderError> {
+        self.submit_job(Self::build_stitched_job_spec(paths, output_path, preset_name)?)
+    }
+
+    /// Builds a multi-clip stitched job specification without submitting it.
+    pub fn build_stitched_job_spec(paths: Vec<PathBuf>, output_path: PathBuf, preset_name: String) -> Result<CraftJobSpec, EncoderError> {
         if paths.is_empty() {
             return Err(EncoderError::InvalidJobSpec("no clips provided for stitching".into()));
         }
@@ -685,11 +869,21 @@ impl QueueManager {
             }],
         };
 
-        self.submit_job(spec)
+        Ok(spec)
     }
 
     /// Stitches selected jobs into a single combined transcode job (AME Parity).
     pub fn stitch_selected_jobs(&self, job_ids: &[String], output_path: PathBuf, preset_name: String) -> Result<String, EncoderError> {
+        self.submit_job(self.build_stitched_selected_job_spec(job_ids, output_path, preset_name)?)
+    }
+
+    /// Builds a stitched job specification from selected jobs without submitting it.
+    pub fn build_stitched_selected_job_spec(
+        &self,
+        job_ids: &[String],
+        output_path: PathBuf,
+        preset_name: String,
+    ) -> Result<CraftJobSpec, EncoderError> {
         if job_ids.len() < 2 {
             return Err(EncoderError::InvalidJobSpec("at least two jobs required to stitch".into()));
         }
@@ -716,7 +910,7 @@ impl QueueManager {
         }
         drop(lock);
 
-        self.stitch_sources_into_job(file_paths, output_path, preset_name)
+        Self::build_stitched_job_spec(file_paths, output_path, preset_name)
     }
 
     /// Sets the destination directory across all specified jobs and their output targets (AME Parity).
@@ -751,28 +945,46 @@ impl QueueManager {
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
 
         if let encodercraft_core::SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut job.spec.source {
-            let safe_fps = fps.max(1) as i64;
+            let frame_to_tick = |frame: u64| {
+                i64::try_from(frame).map_err(|_| EncoderError::InvalidJobSpec("trim frame exceeds the supported signed tick range".into()))
+            };
+            let frame_rate =
+                || i64::try_from(fps.max(1)).map_err(|_| EncoderError::InvalidJobSpec("frame rate exceeds the supported signed tick range".into()));
             match (in_frame, out_frame) {
                 (None, None) => {
                     *start_tick = None;
                     *duration_ticks = None;
                 }
                 (Some(inf), None) => {
-                    *start_tick = Some(inf as i64);
+                    let start = frame_to_tick(inf)?;
+                    let rate = frame_rate()?;
+                    *start_tick = Some(start);
                     *duration_ticks = None;
-                    *timebase = Some(encodercraft_core::Rational64::new(1, safe_fps)?);
+                    *timebase = Some(encodercraft_core::Rational64::new(1, rate)?);
                 }
                 (None, Some(outf)) => {
+                    let end = frame_to_tick(outf)?;
+                    let duration = end
+                        .checked_add(1)
+                        .ok_or_else(|| EncoderError::InvalidJobSpec("trim duration exceeds the supported signed tick range".into()))?;
+                    let rate = frame_rate()?;
                     *start_tick = Some(0);
-                    *duration_ticks = Some((outf as i64).saturating_add(1));
-                    *timebase = Some(encodercraft_core::Rational64::new(1, safe_fps)?);
+                    *duration_ticks = Some(duration);
+                    *timebase = Some(encodercraft_core::Rational64::new(1, rate)?);
                 }
                 (Some(inf), Some(outf)) => {
-                    let lo = inf.min(outf) as i64;
-                    let hi = inf.max(outf) as i64;
+                    let in_tick = frame_to_tick(inf)?;
+                    let out_tick = frame_to_tick(outf)?;
+                    let lo = in_tick.min(out_tick);
+                    let hi = in_tick.max(out_tick);
+                    let duration = hi
+                        .checked_sub(lo)
+                        .and_then(|span| span.checked_add(1))
+                        .ok_or_else(|| EncoderError::InvalidJobSpec("trim duration exceeds the supported signed tick range".into()))?;
+                    let rate = frame_rate()?;
                     *start_tick = Some(lo);
-                    *duration_ticks = Some(hi.saturating_sub(lo).saturating_add(1));
-                    *timebase = Some(encodercraft_core::Rational64::new(1, safe_fps)?);
+                    *duration_ticks = Some(duration);
+                    *timebase = Some(encodercraft_core::Rational64::new(1, rate)?);
                 }
             }
         }
@@ -832,6 +1044,7 @@ fn priority_rank(priority: JobPriority) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use encodercraft_color::{ColorSpaceTag, PixelFormat};
     use encodercraft_core::{ClientInfo, ContainerType, OutputTarget, SourceDescriptor, StartPolicy};
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -869,6 +1082,121 @@ mod tests {
 
     fn is_terminal(status: &JobStatus) -> bool {
         matches!(status, JobStatus::Completed | JobStatus::Failed(_) | JobStatus::Cancelled)
+    }
+
+    #[test]
+    fn conversion_decisions_persist_and_can_be_reversed() {
+        let dir = tempdir().unwrap();
+        let queue = QueueManager::new_in_memory();
+        queue.set_conversion_preferences_path(dir.path().join("preferences.json"));
+        let key = LossyConversionKey {
+            source_pixel_format: "yuv422p10le".into(),
+            source_bit_depth: 10,
+            source_color_space: ColorSpaceTag::REC709,
+            source_has_alpha: false,
+            target_pixel_format: PixelFormat::Yuv420p,
+            target_color: encodercraft_core::ColorTag::Bt709,
+        };
+
+        queue.save_conversion_decision(key.clone(), true).unwrap();
+        let decisions = queue.conversion_preferences().unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].key, key);
+        assert!(decisions[0].allowed);
+
+        queue.save_conversion_decision(key.clone(), false).unwrap();
+        let decisions = queue.conversion_preferences().unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].key, key);
+        assert!(!decisions[0].allowed);
+    }
+
+    #[test]
+    fn trim_range_rejects_unrepresentable_frames_without_mutating_the_job() {
+        let queue = QueueManager::new_in_memory();
+        queue.submit_job(make_test_spec("trim-overflow", JobPriority::Normal)).unwrap();
+
+        for (in_frame, out_frame, fps) in
+            [(Some(u64::MAX), None, 24), (None, Some(i64::MAX as u64), 24), (Some(0), Some(i64::MAX as u64), 24), (Some(0), Some(1), u64::MAX)]
+        {
+            assert!(queue.set_job_trim_range("trim-overflow", in_frame, out_frame, fps).is_err());
+            let job = queue.list_jobs().into_iter().find(|job| job.spec.job_id == "trim-overflow").unwrap();
+            assert!(matches!(job.spec.source, SourceDescriptor::File { start_tick: None, duration_ticks: None, .. }));
+        }
+    }
+
+    #[test]
+    fn lossy_video_submission_requires_saved_allow_and_honors_saved_refusal() {
+        let dir = tempdir().unwrap();
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../source/tests/fixtures/prores.mov");
+        let preferences_path = dir.path().join("preferences.json");
+        let queue = QueueManager::new_in_memory();
+        queue.set_conversion_preferences_path(preferences_path);
+
+        let mut spec = make_test_spec("lossy-video", JobPriority::Normal);
+        spec.source = SourceDescriptor::File { path: source_path, start_tick: None, duration_ticks: None, timebase: None };
+        let target = spec.targets.first_mut().unwrap();
+        target.container = ContainerType::IsoBmffMp4;
+        target.output_path = dir.path().join("lossy-video.mp4");
+        target.preset_name = "Match Source - High Bitrate".into();
+
+        let conversions = queue.conversion_review(&spec).unwrap();
+        let conversion = conversions.first().expect("the ProRes fixture has higher precision than the H.264 target");
+        assert!(matches!(queue.submit_job(spec.clone()), Err(EncoderError::ConversionApprovalRequired(_))));
+
+        queue.save_conversion_decision(conversion.key.clone(), true).unwrap();
+        assert!(queue.submit_job(spec.clone()).is_ok());
+
+        queue.save_conversion_decision(conversion.key.clone(), false).unwrap();
+        assert!(queue.submit_job(spec).is_err());
+    }
+
+    #[test]
+    fn editing_a_queued_job_requires_approval_without_replacing_its_settings() {
+        let dir = tempdir().unwrap();
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../source/tests/fixtures/prores.mov");
+        let queue = QueueManager::new_in_memory();
+        queue.set_conversion_preferences_path(dir.path().join("preferences.json"));
+        let mut original = make_test_spec("edit-lossy", JobPriority::Normal);
+        original.source = SourceDescriptor::File { path: source_path, start_tick: None, duration_ticks: None, timebase: None };
+        original.targets[0].output_path = dir.path().join("edit-lossy.wav");
+        queue.submit_job(original.clone()).unwrap();
+
+        let mut updated = original.clone();
+        let target = updated.targets.first_mut().unwrap();
+        target.container = ContainerType::IsoBmffMp4;
+        target.output_path = dir.path().join("edit-lossy.mp4");
+        target.preset_name = "Match Source - High Bitrate".into();
+
+        assert!(matches!(queue.update_job_spec(&original.job_id, updated), Err(EncoderError::ConversionApprovalRequired(_))));
+        assert_eq!(queue.list_jobs()[0].spec, original);
+    }
+
+    #[test]
+    fn one_time_conversion_approval_survives_queue_restart() {
+        let dir = tempdir().unwrap();
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../source/tests/fixtures/prores.mov");
+        let journal_path = dir.path().join("queue.json");
+        let mut spec = make_test_spec("restart-approved", JobPriority::Normal);
+        spec.source = SourceDescriptor::File { path: source_path, start_tick: None, duration_ticks: None, timebase: None };
+        let target = spec.targets.first_mut().unwrap();
+        target.container = ContainerType::IsoBmffMp4;
+        target.output_path = dir.path().join("restart-approved.mp4");
+        target.preset_name = "Match Source - High Bitrate".into();
+
+        let queue = QueueManager::new_persisted(journal_path.clone()).unwrap();
+        queue.set_conversion_preferences_path(dir.path().join("preferences.json"));
+        let conversions = queue.conversion_review(&spec).unwrap();
+        let approvals: Vec<_> = conversions.into_iter().map(|conversion| conversion.key).collect();
+        assert!(!approvals.is_empty());
+        queue.submit_job_with_approvals(spec.clone(), &approvals).unwrap();
+        drop(queue);
+
+        let reloaded = QueueManager::new_persisted(journal_path).unwrap();
+        reloaded.set_conversion_preferences_path(dir.path().join("preferences.json"));
+        let saved_approvals = reloaded.conversion_approvals_for_job(&spec.job_id).unwrap();
+        assert_eq!(saved_approvals, approvals);
+        assert!(reloaded.check_conversion_consent(&spec, &saved_approvals).is_ok());
     }
 
     /// A real 0.1 s mono 16-bit 8 kHz WAV, so jobs decode actual audio.

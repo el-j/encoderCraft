@@ -28,6 +28,7 @@ proptest! {
                     color_space: ColorSpaceTag::REC709,
                     frame_rate: fps,
                     bit_depth: 10,
+                    bitrate: None,
                     duration_seconds: Some(10.0),
                 }],
                 audio_streams: vec![],

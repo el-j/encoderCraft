@@ -6,8 +6,8 @@
 use std::io::{Read, Seek, Write};
 
 use craft_media::isobmff::{
-    AacConfig, AudioParams, Av1Config, AvcConfig, Brand, CodecConfig, FourCc, HevcConfig, Mp4Writer, SampleEntry, TrackConfig, VideoParams,
-    VpcConfig, WriteSample, WriterOptions,
+    AacConfig, AudioParams, Av1Config, AvcConfig, Brand, CodecConfig, FourCc, HevcConfig, Mp4Writer, PcmConfig, SampleEntry, TrackConfig,
+    VideoParams, VpcConfig, WriteSample, WriterOptions,
 };
 use encodercraft_core::EncoderError;
 
@@ -78,6 +78,20 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
     /// Adds an audio stream track to the container.
     pub fn add_audio_stream(&mut self, cfg: &AudioStreamConfig) -> Result<usize, EncoderError> {
         let writer = self.writer.as_mut().ok_or_else(|| EncoderError::Internal("mp4 writer already finished".into()))?;
+
+        if cfg.codec_fourcc == *b"lpcm" {
+            let entry = SampleEntry::pcm(PcmConfig {
+                bits: cfg.bits_per_sample,
+                float: false,
+                big_endian: false,
+                signed: true,
+                channels: u32::try_from(cfg.layout.channel_count())
+                    .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the MP4 format limit".into()))?,
+                sample_rate: f64::from(cfg.sample_rate),
+            });
+            let track_cfg = TrackConfig::new(entry, cfg.sample_rate);
+            return writer.add_track(track_cfg).map_err(|e| EncoderError::Internal(format!("failed to add PCM audio track: {e}")));
+        }
 
         let fourcc = FourCc::new(&cfg.codec_fourcc);
         let codec_config = match &cfg.codec_fourcc {

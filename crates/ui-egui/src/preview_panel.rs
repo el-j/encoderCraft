@@ -544,6 +544,9 @@ fn transport_bar(ui: &mut Ui, state: &mut PreviewState, tokens: &Tokens) {
 mod tests {
     use super::*;
     use encodercraft_core::{ClientInfo, JobPriority, OutputTarget, StartPolicy};
+    use encodercraft_engine::QueueManager;
+    use encodercraft_presets::PresetRegistry;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn selected_still_job_shows_a_decoded_texture() {
@@ -585,5 +588,55 @@ mod tests {
         assert!(state.source.texture.is_some(), "no frame was decoded");
         assert_eq!(state.transport.last_frame(), 0);
         assert!(state.output.message.is_some(), "missing output must be explained");
+    }
+
+    #[test]
+    fn headless_gui_adds_transcodes_and_previews_a_real_still() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("input.bmp");
+        let mut bmp = Vec::new();
+        let (width, height) = (8u32, 8u32);
+        bmp.extend_from_slice(b"BM");
+        bmp.extend_from_slice(&(54 + width * height * 3).to_le_bytes());
+        bmp.extend_from_slice(&[0; 4]);
+        bmp.extend_from_slice(&54u32.to_le_bytes());
+        bmp.extend_from_slice(&40u32.to_le_bytes());
+        bmp.extend_from_slice(&width.to_le_bytes());
+        bmp.extend_from_slice(&height.to_le_bytes());
+        bmp.extend_from_slice(&1u16.to_le_bytes());
+        bmp.extend_from_slice(&24u16.to_le_bytes());
+        bmp.extend_from_slice(&[0; 4]);
+        bmp.extend_from_slice(&(width * height * 3).to_le_bytes());
+        bmp.extend_from_slice(&[0; 16]);
+        bmp.extend((0..width * height * 3).map(|index| (index * 5) as u8));
+        std::fs::write(&source, bmp).unwrap();
+
+        let queue = Arc::new(QueueManager::new_in_memory());
+        let mut app = crate::app::EncoderCraftApp::new(queue.clone(), Arc::new(Mutex::new(PresetRegistry::default())));
+        app.add_file_job(source);
+        let queued = queue.list_jobs();
+        assert_eq!(queued.len(), 1);
+        app.queue_state.select_single(queued[0].spec.job_id.clone(), 0);
+        app.run_command(crate::commands::AppCommand::StartQueue);
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(20);
+        while Instant::now() < deadline {
+            egui::__run_test_ui(|ui| app.render(ui));
+            let completed = queue.list_jobs().iter().any(|job| job.status == encodercraft_core::JobStatus::Completed);
+            let preview_ready = app.preview_state.source.texture.is_some();
+            if completed && preview_ready {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let completed = queue.list_jobs().iter().any(|job| job.status == encodercraft_core::JobStatus::Completed);
+        assert!(completed, "GUI start command did not finish the queued transcode");
+        assert!(app.preview_state.source.texture.is_some(), "preview did not decode a real source frame");
+        assert!(
+            app.preview_state.source.pixels.as_ref().is_some_and(|(_, _, pixels)| pixels.iter().any(|pixel| *pixel != 0)),
+            "preview frame contains only placeholder pixels"
+        );
+        assert!(dir.path().join("input_encoded.png").is_file(), "GUI queue did not produce its output");
     }
 }

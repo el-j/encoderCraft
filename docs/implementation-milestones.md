@@ -168,6 +168,9 @@ flowchart LR
    - Modal/drawer dialog for fine-tuning Video, Audio, Effects, Captions, and Metadata parameters.
 5. **Theme Tokens & i18n:**
    - Unified ArtCraft dark styling (`theme::Tokens`), HiDPI vector rendering, and multi-language TSV localization catalogs.
+6. **Cross-Surface Command Parity (`crates/engine/src/cmd`, `crates/ui-egui`):**
+   - Every application command binds to a registered engine `CommandSpec`; queue toolbar and workspace actions use the same IDs as menus, shortcuts, and context menus.
+   - Generic command discovery and execution are available through IPC, CLI, and MCP, with registry-coverage and cross-surface tests.
 
 #### Verification Gate:
 - Desktop application runs smoothly at 60+ FPS on macOS (Metal), Windows (DirectX 12), and Linux (Vulkan).
@@ -518,6 +521,10 @@ flowchart LR
    - Distinct semantic badge coloring for `FilmCraft`, `EffectCraft`, `SoundCraft`, `PhotoCraft`, `VectorCraft`, `DesignCraft`, `PdfCraft`, `FigCraft`, `CadCraft`, `DeckCraft`, `SolidCraft`, `WordCraft`, `TextureCraft`, `GridCraft`, and `LightCraft`.
 
 ---
+
+### Post-alpha.1 Recovery: M24 Real Video Transcode
+
+- [x] **M24** – FilmCraft decoding and sample-derived container timing; decoder coverage (#15); preset/container conformance and faststart (#18); bounded decode/convert/encode stages, reusable frame buffers, windowed audio, cancellation-safe atomic outputs, rotation/scaling/frame-rate conversion, configurable pipeline memory limits, ETA, and high-depth RGBAF32 processing (#17). Match Source chooses 10-bit HEVC for >8-bit sources, while unsupported HDR/gamut reductions require consent. Release measurements and the upstream decoder-cache limitation are documented in `docs/file-format-matrix.md`.
 
 ### Milestone 30: Universal Format Expansion & ArtCraft Bidirectional Conversion
 **Objective:** Expand `encoderCraft` into the centralized universal media conversion and transcoding nexus across all ArtCraft creative applications and standard/proprietary commercial formats without greenfield codec reinvention. Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Milestone 8](https://github.com/el-j/encoderCraft/milestone/8).

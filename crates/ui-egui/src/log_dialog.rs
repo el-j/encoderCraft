@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use egui::RichText;
-use encodercraft_engine::QueueManager;
+use encodercraft_engine::{LogEntry, QueueManager, cmd::CommandRegistry};
 
 use crate::icons;
 use crate::theme::Tokens;
@@ -13,10 +13,17 @@ use crate::theme::Tokens;
 pub struct LogDialogState {
     pub is_open: bool,
     pub filter: String,
+    pub status_message: Option<String>,
 }
 
 /// Renders the Encoding Activity Log modal window.
-pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_mgr: &Arc<QueueManager>, tokens: &Tokens) {
+pub fn render_log_dialog(
+    ctx: &egui::Context,
+    state: &mut LogDialogState,
+    queue_mgr: &Arc<QueueManager>,
+    commands: &CommandRegistry,
+    tokens: &Tokens,
+) {
     if !state.is_open {
         return;
     }
@@ -27,7 +34,22 @@ pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_
     egui::Window::new("Encoding Activity Log").open(&mut is_open).resizable(true).default_size(egui::vec2(720.0, 440.0)).collapsible(false).show(
         ctx,
         |ui| {
-            let entries = queue_mgr.list_log_entries();
+            let entries = match commands.dispatch(queue_mgr, "queue.log", serde_json::json!({})) {
+                Ok(value) => match serde_json::from_value::<Vec<LogEntry>>(value) {
+                    Ok(entries) => {
+                        state.status_message = None;
+                        entries
+                    }
+                    Err(error) => {
+                        state.status_message = Some(format!("The log command returned invalid data: {error}"));
+                        Vec::new()
+                    }
+                },
+                Err(error) => {
+                    state.status_message = Some(format!("Could not load the encoding log: {error}"));
+                    Vec::new()
+                }
+            };
 
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Filter:").strong());
@@ -45,6 +67,9 @@ pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(4.0);
+            if let Some(message) = &state.status_message {
+                ui.label(RichText::new(message).color(tokens.status_failed));
+            }
 
             // Filter entries
             let filter_lower = state.filter.to_lowercase();
@@ -135,7 +160,10 @@ pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_
             // Bottom actions
             ui.horizontal(|ui| {
                 if ui.button("Clear Log").on_hover_text("Erase all transcode log entries").clicked() {
-                    let _ = queue_mgr.clear_log_entries();
+                    match commands.dispatch(queue_mgr, "queue.clear_log", serde_json::json!({})) {
+                        Ok(_) => state.status_message = None,
+                        Err(error) => state.status_message = Some(format!("Could not clear log: {error}")),
+                    }
                 }
 
                 if ui.button("Copy to Clipboard").on_hover_text("Copy formatted log text to clipboard").clicked() {
@@ -152,6 +180,9 @@ pub fn render_log_dialog(ctx: &egui::Context, state: &mut LogDialogState, queue_
                         close_requested = true;
                     }
                 });
+                if let Some(message) = &state.status_message {
+                    ui.label(RichText::new(message).small().color(tokens.status_failed));
+                }
             });
         },
     );

@@ -14,6 +14,7 @@ encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
 encodercraft-demux = { workspace = true }
+craft-atomic = { workspace = true }
 encodercraft-audio-dsp = { workspace = true }
 encodercraft-muxers = { workspace = true }
 encodercraft-platform = { workspace = true }
@@ -25,6 +26,8 @@ craft-media = { workspace = true }
 filmcraft-mxf = { workspace = true }
 filmcraft-captions = { workspace = true }
 filmcraft-time = { workspace = true }
+filmcraft-color = { workspace = true }
+effectcraft-opusenc = { workspace = true }
 crossbeam-channel = { workspace = true }
 rayon = { workspace = true }
 chrono = { workspace = true }

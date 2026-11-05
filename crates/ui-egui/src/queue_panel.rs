@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use egui::{RichText, Ui};
-use encodercraft_core::{ContainerType, CraftJobSpec, JobPriority, JobStatus, OutputTarget, SourceDescriptor};
-use encodercraft_engine::{QueueManager, QueuedJob};
+use encodercraft_core::{ContainerType, CraftJobSpec, JobPriority, JobStatus, SourceDescriptor};
+use encodercraft_engine::{QueueManager, QueuedJob, cmd::CommandRegistry};
 
 use crate::icons;
 use crate::theme::Tokens;
@@ -39,6 +39,97 @@ pub struct QueuePanelState {
     pub active_preset_menu: Option<(String, usize)>, // (job_id, target_idx)
     pub sort_column: Option<QueueSortColumn>,
     pub sort_direction: SortDirection,
+    pub pending_specs: Vec<CraftJobSpec>,
+    pub pending_updates: Vec<(String, CraftJobSpec)>,
+    pub status_message: Option<String>,
+}
+
+fn execute_queue_command(
+    state: &mut QueuePanelState,
+    commands: &CommandRegistry,
+    queue_mgr: &Arc<QueueManager>,
+    command_id: &str,
+    params: serde_json::Value,
+) -> Option<serde_json::Value> {
+    match commands.dispatch(queue_mgr, command_id, params) {
+        Ok(result) => Some(result),
+        Err(error) => {
+            state.status_message = Some(format!("Command '{command_id}' failed: {error}"));
+            None
+        }
+    }
+}
+
+fn execute_app_queue_command(
+    state: &mut QueuePanelState,
+    commands: &CommandRegistry,
+    queue_mgr: &Arc<QueueManager>,
+    command: crate::commands::AppCommand,
+) -> Option<serde_json::Value> {
+    execute_app_queue_command_with_params(state, commands, queue_mgr, command, serde_json::json!({}))
+}
+
+fn execute_app_queue_command_with_params(
+    state: &mut QueuePanelState,
+    commands: &CommandRegistry,
+    queue_mgr: &Arc<QueueManager>,
+    command: crate::commands::AppCommand,
+    params: serde_json::Value,
+) -> Option<serde_json::Value> {
+    let Some(info) = command.info() else {
+        state.status_message = Some(format!("Application command {command:?} is not registered."));
+        return None;
+    };
+    execute_command_info(state, commands, queue_mgr, info, params)
+}
+
+fn prepare_app_job_spec(
+    state: &mut QueuePanelState,
+    commands: &CommandRegistry,
+    queue_mgr: &Arc<QueueManager>,
+    command: crate::commands::AppCommand,
+    params: serde_json::Value,
+) -> Option<CraftJobSpec> {
+    let Some(info) = command.info() else {
+        state.status_message = Some(format!("Application command {command:?} is not registered."));
+        return None;
+    };
+    let Some(engine_id) = info.engine_id else {
+        state.status_message = Some(format!("Command '{}' has no engine binding.", info.id));
+        return None;
+    };
+    prepare_job_spec(state, commands, queue_mgr, engine_id, params)
+}
+
+fn execute_command_info(
+    state: &mut QueuePanelState,
+    commands: &CommandRegistry,
+    queue_mgr: &Arc<QueueManager>,
+    info: &crate::commands::CommandInfo,
+    params: serde_json::Value,
+) -> Option<serde_json::Value> {
+    let Some(engine_id) = info.engine_id else {
+        state.status_message = Some(format!("Command '{}' has no engine binding.", info.id));
+        return None;
+    };
+    execute_queue_command(state, commands, queue_mgr, engine_id, params)
+}
+
+fn prepare_job_spec(
+    state: &mut QueuePanelState,
+    commands: &CommandRegistry,
+    queue_mgr: &Arc<QueueManager>,
+    command_id: &str,
+    params: serde_json::Value,
+) -> Option<CraftJobSpec> {
+    let result = execute_queue_command(state, commands, queue_mgr, command_id, params)?;
+    match serde_json::from_value(result) {
+        Ok(spec) => Some(spec),
+        Err(error) => {
+            state.status_message = Some(format!("Command '{command_id}' returned an invalid job specification: {error}"));
+            None
+        }
+    }
 }
 
 impl QueuePanelState {
@@ -295,44 +386,12 @@ pub fn render_queue_panel(
     ui: &mut Ui,
     state: &mut QueuePanelState,
     queue_mgr: &Arc<QueueManager>,
+    commands: &CommandRegistry,
     tokens: &Tokens,
     on_inspect_job: &mut Option<CraftJobSpec>,
     on_open_log: &mut bool,
 ) {
     let mut jobs = queue_mgr.list_jobs();
-
-    // Handle drag and drop files onto the queue table
-    let dropped_files = ui.ctx().input(|i| i.raw.dropped_files.clone());
-    for file in dropped_files {
-        let path = file.path().to_path_buf();
-        if path.is_file() {
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-            let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-            let out_path = parent.join(format!("{stem}_encoded.mp4"));
-
-            let spec = CraftJobSpec {
-                version: "1.0".into(),
-                job_id: format!("job_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)),
-                client_info: encodercraft_core::ClientInfo {
-                    app_name: "encoderCraft GUI".into(),
-                    app_version: "0.1.0-alpha.2".into(),
-                    pid: std::process::id(),
-                    user_notes: None,
-                },
-                priority: JobPriority::Normal,
-                start_policy: encodercraft_core::StartPolicy::AutoStart,
-                source: SourceDescriptor::File { path: path.clone(), start_tick: None, duration_ticks: None, timebase: None },
-                targets: vec![OutputTarget {
-                    target_id: "target-1".into(),
-                    output_path: out_path,
-                    preset_name: "Match Source - High Bitrate".into(),
-                    container: ContainerType::IsoBmffMp4,
-                    ..Default::default()
-                }],
-            };
-            let _ = queue_mgr.submit_job(spec);
-        }
-    }
 
     // Apply sorting if a sort column is set
     if let Some(col) = state.sort_column {
@@ -364,73 +423,55 @@ pub fn render_queue_panel(
     }
 
     ui.vertical(|ui| {
-        // --- Keyboard shortcuts for AME parity ---
-        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            queue_mgr.start_queue();
+        if let Some(message) = &state.status_message {
+            ui.label(RichText::new(message).small().color(tokens.status_failed));
         }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            queue_mgr.stop_worker();
-        }
-        state.is_running = queue_mgr.is_worker_running() && !queue_mgr.is_paused();
-        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::A)) {
-            state.select_all(&jobs);
-        }
-        if ui.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::ArrowUp)) {
-            let ids = state.selected_ids_list();
-            for id in ids {
-                let _ = queue_mgr.move_job_up(&id);
-            }
-        }
-        if ui.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::ArrowDown)) {
-            let mut ids = state.selected_ids_list();
-            ids.reverse();
-            for id in ids {
-                let _ = queue_mgr.move_job_down(&id);
-            }
-        }
-        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::D)) {
-            let ids = state.selected_ids_list();
-            let mut new_ids = Vec::new();
-            for id in ids {
-                if let Ok(new_id) = queue_mgr.duplicate_job(&id) {
-                    new_ids.push(new_id);
-                }
-            }
-            if !new_ids.is_empty() {
-                state.selected_job_ids.clear();
-                for id in new_ids {
-                    state.selected_job_ids.insert(id.clone());
-                    state.selected_job_id = Some(id);
-                }
-            }
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
-            let ids = state.selected_ids_list();
-            for id in ids {
-                let _ = queue_mgr.remove_job(&id);
-            }
-            state.clear_selection();
-        }
+        let worker_running = queue_mgr.is_worker_running();
+        state.is_running = worker_running && !queue_mgr.is_paused();
 
         // --- 1. Top Batch Queue Toolbar ---
         let selected_count = state.selected_job_ids.len().max(if state.selected_job_id.is_some() { 1 } else { 0 });
         let has_selection = selected_count > 0;
+        let command_state = crate::commands::CommandState { jobs: jobs.len(), worker_running, worker_active: state.is_running, ..Default::default() };
 
         ui.horizontal(|ui| {
-            let start_btn =
-                icons::button_with_label(ui, icons::Icon::Play, "Start Queue", state.is_running, tokens, "Start processing the batch queue (Enter)");
+            let start_btn = icons::button_with_label_color_enabled(
+                ui,
+                icons::Icon::Play,
+                "Start Queue",
+                crate::commands::AppCommand::StartQueue.enabled(&command_state),
+                tokens.status_completed,
+                tokens,
+                "Start processing the batch queue (Enter)",
+            );
             if start_btn.clicked() {
-                queue_mgr.start_queue();
+                execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StartQueue);
             }
 
-            let pause_btn = icons::button_with_label(ui, icons::Icon::Pause, "Pause", false, tokens, "Pause active encode");
+            let pause_btn = icons::button_with_label_enabled(
+                ui,
+                icons::Icon::Pause,
+                "Pause",
+                false,
+                crate::commands::AppCommand::PauseQueue.enabled(&command_state),
+                tokens,
+                "Pause active encode",
+            );
             if pause_btn.clicked() {
-                queue_mgr.pause_worker();
+                execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::PauseQueue);
             }
 
-            let stop_btn = icons::button_with_label(ui, icons::Icon::Stop, "Stop", false, tokens, "Stop batch queue (Esc)");
+            let stop_btn = icons::button_with_label_enabled(
+                ui,
+                icons::Icon::Stop,
+                "Stop",
+                false,
+                crate::commands::AppCommand::StopQueue.enabled(&command_state),
+                tokens,
+                "Stop batch queue (Esc)",
+            );
             if stop_btn.clicked() {
-                queue_mgr.stop_worker();
+                execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StopQueue);
             }
 
             ui.separator();
@@ -440,16 +481,14 @@ pub fn render_queue_panel(
                     icons::button_with_label(ui, icons::Icon::Plus, "Add Output", false, tokens, "Add another output target to selected job(s)");
                 if add_output_btn.clicked() {
                     for id in state.selected_ids_list() {
-                        if let Some(j) = jobs.iter().find(|j| j.spec.job_id == id) {
-                            let count = j.spec.targets.len() + 1;
-                            let new_target = OutputTarget {
-                                target_id: format!("target-{count}"),
-                                output_path: std::path::PathBuf::from(format!("output_{count}.mp4")),
-                                preset_name: "Match Source - High Bitrate".into(),
-                                container: ContainerType::IsoBmffMp4,
-                                ..Default::default()
-                            };
-                            let _ = queue_mgr.add_output_target(&id, new_target);
+                        if let Some(updated_spec) = prepare_app_job_spec(
+                            state,
+                            commands,
+                            queue_mgr,
+                            crate::commands::AppCommand::AddOutputTarget,
+                            serde_json::json!({ "jobId": id }),
+                        ) {
+                            state.pending_updates.push((id.clone(), updated_spec));
                             state.expanded_jobs.insert(id);
                         }
                     }
@@ -460,14 +499,28 @@ pub fn render_queue_panel(
                 if dup_btn.clicked() {
                     let ids = state.selected_ids_list();
                     for id in ids {
-                        let _ = queue_mgr.duplicate_job(&id);
+                        if let Some(spec) = prepare_app_job_spec(
+                            state,
+                            commands,
+                            queue_mgr,
+                            crate::commands::AppCommand::DuplicateSelected,
+                            serde_json::json!({ "jobId": id }),
+                        ) {
+                            state.pending_specs.push(spec);
+                        }
                     }
                 }
 
                 let move_up_btn = icons::button(ui, icons::Icon::ArrowUp, 20.0, false, tokens, "Move selected up in queue (Alt+Up)");
                 if move_up_btn.clicked() {
                     for id in state.selected_ids_list() {
-                        let _ = queue_mgr.move_job_up(&id);
+                        execute_app_queue_command_with_params(
+                            state,
+                            commands,
+                            queue_mgr,
+                            crate::commands::AppCommand::MoveSelectedUp,
+                            serde_json::json!({ "jobId": id }),
+                        );
                     }
                 }
 
@@ -476,7 +529,13 @@ pub fn render_queue_panel(
                     let mut ids = state.selected_ids_list();
                     ids.reverse();
                     for id in ids {
-                        let _ = queue_mgr.move_job_down(&id);
+                        execute_app_queue_command_with_params(
+                            state,
+                            commands,
+                            queue_mgr,
+                            crate::commands::AppCommand::MoveSelectedDown,
+                            serde_json::json!({ "jobId": id }),
+                        );
                     }
                 }
 
@@ -484,7 +543,13 @@ pub fn render_queue_panel(
                 let reset_btn = icons::button_with_label(ui, icons::Icon::Reset, &reset_label, false, tokens, "Reset selected job(s) back to Ready");
                 if reset_btn.clicked() {
                     for id in state.selected_ids_list() {
-                        let _ = queue_mgr.reset_job_status(&id);
+                        execute_app_queue_command_with_params(
+                            state,
+                            commands,
+                            queue_mgr,
+                            crate::commands::AppCommand::ResetSelected,
+                            serde_json::json!({ "jobId": id }),
+                        );
                     }
                 }
 
@@ -493,7 +558,13 @@ pub fn render_queue_panel(
                 if remove_btn.clicked() {
                     let ids = state.selected_ids_list();
                     for id in ids {
-                        let _ = queue_mgr.remove_job(&id);
+                        execute_app_queue_command_with_params(
+                            state,
+                            commands,
+                            queue_mgr,
+                            crate::commands::AppCommand::RemoveSelected,
+                            serde_json::json!({ "jobId": id }),
+                        );
                     }
                     state.clear_selection();
                 }
@@ -501,9 +572,14 @@ pub fn render_queue_panel(
                 let inspect_btn = icons::button_with_label(ui, icons::Icon::Gear, "Settings...", false, tokens, "Open Export Settings dialog");
                 if inspect_btn.clicked()
                     && let Some(ref id) = state.selected_job_id
-                    && let Some(j) = jobs.iter().find(|j| &j.spec.job_id == id)
                 {
-                    *on_inspect_job = Some(j.spec.clone());
+                    *on_inspect_job = prepare_app_job_spec(
+                        state,
+                        commands,
+                        queue_mgr,
+                        crate::commands::AppCommand::InspectSettings,
+                        serde_json::json!({ "jobId": id }),
+                    );
                 }
             });
 
@@ -512,7 +588,7 @@ pub fn render_queue_panel(
             let has_completed = jobs.iter().any(|j| j.status == JobStatus::Completed);
             ui.add_enabled_ui(has_completed, |ui| {
                 if ui.button("Clear Finished").on_hover_text("Remove finished jobs from queue").clicked() {
-                    let _ = queue_mgr.clear_completed_jobs();
+                    execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::ClearFinished);
                 }
             });
 
@@ -532,7 +608,19 @@ pub fn render_queue_panel(
                         && let Some(target) = first_job.spec.targets.first()
                     {
                         let out_path = target.output_path.with_file_name("stitched_batch.mp4");
-                        let _ = queue_mgr.stitch_selected_jobs(&ids, out_path, "Match Source - High Bitrate".into());
+                        if let Some(spec) = prepare_app_job_spec(
+                            state,
+                            commands,
+                            queue_mgr,
+                            crate::commands::AppCommand::StitchSelected,
+                            serde_json::json!({
+                                "jobIds": ids,
+                                "outputPath": out_path,
+                                "presetName": "Match Source - High Bitrate",
+                            }),
+                        ) {
+                            state.pending_specs.push(spec);
+                        }
                     }
                 }
             }
@@ -550,12 +638,18 @@ pub fn render_queue_panel(
                     && let Some(folder) = rfd::FileDialog::new().set_title("Select Destination Folder").pick_folder()
                 {
                     let ids = state.selected_ids_list();
-                    let _ = queue_mgr.set_jobs_output_dir(&ids, folder);
+                    execute_app_queue_command_with_params(
+                        state,
+                        commands,
+                        queue_mgr,
+                        crate::commands::AppCommand::SetDestination,
+                        serde_json::json!({ "jobIds": ids, "outputDir": folder }),
+                    );
                 }
             });
 
             let log_btn = icons::button_with_label(ui, icons::Icon::Clock, "Show Log...", false, tokens, "Open Encoding Activity Log (Cmd+L)");
-            if log_btn.clicked() {
+            if log_btn.clicked() && execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::ShowLog).is_some() {
                 *on_open_log = true;
             }
         });
@@ -624,7 +718,7 @@ pub fn render_queue_panel(
         egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             for (idx, job) in jobs.iter().enumerate() {
                 let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs };
-                render_grouped_job_row(ui, item, state, queue_mgr, tokens, on_inspect_job);
+                render_grouped_job_row(ui, item, state, queue_mgr, commands, tokens, on_inspect_job);
             }
         });
     });
@@ -696,6 +790,7 @@ fn render_grouped_job_row(
     item: GroupedJobItem<'_>,
     state: &mut QueuePanelState,
     queue_mgr: &Arc<QueueManager>,
+    commands: &CommandRegistry,
     tokens: &Tokens,
     on_inspect_job: &mut Option<CraftJobSpec>,
 ) {
@@ -756,7 +851,7 @@ fn render_grouped_job_row(
                 }
 
                 job_select_btn.context_menu(|ui| {
-                    render_job_context_menu(ui, job, all_jobs, state, queue_mgr, on_inspect_job);
+                    render_job_context_menu(ui, job, all_jobs, state, queue_mgr, commands);
                 });
             });
 
@@ -799,7 +894,13 @@ fn render_grouped_job_row(
                         {
                             let mut updated = t.clone();
                             updated.output_path = new_path;
-                            let _ = queue_mgr.update_output_target(&job_id, 0, updated);
+                            execute_queue_command(
+                                state,
+                                commands,
+                                queue_mgr,
+                                "queue.update_output_target",
+                                serde_json::json!({ "jobId": job_id, "targetIndex": 0, "target": updated }),
+                            );
                         }
                     }
                 } else {
@@ -831,10 +932,22 @@ fn render_grouped_job_row(
 
                         if job.spec.targets.len() > 1 && icons::button(ui, icons::Icon::Trash, 14.0, false, tokens, "Remove output target").clicked()
                         {
-                            let _ = queue_mgr.remove_output_target(&job_id, idx);
+                            execute_queue_command(
+                                state,
+                                commands,
+                                queue_mgr,
+                                "queue.remove_output_target",
+                                serde_json::json!({ "jobId": job_id, "targetIndex": idx }),
+                            );
                         }
                         if icons::button(ui, icons::Icon::Duplicate, 14.0, false, tokens, "Duplicate output target").clicked() {
-                            let _ = queue_mgr.duplicate_output_target(&job_id, idx);
+                            execute_queue_command(
+                                state,
+                                commands,
+                                queue_mgr,
+                                "queue.duplicate_output_target",
+                                serde_json::json!({ "jobId": job_id, "targetIndex": idx }),
+                            );
                         }
                     });
 
@@ -861,7 +974,13 @@ fn render_grouped_job_row(
                                 updated.output_path = p;
                             }
                             updated.preset_name = default_preset_for_container(current_container).to_string();
-                            let _ = queue_mgr.update_output_target(&job_id, idx, updated);
+                            execute_queue_command(
+                                state,
+                                commands,
+                                queue_mgr,
+                                "queue.update_output_target",
+                                serde_json::json!({ "jobId": job_id, "targetIndex": idx, "target": updated }),
+                            );
                         }
                     });
 
@@ -874,8 +993,16 @@ fn render_grouped_job_row(
                         if pre_btn.clicked() {
                             state.active_preset_menu = if is_menu_open { None } else { Some((job_id.clone(), idx)) };
                         }
-                        if pre_btn.double_clicked() {
-                            *on_inspect_job = Some(job.spec.clone());
+                        if pre_btn.double_clicked()
+                            && let Some(spec) = prepare_app_job_spec(
+                                state,
+                                commands,
+                                queue_mgr,
+                                crate::commands::AppCommand::InspectSettings,
+                                serde_json::json!({ "jobId": job_id }),
+                            )
+                        {
+                            *on_inspect_job = Some(spec);
                         }
 
                         if is_menu_open {
@@ -884,13 +1011,27 @@ fn render_grouped_job_row(
                                     if ui.button(preset_name).clicked() {
                                         let mut updated = target.clone();
                                         updated.preset_name = preset_name.to_string();
-                                        let _ = queue_mgr.update_output_target(&job_id, idx, updated);
+                                        execute_queue_command(
+                                            state,
+                                            commands,
+                                            queue_mgr,
+                                            "queue.update_output_target",
+                                            serde_json::json!({ "jobId": job_id, "targetIndex": idx, "target": updated }),
+                                        );
                                         state.active_preset_menu = None;
                                     }
                                 }
                                 ui.separator();
                                 if ui.button("Custom Export Settings...").clicked() {
-                                    *on_inspect_job = Some(job.spec.clone());
+                                    if let Some(spec) = prepare_app_job_spec(
+                                        state,
+                                        commands,
+                                        queue_mgr,
+                                        crate::commands::AppCommand::InspectSettings,
+                                        serde_json::json!({ "jobId": job_id }),
+                                    ) {
+                                        *on_inspect_job = Some(spec);
+                                    }
                                     state.active_preset_menu = None;
                                 }
                             });
@@ -908,20 +1049,52 @@ fn render_grouped_job_row(
                         {
                             let mut updated = target.clone();
                             updated.output_path = new_path;
-                            let _ = queue_mgr.update_output_target(&job_id, idx, updated);
+                            execute_queue_command(
+                                state,
+                                commands,
+                                queue_mgr,
+                                "queue.update_output_target",
+                                serde_json::json!({ "jobId": job_id, "targetIndex": idx, "target": updated }),
+                            );
                         }
 
                         out_link.context_menu(|ui| {
                             if ui.button("Reveal in Finder / Explorer").clicked() {
-                                reveal_in_file_manager(&target.output_path);
+                                if let Some(value) = execute_queue_command(
+                                    state,
+                                    commands,
+                                    queue_mgr,
+                                    "queue.reveal_output",
+                                    serde_json::json!({ "jobId": job_id, "targetIndex": idx }),
+                                ) && let Some(path) = value.get("path").and_then(serde_json::Value::as_str)
+                                {
+                                    reveal_in_file_manager(std::path::Path::new(path));
+                                }
                                 ui.close();
                             }
                             if ui.button("Copy Output Path").clicked() {
-                                ui.ctx().copy_text(target.output_path.display().to_string());
+                                if let Some(value) = execute_queue_command(
+                                    state,
+                                    commands,
+                                    queue_mgr,
+                                    "queue.copy_output_path",
+                                    serde_json::json!({ "jobId": job_id, "targetIndex": idx }),
+                                ) && let Some(path) = value.get("path").and_then(serde_json::Value::as_str)
+                                {
+                                    ui.ctx().copy_text(path.to_owned());
+                                }
                                 ui.close();
                             }
                             if ui.button("Inspect Settings...").clicked() {
-                                *on_inspect_job = Some(job.spec.clone());
+                                if let Some(spec) = prepare_app_job_spec(
+                                    state,
+                                    commands,
+                                    queue_mgr,
+                                    crate::commands::AppCommand::InspectSettings,
+                                    serde_json::json!({ "jobId": job_id }),
+                                ) {
+                                    *on_inspect_job = Some(spec);
+                                }
                                 ui.close();
                             }
                         });
@@ -942,72 +1115,162 @@ fn render_grouped_job_row(
 fn render_job_context_menu(
     ui: &mut Ui,
     job: &QueuedJob,
-    _all_jobs: &[QueuedJob],
+    all_jobs: &[QueuedJob],
     state: &mut QueuePanelState,
     queue_mgr: &Arc<QueueManager>,
-    on_inspect_job: &mut Option<CraftJobSpec>,
+    commands: &CommandRegistry,
 ) {
     let job_id = &job.spec.job_id;
+    if !state.selected_job_ids.contains(job_id) {
+        let Some(index) = all_jobs.iter().position(|candidate| candidate.spec.job_id == *job_id) else {
+            state.status_message = Some(format!("Queue item '{job_id}' is no longer available."));
+            return;
+        };
+        state.select_single(job_id.clone(), index);
+    }
+    let selected_ids: Vec<_> = all_jobs
+        .iter()
+        .filter(|candidate| state.selected_job_ids.contains(&candidate.spec.job_id))
+        .map(|candidate| candidate.spec.job_id.clone())
+        .collect();
     let out_path = job.spec.targets.first().map(|t| t.output_path.clone());
     let src_path = match &job.spec.source {
         SourceDescriptor::File { path, .. } => Some(path.clone()),
         _ => None,
     };
 
-    if let Some(ref p) = out_path {
-        if ui.button("Reveal Output in Finder / Explorer").clicked() {
-            reveal_in_file_manager(p);
-            ui.close();
+    for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::QueueRow) {
+        if info.command == crate::commands::AppCommand::ResetSelected {
+            ui.separator();
         }
-        if ui.button("Copy Output Path").clicked() {
-            ui.ctx().copy_text(p.display().to_string());
-            ui.close();
+        let command_state = crate::commands::CommandState {
+            selected: selected_ids.len(),
+            jobs: all_jobs.len(),
+            has_source: src_path.is_some(),
+            has_output: out_path.is_some(),
+            ..Default::default()
+        };
+        if !info.command.enabled(&command_state) {
+            continue;
         }
-    }
-
-    if let Some(ref p) = src_path {
-        if ui.button("Reveal Source in Finder / Explorer").clicked() {
-            reveal_in_file_manager(p);
-            ui.close();
+        if !ui.button(info.label).clicked() {
+            continue;
         }
-        if ui.button("Copy Source Path").clicked() {
-            ui.ctx().copy_text(p.display().to_string());
-            ui.close();
-        }
-    }
-
-    ui.separator();
-
-    if ui.button("Export Settings...").clicked() {
-        *on_inspect_job = Some(job.spec.clone());
-        ui.close();
-    }
-
-    if ui.button("Duplicate").clicked() {
-        let _ = queue_mgr.duplicate_job(job_id);
-        ui.close();
-    }
-
-    if ui.button("Reset Status").clicked() {
-        let _ = queue_mgr.reset_job_status(job_id);
-        ui.close();
-    }
-
-    if ui.button("Remove").clicked() {
-        let _ = queue_mgr.remove_job(job_id);
-        ui.close();
-    }
-
-    if state.selected_job_ids.len() > 1 {
-        ui.separator();
-        if ui.button(format!("Stitch {} Selected Clips...", state.selected_job_ids.len())).clicked() {
-            if let Some(ref first_path) = out_path {
-                let out = first_path.with_file_name("stitched_batch.mp4");
-                let ids = state.selected_ids_list();
-                let _ = queue_mgr.stitch_selected_jobs(&ids, out, "Match Source - High Bitrate".into());
+        match info.command {
+            crate::commands::AppCommand::RevealOutput => {
+                if let Some(value) = execute_command_info(state, commands, queue_mgr, info, serde_json::json!({ "jobId": job.spec.job_id }))
+                    && let Some(path) = value.get("path").and_then(serde_json::Value::as_str)
+                {
+                    reveal_in_file_manager(std::path::Path::new(path));
+                }
             }
-            ui.close();
+            crate::commands::AppCommand::CopyOutputPath => {
+                if let Some(value) = execute_command_info(state, commands, queue_mgr, info, serde_json::json!({ "jobId": job.spec.job_id }))
+                    && let Some(path) = value.get("path").and_then(serde_json::Value::as_str)
+                {
+                    ui.ctx().copy_text(path.to_owned());
+                }
+            }
+            crate::commands::AppCommand::RevealSource => {
+                if let Some(value) = execute_command_info(state, commands, queue_mgr, info, serde_json::json!({ "jobId": job.spec.job_id }))
+                    && let Some(path) = value.get("path").and_then(serde_json::Value::as_str)
+                {
+                    reveal_in_file_manager(std::path::Path::new(path));
+                }
+            }
+            crate::commands::AppCommand::CopySourcePath => {
+                if let Some(value) = execute_command_info(state, commands, queue_mgr, info, serde_json::json!({ "jobId": job.spec.job_id }))
+                    && let Some(path) = value.get("path").and_then(serde_json::Value::as_str)
+                {
+                    ui.ctx().copy_text(path.to_owned());
+                }
+            }
+            crate::commands::AppCommand::ExportSettings => {
+                if let Some(value) = execute_command_info(state, commands, queue_mgr, info, serde_json::json!({ "jobId": job.spec.job_id }))
+                    && let Some(path) = rfd::FileDialog::new().set_title("Export Job Settings").set_file_name("encodercraft-job.json").save_file()
+                {
+                    let result = serde_json::to_vec_pretty(&value)
+                        .map_err(|error| error.to_string())
+                        .and_then(|bytes| std::fs::write(&path, bytes).map_err(|error| error.to_string()));
+                    if let Err(error) = result {
+                        state.status_message = Some(format!("Could not export job settings: {error}"));
+                    } else {
+                        state.status_message = Some(format!("Exported job settings to {}", path.display()));
+                    }
+                }
+            }
+            crate::commands::AppCommand::ResetSelected | crate::commands::AppCommand::RemoveSelected => {
+                let Some(command_id) = info.engine_id else {
+                    state.status_message = Some(format!("Command '{}' has no engine binding.", info.id));
+                    ui.close();
+                    continue;
+                };
+                for id in &selected_ids {
+                    execute_queue_command(state, commands, queue_mgr, command_id, serde_json::json!({ "jobId": id }));
+                }
+            }
+            crate::commands::AppCommand::DuplicateSelected => {
+                let Some(command_id) = info.engine_id else {
+                    state.status_message = Some(format!("Command '{}' has no engine binding.", info.id));
+                    ui.close();
+                    continue;
+                };
+                for id in &selected_ids {
+                    if let Some(spec) = prepare_job_spec(state, commands, queue_mgr, command_id, serde_json::json!({ "jobId": id })) {
+                        state.pending_specs.push(spec);
+                    }
+                }
+            }
+            crate::commands::AppCommand::MoveSelectedUp | crate::commands::AppCommand::MoveSelectedDown => {
+                let Some(command_id) = info.engine_id else {
+                    state.status_message = Some(format!("Command '{}' has no engine binding.", info.id));
+                    ui.close();
+                    continue;
+                };
+                let mut ids = selected_ids.clone();
+                if info.command == crate::commands::AppCommand::MoveSelectedDown {
+                    ids.reverse();
+                }
+                for id in ids {
+                    execute_queue_command(state, commands, queue_mgr, command_id, serde_json::json!({ "jobId": id }));
+                }
+            }
+            crate::commands::AppCommand::StitchSelected => {
+                let Some(command_id) = info.engine_id else {
+                    state.status_message = Some(format!("Command '{}' has no engine binding.", info.id));
+                    ui.close();
+                    continue;
+                };
+                let output_path = out_path
+                    .as_ref()
+                    .map_or_else(|| std::env::temp_dir().join("stitched_batch.mp4"), |path| path.with_file_name("stitched_batch.mp4"));
+                if let Some(spec) = prepare_job_spec(
+                    state,
+                    commands,
+                    queue_mgr,
+                    command_id,
+                    serde_json::json!({
+                        "jobIds": selected_ids,
+                        "outputPath": output_path,
+                        "presetName": "Match Source - High Bitrate",
+                    }),
+                ) {
+                    state.pending_specs.push(spec);
+                }
+            }
+            crate::commands::AppCommand::SetDestination => {
+                let Some(command_id) = info.engine_id else {
+                    state.status_message = Some(format!("Command '{}' has no engine binding.", info.id));
+                    ui.close();
+                    continue;
+                };
+                if let Some(folder) = rfd::FileDialog::new().set_title("Select Output Directory").pick_folder() {
+                    execute_queue_command(state, commands, queue_mgr, command_id, serde_json::json!({ "jobIds": selected_ids, "outputDir": folder }));
+                }
+            }
+            _ => {}
         }
+        ui.close();
     }
 }
 
@@ -1128,6 +1391,31 @@ mod tests {
         assert_eq!(state.selected_ids_list(), vec!["j".to_string()]);
         state.clear_selection();
         assert!(state.selected_ids_list().is_empty());
+    }
+
+    #[test]
+    fn queue_panel_engine_command_ids_are_registered() {
+        let registry = CommandRegistry::new();
+        let registered: std::collections::HashSet<_> = registry.list().into_iter().map(|(id, _, _)| id).collect();
+        for id in [
+            "queue.start",
+            "queue.pause_worker",
+            "queue.stop_worker",
+            "queue.move_up",
+            "queue.move_down",
+            "queue.duplicate_spec",
+            "queue.reset",
+            "queue.remove",
+            "queue.clear_finished",
+            "queue.prepare_stitch",
+            "queue.set_output_dir",
+            "queue.prepare_add_output_target",
+            "queue.update_output_target",
+            "queue.remove_output_target",
+            "queue.duplicate_output_target",
+        ] {
+            assert!(registered.contains(id), "queue panel references unregistered command {id}");
+        }
     }
 
     #[test]

@@ -8,18 +8,21 @@ use encodercraft_ipc::IpcHandler;
 use encodercraft_presets::PresetRegistry;
 use serde_json::json;
 
+use crate::cmd::CommandRegistry;
 use crate::queue::QueueManager;
 
 /// Reusable IPC handler for encoderCraft engine.
 pub struct EngineIpcHandler {
     pub queue_mgr: Arc<QueueManager>,
     pub preset_registry: Arc<Mutex<PresetRegistry>>,
+    command_registry: CommandRegistry,
 }
 
 impl EngineIpcHandler {
     /// Creates a new `EngineIpcHandler` instance.
     pub fn new(queue_mgr: Arc<QueueManager>, preset_registry: Arc<Mutex<PresetRegistry>>) -> Self {
-        Self { queue_mgr, preset_registry }
+        let command_registry = CommandRegistry::with_preset_registry(Arc::clone(&preset_registry));
+        Self { queue_mgr, preset_registry, command_registry }
     }
 }
 
@@ -33,11 +36,11 @@ impl IpcHandler for EngineIpcHandler {
         if !emit(IpcResponse::success(req.id, json!({ "subscribed": true }))) {
             return true;
         }
-        let mut seen: std::collections::HashMap<String, (JobStatus, u32)> = std::collections::HashMap::new();
+        let mut seen: std::collections::HashMap<String, (JobStatus, u32, Option<u64>)> = std::collections::HashMap::new();
         loop {
             let jobs = self.queue_mgr.list_jobs();
             for job in &jobs {
-                let key = (job.status.clone(), job.progress_percent.clamp(0.0, 100.0) as u32);
+                let key = (job.status.clone(), job.progress_percent.clamp(0.0, 100.0) as u32, job.target_eta_seconds);
                 if seen.get(&job.spec.job_id) != Some(&key) {
                     let event = json!({
                         "event": "queue.event",
@@ -45,6 +48,7 @@ impl IpcHandler for EngineIpcHandler {
                         "status": job.status,
                         "progressPercent": job.progress_percent,
                         "fps": job.current_fps,
+                        "targetEtaSeconds": job.target_eta_seconds,
                     });
                     if !emit(IpcResponse::success(req.id, event)) {
                         return true;
@@ -58,6 +62,31 @@ impl IpcHandler for EngineIpcHandler {
     }
 
     fn handle(&self, req: &IpcRequest) -> IpcResponse {
+        if req.method == "command.list" {
+            let commands: Vec<_> = self
+                .command_registry
+                .list()
+                .into_iter()
+                .map(|(id, label, description)| json!({ "id": id, "label": label, "description": description }))
+                .collect();
+            return IpcResponse::success(req.id, json!(commands));
+        }
+        if req.method == "command.execute" {
+            let Some(command_id) = req.params.get("commandId").and_then(|value| value.as_str()) else {
+                return IpcResponse::error(req.id, "missing commandId parameter");
+            };
+            let params = req.params.get("params").cloned().unwrap_or_else(|| json!({}));
+            return match self.command_registry.dispatch(&self.queue_mgr, command_id, params) {
+                Ok(result) => IpcResponse::success(req.id, result),
+                Err(error) => IpcResponse::error(req.id, error.to_string()),
+            };
+        }
+        if self.command_registry.contains(&req.method) {
+            return match self.command_registry.dispatch(&self.queue_mgr, &req.method, req.params.clone()) {
+                Ok(result) => IpcResponse::success(req.id, result),
+                Err(error) => IpcResponse::error(req.id, error.to_string()),
+            };
+        }
         match req.method.as_str() {
             "app.ping" => IpcResponse::success(req.id, json!({ "pong": true, "app": "encoderCraft", "version": "0.1.0" })),
             "app.version" => IpcResponse::success(req.id, json!({ "app": "encoderCraft", "version": "0.1.0", "engine": "ArtCraft-Rust" })),

@@ -4,8 +4,10 @@ use std::path::PathBuf;
 
 use egui::{ColorImage, RichText, TextureHandle, Ui, Window};
 use encodercraft_core::{
-    CaptionExportFormat, ContainerType, CraftJobSpec, MediaStreamKind, OutputTarget, Rational64, SourceDescriptor, SourceSelection,
+    CaptionExportFormat, ContainerType, CraftJobSpec, FrameRateMode, MediaStreamKind, OutputTarget, Rational64, Rotation, ScalingFilter,
+    SourceDescriptor, SourceSelection,
 };
+use encodercraft_geom::ScaleMode;
 use encodercraft_pipeline::SourceInventory;
 use encodercraft_source::MediaProbe;
 
@@ -678,6 +680,68 @@ fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
                 target.custom_frame_rate = Rational64::new(60, 1).ok();
             }
         });
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Rotation:");
+        egui::ComboBox::from_id_salt("inspector_rotation_combo")
+            .selected_text(match target.transform.rotation {
+                Rotation::None => "0°",
+                Rotation::Cw90 => "90° clockwise",
+                Rotation::Cw180 => "180°",
+                Rotation::Cw270 => "270° clockwise",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut target.transform.rotation, Rotation::None, "0°");
+                ui.selectable_value(&mut target.transform.rotation, Rotation::Cw90, "90° clockwise");
+                ui.selectable_value(&mut target.transform.rotation, Rotation::Cw180, "180°");
+                ui.selectable_value(&mut target.transform.rotation, Rotation::Cw270, "270° clockwise");
+            });
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Scale mode:");
+        egui::ComboBox::from_id_salt("inspector_scale_mode_combo")
+            .selected_text(match target.transform.scale_mode {
+                ScaleMode::Fit => "Fit (letterbox)",
+                ScaleMode::Fill => "Fill (crop)",
+                ScaleMode::Stretch => "Stretch",
+                ScaleMode::Center => "Center (1:1)",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut target.transform.scale_mode, ScaleMode::Fit, "Fit (letterbox)");
+                ui.selectable_value(&mut target.transform.scale_mode, ScaleMode::Fill, "Fill (crop)");
+                ui.selectable_value(&mut target.transform.scale_mode, ScaleMode::Stretch, "Stretch");
+                ui.selectable_value(&mut target.transform.scale_mode, ScaleMode::Center, "Center (1:1)");
+            });
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Scale filter:");
+        egui::ComboBox::from_id_salt("inspector_scaling_filter_combo")
+            .selected_text(match target.transform.scaling_filter {
+                ScalingFilter::Bilinear => "Bilinear",
+                ScalingFilter::Bicubic => "Bicubic (Catmull-Rom)",
+                ScalingFilter::Lanczos3 => "Lanczos 3",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut target.transform.scaling_filter, ScalingFilter::Bilinear, "Bilinear");
+                ui.selectable_value(&mut target.transform.scaling_filter, ScalingFilter::Bicubic, "Bicubic (Catmull-Rom)");
+                ui.selectable_value(&mut target.transform.scaling_filter, ScalingFilter::Lanczos3, "Lanczos 3");
+            });
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Frame-rate conversion:");
+        egui::ComboBox::from_id_salt("inspector_frame_rate_mode_combo")
+            .selected_text(match target.transform.frame_rate_mode {
+                FrameRateMode::Nearest => "Nearest frame",
+                FrameRateMode::Blend => "Blend frames",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut target.transform.frame_rate_mode, FrameRateMode::Nearest, "Nearest frame");
+                ui.selectable_value(&mut target.transform.frame_rate_mode, FrameRateMode::Blend, "Blend frames");
+            });
     });
 
     ui.add_space(6.0);

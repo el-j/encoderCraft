@@ -4,7 +4,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use encodercraft_color::{ColorSpaceTag, PixelFormat};
+use encodercraft_color::{ColorSpaceTag, PixelFormat, TransferFunction};
 use encodercraft_core::{
     ClientInfo, ColorTag, ContainerType, CraftJobSpec, JobPriority, OutputTarget, Rational64, SourceDescriptor, StartPolicy, VideoEncodeSettings,
     VideoFrame,
@@ -92,12 +92,34 @@ fn small_target(path: &Path, container: ContainerType, preset: &str) -> OutputTa
 
 fn luma(frame: &VideoFrame) -> Vec<u8> {
     let (plane, _) = frame.plane(0).unwrap();
-    plane
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|p| (0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2])).round().clamp(0.0, 255.0) as u8)
-        .collect()
+    match frame.format {
+        PixelFormat::Rgba8 => plane
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| (0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2])).round().clamp(0.0, 255.0) as u8)
+            .collect(),
+        PixelFormat::RgbaF32 => plane
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|pixel| {
+                let signal = |start| {
+                    let value = f32::from_ne_bytes(pixel[start..start + 4].try_into().unwrap()).clamp(0.0, 1.0);
+                    if frame.color_space.transfer == TransferFunction::Linear {
+                        if value < 0.018 { 4.5 * value } else { 1.099 * value.powf(0.45) - 0.099 }
+                    } else {
+                        value
+                    }
+                };
+                let r = f64::from(signal(0));
+                let g = f64::from(signal(4));
+                let b = f64::from(signal(8));
+                ((0.2126 * r + 0.7152 * g + 0.0722 * b) * 255.0).round().clamp(0.0, 255.0) as u8
+            })
+            .collect(),
+        other => panic!("test luma does not support {other:?}"),
+    }
 }
 
 fn psnr(a: &[u8], b: &[u8]) -> f64 {
@@ -108,14 +130,21 @@ fn psnr(a: &[u8], b: &[u8]) -> f64 {
 /// Decodes `out` and checks dimensions, frame count, duration and PSNR against the decoded source.
 fn assert_matches_source(label: &str, source: &Path, out: &Path) {
     let src = MediaReader::open(source).unwrap();
+    let source_probe = src.probe();
+    let source_video = source_probe.video.as_ref().unwrap_or_else(|| panic!("{label}: source has no video stream"));
     let reader = MediaReader::open(out).unwrap_or_else(|e| panic!("{label}: output does not open: {e}"));
     let probe = reader.probe();
     let video = probe.video.as_ref().unwrap_or_else(|| panic!("{label}: no video stream"));
-    assert_eq!((video.width, video.height), (W, H), "{label}: dimensions");
-    assert_eq!(reader.frame_count(), FRAMES, "{label}: frame count");
-    let expected = FRAMES as f64 * 1_001.0 / 30_000.0;
-    assert!((probe.duration_seconds - expected).abs() <= 1_001.0 / 30_000.0 + 1e-3, "{label}: duration {} vs {expected}", probe.duration_seconds);
-    for index in [0, FRAMES - 1] {
+    assert_eq!((video.width, video.height), (source_video.width, source_video.height), "{label}: dimensions");
+    let source_frames = src.frame_count();
+    assert_eq!(reader.frame_count(), source_frames, "{label}: frame count");
+    let frame_duration = source_video.frame_rate.den as f64 / source_video.frame_rate.num.max(1) as f64;
+    assert!(
+        (probe.duration_seconds - source_probe.duration_seconds).abs() <= frame_duration + 1e-3,
+        "{label}: output duration {}",
+        probe.duration_seconds
+    );
+    for index in [0, source_frames.saturating_sub(1)] {
         let got = reader.frame_at_index(index).unwrap_or_else(|e| panic!("{label}: decode frame {index}: {e}"));
         let want = src.frame_at_index(index).unwrap();
         let p = psnr(&luma(&got), &luma(&want));
@@ -211,6 +240,29 @@ fn prores_hq_preset_writes_the_hq_sample_entry() {
     let bytes = std::fs::read(&out).unwrap();
     assert!(bytes.windows(4).any(|w| w == b"apch"), "HQ sample entry apch missing");
     assert!(!bytes.windows(4).any(|w| w == b"apcn"), "standard-profile sample entry written for an HQ preset");
+}
+
+#[test]
+fn match_source_preserves_high_depth_through_the_pipeline() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../source/tests/fixtures/prores.mov");
+    let source_reader = MediaReader::open(&source).unwrap();
+    let source_video = source_reader.probe().video.as_ref().unwrap();
+    assert!(source_video.bit_depth > 8, "fixture should exercise the high-depth path");
+    assert_eq!(source_reader.frame_at_index(0).unwrap().format, PixelFormat::RgbaF32);
+
+    let dir = tempdir().unwrap();
+    let output = dir.path().join("high_depth_match_source.mp4");
+    let match_source = encodercraft_presets::factory_presets().into_iter().find(|preset| preset.name == "Match Source - High Bitrate").unwrap();
+    let source_info = encodercraft_demux::probe_file(&source).unwrap();
+    let target = encodercraft_presets::evaluate_preset(&match_source, &source_info, output.clone()).unwrap();
+    assert_eq!(target.video.codec.as_deref(), Some("hevc"));
+    run(job(&source, target)).unwrap();
+
+    let output_reader = MediaReader::open(&output).unwrap();
+    let output_video = output_reader.probe().video.as_ref().unwrap();
+    assert!(output_video.bit_depth > 8, "the encoded output must retain more than 8 bits per component");
+    assert_eq!(output_reader.frame_at_index(0).unwrap().format, PixelFormat::RgbaF32);
+    assert_matches_source("10-bit Match Source transcode", &source, &output);
 }
 
 #[test]

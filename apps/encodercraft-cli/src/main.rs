@@ -3,19 +3,27 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use encodercraft_core::{ClientInfo, CraftJobSpec, EncoderError, JobPriority, JobStatus, SourceDescriptor, StartPolicy};
 use encodercraft_demux::probe_file;
 use encodercraft_dispatch::DispatchClient;
-use encodercraft_engine::{EngineIpcHandler, QueueManager};
+use encodercraft_engine::{EngineIpcHandler, LossyConversionKey, QueueManager};
 use encodercraft_ipc::IpcServer;
 use encodercraft_mcp::McpServer;
 use encodercraft_presets::{PresetRegistry, evaluate_preset};
 use encodercraft_watch::{WatchFolderConfig, WatchFolderService};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), EncoderError> {
     env_logger::init();
     let args: Vec<String> = std::env::args().collect();
 
@@ -32,6 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("--containers") | Some("containers") => print!("{}", encodercraft_video_codecs::capabilities::render_container_matrix_markdown()),
         Some("--formats") | Some("formats") => print!("{}", encodercraft_video_codecs::capabilities::render_text()),
         Some("queue") => cmd_queue(&args[2..])?,
+        Some("command") => cmd_command(&args[2..])?,
         Some("watch") => cmd_watch(&args[2..])?,
         Some("daemon") => cmd_daemon(&args[2..])?,
         Some("mcp") => cmd_mcp()?,
@@ -61,10 +70,17 @@ fn print_usage() {
     println!("      --sidecar-xmp                       Export external sidecar .xmp file");
     println!("      --caption <file>                    Subtitle/caption file to embed or burn");
     println!("      --fps <rate>                        Frame rate for image sequences (e.g. 25, 29.97, 30000/1001); input like shot_%04d.png");
+    println!("      --rotate <0|90|180|270>              Clockwise video rotation");
+    println!("      --scale-mode <fit|fill|stretch|center> Video scaling and aspect handling");
+    println!("      --scale-filter <bilinear|bicubic|lanczos3> Spatial resampling quality");
+    println!("      --frame-rate-mode <nearest|blend>     Frame selection when changing video frame rate");
+    println!("      --frame-memory-mib <MiB>               Bounded video-frame queue budget (default 256 MiB)");
+    println!("      --normalization-memory-mib <MiB>       Maximum whole-track loudness buffer (default 1024 MiB)");
     println!("      --burn-captions                     Burn captions directly into video frames");
     println!("      --sequence <name|index>             Export only this sequence/composition of a project source (see `probe`)");
     println!("      --pages <N|A-B>                     Export only these pages of a document source");
     println!("      --layers <a,b,...>                  Export only these layers of a CAD drawing or layered image");
+    println!("      Lossy video conversions prompt for approval; unattended jobs require a saved allow decision");
     println!(
         "  convert <input> --to <format> [-o <file>] Convert to a target format (extension or name, e.g. pdf, flac, soundcraft); invalid pairs are rejected"
     );
@@ -72,6 +88,8 @@ fn print_usage() {
     println!("  presets                                 List all factory presets");
     println!("  --formats                               Show the codec decode/encode capability table");
     println!("  queue [list|start|pause|clear|cancel <id>|log] Interact with running daemon queue");
+    println!("  command list                            List shared commands from a running instance");
+    println!("  command execute <id> [json-params]     Execute a shared command on the running instance");
     println!("  watch <dir> -p <preset> -o <out_dir>    Start automated directory monitor");
     println!("  daemon [--port <port>]                  Run background IPC daemon");
     println!("  mcp                                     Run Model Context Protocol server over stdio");
@@ -104,6 +122,76 @@ fn gcd(a: i64, b: i64) -> i64 {
     if b == 0 { a.max(1) } else { gcd(b, a % b) }
 }
 
+fn request_conversion_approvals(queue: &QueueManager, spec: &CraftJobSpec) -> Result<Vec<LossyConversionKey>, EncoderError> {
+    let conversions = queue.conversion_review(spec)?;
+    if conversions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        let first = conversions.first().map(|conversion| conversion.description()).unwrap_or_default();
+        return Err(EncoderError::ConversionApprovalRequired(first));
+    }
+
+    let mut approved_once = Vec::new();
+    for conversion in conversions {
+        println!("Lossy conversion requires approval: {}", conversion.description());
+        loop {
+            print!("Allow once [y], always allow this format pair [a], refuse [n], always refuse [d]? ");
+            std::io::stdout().flush().map_err(|error| EncoderError::Io(format!("could not display conversion prompt: {error}")))?;
+            let mut answer = String::new();
+            let bytes =
+                std::io::stdin().read_line(&mut answer).map_err(|error| EncoderError::Io(format!("could not read conversion approval: {error}")))?;
+            if bytes == 0 {
+                return Err(EncoderError::ConversionApprovalRequired(conversion.description()));
+            }
+            match answer.trim().to_ascii_lowercase().as_str() {
+                "y" | "yes" => {
+                    approved_once.push(conversion.key);
+                    break;
+                }
+                "a" | "always" => {
+                    queue.save_conversion_decision(conversion.key, true)?;
+                    break;
+                }
+                "n" | "no" => {
+                    return Err(EncoderError::InvalidJobSpec(format!("conversion refused: {}", conversion.description())));
+                }
+                "d" | "deny" => {
+                    queue.save_conversion_decision(conversion.key.clone(), false)?;
+                    return Err(EncoderError::InvalidJobSpec(format!(
+                        "conversion refused and saved for this format pair: {}",
+                        conversion.description()
+                    )));
+                }
+                _ => println!("Choose y, a, n, or d."),
+            }
+        }
+    }
+    Ok(approved_once)
+}
+
+fn submit_cli_job(queue: &QueueManager, spec: CraftJobSpec) -> Result<String, EncoderError> {
+    let approved_once = request_conversion_approvals(queue, &spec)?;
+    queue.submit_job_with_approvals(spec, &approved_once)
+}
+
+fn new_cli_queue(limits: encodercraft_pipeline::PipelineLimits) -> QueueManager {
+    let queue = QueueManager::new_in_memory_with_limits(limits);
+    if let Some(path) = encodercraft_engine::default_preferences_path() {
+        queue.set_conversion_preferences_path(path);
+    }
+    queue
+}
+
+fn parse_memory_mib(option: &str, value: &str) -> Result<usize, EncoderError> {
+    let mib = value.parse::<usize>().map_err(|_| EncoderError::InvalidJobSpec(format!("{option} needs a positive integer MiB value")))?;
+    mib.checked_mul(1 << 20)
+        .filter(|bytes| mib > 0 && *bytes <= 64 << 30)
+        .ok_or_else(|| EncoderError::InvalidJobSpec(format!("{option} must be between 1 and 65536 MiB")))
+}
+
 fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut inputs: Vec<PathBuf> = Vec::new();
     let mut preset_name = "Match Source - High Bitrate".to_string();
@@ -118,6 +206,12 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let mut caption_file = None;
     let mut burn_captions = false;
     let mut fps = None;
+    let mut rotation = encodercraft_core::Rotation::None;
+    let mut scale_mode = encodercraft_geom::ScaleMode::Fit;
+    let mut scaling_filter = encodercraft_core::ScalingFilter::Bilinear;
+    let mut frame_rate_mode = encodercraft_core::FrameRateMode::Nearest;
+    let mut frame_memory_bytes = None;
+    let mut normalization_memory_bytes = None;
     let mut selection = encodercraft_core::SourceSelection::default();
 
     let mut i = 0;
@@ -152,6 +246,49 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                     fps = Some(parse_fps(val)?);
                     i += 1;
                 }
+                "--rotate" => {
+                    let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--rotate needs 0, 90, 180 or 270".into()))?;
+                    rotation = match val.as_str() {
+                        "0" => encodercraft_core::Rotation::None,
+                        "90" => encodercraft_core::Rotation::Cw90,
+                        "180" => encodercraft_core::Rotation::Cw180,
+                        "270" => encodercraft_core::Rotation::Cw270,
+                        _ => return Err(EncoderError::InvalidJobSpec(format!("invalid rotation '{val}'; use 0, 90, 180 or 270"))),
+                    };
+                    i += 1;
+                }
+                "--scale-mode" => {
+                    let val =
+                        args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--scale-mode needs fit, fill, stretch or center".into()))?;
+                    scale_mode = match val.to_ascii_lowercase().as_str() {
+                        "fit" => encodercraft_geom::ScaleMode::Fit,
+                        "fill" => encodercraft_geom::ScaleMode::Fill,
+                        "stretch" => encodercraft_geom::ScaleMode::Stretch,
+                        "center" => encodercraft_geom::ScaleMode::Center,
+                        _ => return Err(EncoderError::InvalidJobSpec(format!("invalid scale mode '{val}'; use fit, fill, stretch or center"))),
+                    };
+                    i += 1;
+                }
+                "--frame-rate-mode" => {
+                    let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--frame-rate-mode needs nearest or blend".into()))?;
+                    frame_rate_mode = match val.to_ascii_lowercase().as_str() {
+                        "nearest" => encodercraft_core::FrameRateMode::Nearest,
+                        "blend" => encodercraft_core::FrameRateMode::Blend,
+                        _ => return Err(EncoderError::InvalidJobSpec(format!("invalid frame-rate mode '{val}'; use nearest or blend"))),
+                    };
+                    i += 1;
+                }
+                "--frame-memory-mib" => {
+                    let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--frame-memory-mib needs an integer value".into()))?;
+                    frame_memory_bytes = Some(parse_memory_mib("--frame-memory-mib", val)?);
+                    i += 1;
+                }
+                "--normalization-memory-mib" => {
+                    let val =
+                        args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--normalization-memory-mib needs an integer value".into()))?;
+                    normalization_memory_bytes = Some(parse_memory_mib("--normalization-memory-mib", val)?);
+                    i += 1;
+                }
                 "--sequence" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--sequence needs a name or index".into()))?;
                     selection.sequence = Some(val.clone());
@@ -179,6 +316,18 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                         xmp_title = Some(val.clone());
                         i += 1;
                     }
+                }
+                "--scale-filter" => {
+                    let val =
+                        args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--scale-filter needs bilinear, bicubic or lanczos3".into()))?;
+                    scaling_filter = match val.to_ascii_lowercase().as_str() {
+                        "bilinear" => encodercraft_core::ScalingFilter::Bilinear,
+                        "bicubic" => encodercraft_core::ScalingFilter::Bicubic,
+                        "lanczos3" | "lanczos" => encodercraft_core::ScalingFilter::Lanczos3,
+                        _ => {
+                            return Err(EncoderError::InvalidJobSpec(format!("invalid scaling filter '{val}'; use bilinear, bicubic or lanczos3")));
+                        }
+                    };
                 }
                 "--xmp-creator" => {
                     if let Some(val) = args.get(i + 1) {
@@ -211,7 +360,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         return Err(EncoderError::InvalidJobSpec("missing input file(s)".into()));
     }
 
-    let registry = PresetRegistry::default();
+    let registry = default_preset_registry();
     if let Some(container) = to
         && !preset_explicit
         && let Some(p) = registry.list().iter().find(|p| p.container == container)
@@ -249,7 +398,14 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         println!("Starting batch transcode: {total} files using preset '{preset_name}'");
     }
 
-    let queue = Arc::new(QueueManager::new_in_memory());
+    let mut pipeline_limits = encodercraft_pipeline::PipelineLimits::default();
+    if let Some(bytes) = frame_memory_bytes {
+        pipeline_limits.queue_bytes = bytes;
+    }
+    if let Some(bytes) = normalization_memory_bytes {
+        pipeline_limits.audio_bytes = bytes;
+    }
+    let queue = Arc::new(new_cli_queue(pipeline_limits));
     let mut submitted: Vec<(String, PathBuf)> = Vec::new();
 
     for (idx, input_path) in inputs.iter().enumerate() {
@@ -289,6 +445,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         }
 
         target.selection = selection.clone();
+        target.transform = encodercraft_core::VideoTransform { scale_mode, scaling_filter, rotation, frame_rate_mode };
         if let Some(rate) = fps {
             target.custom_frame_rate = Some(rate);
         }
@@ -324,7 +481,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
 
         println!("Queued: preset='{}' ➔ {}", preset_name, output_path.display());
         submitted.push((spec.job_id.clone(), output_path));
-        queue.submit_job(spec)?;
+        submit_cli_job(&queue, spec)?;
     }
 
     queue.start_queue();
@@ -428,7 +585,8 @@ fn wait_for_jobs(queue: &QueueManager, submitted: &[(String, PathBuf)]) -> Resul
                 }
                 JobStatus::Processing => {
                     pending = true;
-                    eprint!("\r[{}/{}] {:>3.0}%", idx + 1, submitted.len(), job.progress_percent);
+                    let eta = job.target_eta_seconds.map(|seconds| format!(" | Target ETA {seconds}s")).unwrap_or_default();
+                    eprint!("\r[{}/{}] {:>3.0}%{eta}", idx + 1, submitted.len(), job.progress_percent);
                 }
                 _ => pending = true,
             }
@@ -471,7 +629,7 @@ fn cmd_probe(args: &[String]) -> Result<(), EncoderError> {
 }
 
 fn cmd_presets() -> Result<(), EncoderError> {
-    let registry = PresetRegistry::default();
+    let registry = default_preset_registry();
     println!("Available Presets ({}):", registry.list().len());
     for p in registry.list() {
         println!("  - [{:?}] {} (Container: {:?})", p.category, p.name, p.container);
@@ -537,6 +695,29 @@ fn cmd_queue(args: &[String]) -> Result<(), EncoderError> {
     Ok(())
 }
 
+fn cmd_command(args: &[String]) -> Result<(), EncoderError> {
+    let client = DispatchClient::connect_default();
+    match args.first().map(String::as_str) {
+        Some("list") => {
+            let commands = client.list_commands()?;
+            println!("{}", serde_json::to_string_pretty(&commands).map_err(|error| EncoderError::Internal(error.to_string()))?);
+        }
+        Some("execute") => {
+            let command_id = args.get(1).ok_or_else(|| EncoderError::InvalidJobSpec("missing command ID".into()))?;
+            let params = match args.get(2) {
+                Some(text) => {
+                    serde_json::from_str(text).map_err(|error| EncoderError::InvalidJobSpec(format!("invalid JSON parameters: {error}")))?
+                }
+                None => serde_json::json!({}),
+            };
+            let result = client.execute_command(command_id, params)?;
+            println!("{}", serde_json::to_string_pretty(&result).map_err(|error| EncoderError::Internal(error.to_string()))?);
+        }
+        _ => return Err(EncoderError::InvalidJobSpec("usage: encodercraft command list | command execute <id> [json-params]".into())),
+    }
+    Ok(())
+}
+
 fn cmd_watch(args: &[String]) -> Result<(), EncoderError> {
     let watch_dir = args.first().map(PathBuf::from).ok_or_else(|| EncoderError::InvalidJobSpec("missing watch directory".into()))?;
 
@@ -566,7 +747,10 @@ fn cmd_watch(args: &[String]) -> Result<(), EncoderError> {
     }
 
     let queue = Arc::new(QueueManager::new_in_memory());
-    let mut service = WatchFolderService::new(PresetRegistry::default());
+    if let Some(path) = encodercraft_engine::default_preferences_path() {
+        queue.set_conversion_preferences_path(path);
+    }
+    let mut service = WatchFolderService::new(default_preset_registry());
     service.add_config(WatchFolderConfig::new("cli-watch", watch_dir.clone(), out_dir, preset));
 
     println!("Watching directory: {} (Press Ctrl+C to stop)", watch_dir.display());
@@ -596,7 +780,10 @@ fn cmd_daemon(args: &[String]) -> Result<(), EncoderError> {
     }
 
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
-    let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
+    if let Some(path) = encodercraft_engine::default_preferences_path() {
+        queue_mgr.set_conversion_preferences_path(path);
+    }
+    let preset_registry = Arc::new(Mutex::new(default_preset_registry()));
 
     let handler = Arc::new(EngineIpcHandler::new(queue_mgr.clone(), preset_registry));
 
@@ -624,13 +811,20 @@ fn cmd_daemon(args: &[String]) -> Result<(), EncoderError> {
 
 fn cmd_mcp() -> Result<(), EncoderError> {
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
-    let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
+    if let Some(path) = encodercraft_engine::default_preferences_path() {
+        queue_mgr.set_conversion_preferences_path(path);
+    }
+    let preset_registry = Arc::new(Mutex::new(default_preset_registry()));
     let server = McpServer::new(queue_mgr, preset_registry);
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
 
     server.run_stdio(stdin.lock(), stdout.lock()).map_err(|e| EncoderError::Io(format!("MCP stdio error: {e}")))
+}
+
+fn default_preset_registry() -> PresetRegistry {
+    PresetRegistry::new(encodercraft_engine::default_config_dir().map(|dir| dir.join("presets")))
 }
 
 #[cfg(test)]
@@ -647,5 +841,13 @@ mod session_tests {
         assert_eq!(session_output_container(s, Path::new("o.soundcraft")), Some(ContainerType::ArtcraftSoundcraft));
         assert_eq!(session_output_container(s, Path::new("o.xyz")), Some(ContainerType::Wave));
         assert_eq!(session_output_container(Path::new("a.mov"), Path::new("o.flac")), None);
+    }
+
+    #[test]
+    fn memory_limit_parser_accepts_only_bounded_positive_mib_values() {
+        assert_eq!(parse_memory_mib("--frame-memory-mib", "1").unwrap(), 1 << 20);
+        assert!(parse_memory_mib("--frame-memory-mib", "0").is_err());
+        assert!(parse_memory_mib("--frame-memory-mib", "65537").is_err());
+        assert!(parse_memory_mib("--frame-memory-mib", "large").is_err());
     }
 }

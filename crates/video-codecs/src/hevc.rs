@@ -1,6 +1,6 @@
 //! HEVC (H.265) video encoder wrapper backed by `craft-hevcenc`.
 
-use craft_hevcenc::{Encoder, EncoderConfig, Frame, RateControl};
+use craft_hevcenc::{Encoder, EncoderConfig, Frame, Profile, RateControl};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
@@ -25,6 +25,7 @@ impl HevcEncoderWrapper {
         let fps_num = if fps.num > 0 { fps.num as u32 } else { 30 };
         let fps_den = if fps.den > 0 { fps.den as u32 } else { 1 };
         let mut cfg = EncoderConfig::new(width, height, fps_num, fps_den);
+        cfg.profile = Profile::Main10;
         cfg.rate = match (params.rate_mode, params.bitrate_kbps) {
             (RateMode::ConstantQuality, _) | (_, None) => RateControl::ConstantQp(28),
             (_, Some(kbps)) => RateControl::Bitrate { kbps },

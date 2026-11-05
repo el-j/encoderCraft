@@ -6,6 +6,7 @@ use encodercraft_color::PixelFormat;
 use encodercraft_core::{EncoderError, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
+use crate::yuv::rgba_f32_to_rgb8;
 
 /// Standard Luminance Quantization Table (Annex K.1).
 const STD_LUMA_QTABLE: [u8; 64] = [
@@ -31,6 +32,18 @@ impl MjpegEncoder {
 
         if width == 0 || height == 0 {
             return Err(EncoderError::InvalidJobSpec("cannot encode JPEG with zero dimensions".into()));
+        }
+        if frame.format == PixelFormat::RgbaF32 {
+            let rgb = VideoFrame::from_raw_bytes(
+                frame.dimensions,
+                PixelFormat::Rgb8,
+                frame.color_space,
+                frame.pts,
+                frame.duration,
+                frame.timebase,
+                rgba_f32_to_rgb8(frame)?,
+            )?;
+            return self.encode_jpeg(&rgb);
         }
 
         let is_rgb = matches!(frame.format, PixelFormat::Rgb8 | PixelFormat::Rgba8);
@@ -216,5 +229,15 @@ mod tests {
         assert_eq!(&pkt.data[0..2], &[0xFF, 0xD8]);
         let len = pkt.data.len();
         assert_eq!(&pkt.data[len - 2..len], &[0xFF, 0xD9]);
+    }
+
+    #[test]
+    fn float_working_frame_is_quantized_at_the_jpeg_boundary() {
+        let dims = Dimensions::new(2, 2).unwrap();
+        let frame = VideoFrame::new_allocated(dims, PixelFormat::RgbaF32, ColorSpaceTag::REC709, 0, 1, Rational64::FPS_24).unwrap();
+        let mut encoder = MjpegEncoder::new(85);
+        let packets = encoder.encode_frame(&frame).unwrap();
+        assert_eq!(packets.len(), 1);
+        assert_eq!(&packets[0].data[..2], &[0xFF, 0xD8]);
     }
 }

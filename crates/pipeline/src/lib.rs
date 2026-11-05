@@ -19,6 +19,8 @@ pub mod progress;
 pub mod project;
 pub mod scale;
 pub mod stitch;
+pub mod stream;
+pub(crate) mod transform;
 
 pub use captions::{CaptionBurner, CaptionTrack, NativeCaptionFormat};
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
@@ -27,8 +29,9 @@ pub use inventory::{SequenceInfo, SourceInventory, inspect_bytes, inspect_source
 pub use lut::Lut3D;
 pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output_path};
 pub use overlay::{OverlayPosition, TimecodeOverlay, WatermarkOverlay};
-pub use pipeline::TranscodePipeline;
+pub use pipeline::{TranscodePipeline, target_pixel_format};
 pub use progress::JobProgress;
 pub use project::{MotionComp, MotionLayer, MotionProject, TimelineProject, TimelineSequence, TimelineTrack};
 pub use scale::FrameScaler;
 pub use stitch::{ClipStitcher, StitchOptions, stitch_audio_buffers};
+pub use stream::{PipelineLimits, StreamStats};

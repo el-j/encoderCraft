@@ -5,13 +5,11 @@ use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
 use crate::params::EncodeParams;
-use crate::yuv::frame_to_yuv420_8;
+use crate::yuv::frame_to_yuv422_16;
 
 /// Avid DNxHR video encoder wrapper.
 pub struct DnxEncoderWrapper {
     inner: Encoder,
-    width: u32,
-    height: u32,
     profile: Profile,
     bit_depth: u8,
 }
@@ -41,44 +39,21 @@ impl DnxEncoderWrapper {
         let bit_depth = cfg.bit_depth;
         let inner = Encoder::with_config(cfg).map_err(|e| EncoderError::Internal(format!("Avid DNxHR encoder init error: {e}")))?;
 
-        Ok(Self { inner, width, height, profile, bit_depth })
+        Ok(Self { inner, profile, bit_depth })
     }
 }
 
 impl VideoEncoder for DnxEncoderWrapper {
     fn encode_frame(&mut self, frame: &VideoFrame) -> Result<Vec<EncodedPacket>, EncoderError> {
-        let yuv = frame_to_yuv420_8(frame)?;
-        let w = self.width as usize;
-        let h = self.height as usize;
-        let uv_w = (self.width.div_ceil(2)) as usize;
-
-        let mut y_plane = Vec::with_capacity(w.checked_mul(h).unwrap_or(0));
-        let mut cb_plane = Vec::with_capacity(uv_w.checked_mul(h).unwrap_or(0));
-        let mut cr_plane = Vec::with_capacity(uv_w.checked_mul(h).unwrap_or(0));
-
-        let shift = if self.bit_depth > 8 { (self.bit_depth - 8) as u32 } else { 0 };
-
-        // Convert 8-bit 4:2:0 YUV to 4:2:2 planar YUV
-        for py in 0..h {
-            let row_start = py.checked_mul(yuv.y_stride).unwrap_or(0);
-            for px in 0..w {
-                let sample = (yuv.y.get(row_start + px).copied().unwrap_or(16) as u16) << shift;
-                y_plane.push(sample);
-            }
-
-            let chroma_y = py / 2;
-            let uv_row_start = chroma_y.checked_mul(yuv.uv_stride).unwrap_or(0);
-            for cx in 0..uv_w {
-                let u_sample = (yuv.u.get(uv_row_start + cx).copied().unwrap_or(128) as u16) << shift;
-                let v_sample = (yuv.v.get(uv_row_start + cx).copied().unwrap_or(128) as u16) << shift;
-                cb_plane.push(u_sample);
-                cr_plane.push(v_sample);
-            }
-        }
+        let yuv = frame_to_yuv422_16(frame)?;
+        let shift = 10u8.saturating_sub(self.bit_depth) as u32;
+        let y_plane = yuv.y.into_iter().map(|sample| sample >> shift).collect();
+        let cb_plane = yuv.u.into_iter().map(|sample| sample >> shift).collect();
+        let cr_plane = yuv.v.into_iter().map(|sample| sample >> shift).collect();
 
         let dnx_frame = Frame {
-            width: self.width,
-            height: self.height,
+            width: yuv.width,
+            height: yuv.height,
             chroma: ChromaFormat::Yuv422,
             rgb: false,
             bit_depth: self.bit_depth,

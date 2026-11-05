@@ -134,7 +134,13 @@ pub fn format_age(modified: Option<SystemTime>, now: SystemTime) -> String {
 }
 
 /// Renders the browser. Returns media files the user asked to add to the queue.
-pub fn render_media_browser(ui: &mut Ui, state: &mut MediaBrowserState, tokens: &Tokens) -> Vec<PathBuf> {
+pub fn render_media_browser(
+    ui: &mut Ui,
+    state: &mut MediaBrowserState,
+    tokens: &Tokens,
+    commands: &encodercraft_engine::cmd::CommandRegistry,
+    queue_mgr: &std::sync::Arc<encodercraft_engine::QueueManager>,
+) -> Vec<PathBuf> {
     let mut to_add = Vec::new();
     if state.model.poll() {
         ui.ctx().request_repaint();
@@ -218,27 +224,51 @@ pub fn render_media_browser(ui: &mut Ui, state: &mut MediaBrowserState, tokens: 
             }
             let entries: Vec<Entry> = state.model.visible().into_iter().cloned().collect();
             match state.view {
-                BrowserView::List => list_view(ui, state, &entries, tokens, &mut to_add),
-                BrowserView::Thumbnails => thumbnail_view(ui, state, &entries, tokens, &mut to_add),
+                BrowserView::List => list_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
+                BrowserView::Thumbnails => thumbnail_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
             }
         });
     });
     to_add
 }
 
-fn entry_menu(ui: &mut Ui, state: &mut MediaBrowserState, e: &Entry, to_add: &mut Vec<PathBuf>) {
-    if e.kind.is_media() && ui.button("Add to Queue").clicked() {
-        to_add.push(e.path.clone());
-        ui.close();
-    }
-    if e.kind == EntryKind::Folder {
-        if ui.button("Open").clicked() {
-            state.go(e.path.clone());
-            ui.close();
-        }
-        let is_fav = state.model.favorites.contains(&e.path);
-        if ui.button(if is_fav { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
-            state.model.toggle_favorite(&e.path);
+fn entry_menu(
+    ui: &mut Ui,
+    state: &mut MediaBrowserState,
+    e: &Entry,
+    to_add: &mut Vec<PathBuf>,
+    commands: &encodercraft_engine::cmd::CommandRegistry,
+    queue_mgr: &std::sync::Arc<encodercraft_engine::QueueManager>,
+) {
+    for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::MediaItem) {
+        let enabled = match info.command {
+            crate::commands::AppCommand::AddMediaItem => e.kind.is_media(),
+            crate::commands::AppCommand::OpenMediaFolder | crate::commands::AppCommand::ToggleMediaFavorite => e.kind == EntryKind::Folder,
+            _ => false,
+        };
+        if ui.add_enabled(enabled, egui::Button::new(info.context_label(crate::commands::CommandContextMenu::MediaItem))).clicked() {
+            match info.command {
+                crate::commands::AppCommand::AddMediaItem => to_add.push(e.path.clone()),
+                crate::commands::AppCommand::OpenMediaFolder => {
+                    match commands.dispatch(queue_mgr, "media.open_folder", serde_json::json!({ "path": e.path.clone() })) {
+                        Ok(value) => match value.get("path").and_then(serde_json::Value::as_str) {
+                            Some(path) => state.go(PathBuf::from(path)),
+                            None => state.model.error = Some("Open Folder returned no folder path.".into()),
+                        },
+                        Err(error) => state.model.error = Some(format!("Open Folder failed: {error}")),
+                    }
+                }
+                crate::commands::AppCommand::ToggleMediaFavorite => {
+                    match commands.dispatch(queue_mgr, "media.toggle_favorite", serde_json::json!({ "path": e.path.clone() })) {
+                        Ok(value) => match serde_json::from_value(value) {
+                            Ok(favorites) => state.model.favorites = favorites,
+                            Err(error) => state.model.error = Some(format!("Favorite Folder returned invalid data: {error}")),
+                        },
+                        Err(error) => state.model.error = Some(format!("Favorite Folder failed: {error}")),
+                    }
+                }
+                _ => {}
+            }
             ui.close();
         }
     }
@@ -252,7 +282,15 @@ fn activate(state: &mut MediaBrowserState, e: &Entry, to_add: &mut Vec<PathBuf>)
     }
 }
 
-fn list_view(ui: &mut Ui, state: &mut MediaBrowserState, entries: &[Entry], tokens: &Tokens, to_add: &mut Vec<PathBuf>) {
+fn list_view(
+    ui: &mut Ui,
+    state: &mut MediaBrowserState,
+    entries: &[Entry],
+    tokens: &Tokens,
+    to_add: &mut Vec<PathBuf>,
+    commands: &encodercraft_engine::cmd::CommandRegistry,
+    queue_mgr: &std::sync::Arc<encodercraft_engine::QueueManager>,
+) {
     let now = SystemTime::now();
     ui.horizontal(|ui| {
         for (label, by) in [("Name", SortBy::Name), ("Type", SortBy::Kind), ("Size", SortBy::Size), ("Modified", SortBy::Modified)] {
@@ -280,7 +318,7 @@ fn list_view(ui: &mut Ui, state: &mut MediaBrowserState, entries: &[Entry], toke
                 if resp.double_clicked() {
                     activate(state, e, to_add);
                 }
-                resp.context_menu(|ui| entry_menu(ui, state, e, to_add));
+                resp.context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
             });
         }
     });
@@ -292,7 +330,15 @@ fn list_view(ui: &mut Ui, state: &mut MediaBrowserState, entries: &[Entry], toke
     }
 }
 
-fn thumbnail_view(ui: &mut Ui, state: &mut MediaBrowserState, entries: &[Entry], tokens: &Tokens, to_add: &mut Vec<PathBuf>) {
+fn thumbnail_view(
+    ui: &mut Ui,
+    state: &mut MediaBrowserState,
+    entries: &[Entry],
+    tokens: &Tokens,
+    to_add: &mut Vec<PathBuf>,
+    commands: &encodercraft_engine::cmd::CommandRegistry,
+    queue_mgr: &std::sync::Arc<encodercraft_engine::QueueManager>,
+) {
     let cell = Vec2::new(state.thumb_size, state.thumb_size * 0.65 + 28.0);
     let cols = ((ui.available_width() / (cell.x + 8.0)).floor() as usize).max(1);
     let rows = entries.len().div_ceil(cols);
@@ -339,7 +385,7 @@ fn thumbnail_view(ui: &mut Ui, state: &mut MediaBrowserState, entries: &[Entry],
                     if resp.double_clicked() {
                         activate(state, e, to_add);
                     }
-                    resp.on_hover_text(&e.name).context_menu(|ui| entry_menu(ui, state, e, to_add));
+                    resp.on_hover_text(&e.name).context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
                 }
             });
         }
@@ -369,17 +415,19 @@ mod tests {
         std::fs::write(dir.path().join("a.mov"), b"x").unwrap();
         let mut state = MediaBrowserState::at(dir.path().to_path_buf(), Vec::new());
         let tokens = Tokens::dark();
+        let queue_mgr = std::sync::Arc::new(encodercraft_engine::QueueManager::new_in_memory());
+        let commands = encodercraft_engine::cmd::CommandRegistry::new();
         let end = std::time::Instant::now() + Duration::from_secs(10);
         while state.model.visible().is_empty() && std::time::Instant::now() < end {
             egui::__run_test_ui(|ui| {
-                render_media_browser(ui, &mut state, &tokens);
+                render_media_browser(ui, &mut state, &tokens, &commands, &queue_mgr);
             });
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(state.model.visible().len(), 1);
         state.view = BrowserView::Thumbnails;
         egui::__run_test_ui(|ui| {
-            render_media_browser(ui, &mut state, &tokens);
+            render_media_browser(ui, &mut state, &tokens, &commands, &queue_mgr);
         });
         let entry = state.model.visible().into_iter().cloned().collect::<Vec<_>>();
         let mut added = Vec::new();

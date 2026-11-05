@@ -2,9 +2,14 @@
 //! trimming, frame-rate conversion and audio extraction. Nothing here fabricates media; a source
 //! that cannot be decoded is a typed error.
 
-use encodercraft_core::{AudioSampleBuffer, EncoderError, OutputTarget, Rational64, SourceDescriptor, VideoFrame};
+use encodercraft_audio_dsp::{SincResampler, normalize_loudness, remix_channels};
+use encodercraft_core::{
+    AudioSampleBuffer, ChannelLayout, EncoderError, FrameRateMode, OutputTarget, Rational64, Rotation, SourceDescriptor, VideoFrame,
+};
 use encodercraft_geom::Dimensions;
 use encodercraft_source::{MediaReader, SourceKind};
+
+use crate::stream::PipelineLimits;
 
 /// Largest accepted output edge in pixels.
 const MAX_EDGE: u32 = 16_384;
@@ -19,6 +24,8 @@ pub(crate) struct VideoInput {
     src_frames: u64,
     count: u64,
     still: bool,
+    rotation: Rotation,
+    frame_rate_mode: FrameRateMode,
 }
 
 /// Opens the media file of a job source.
@@ -78,8 +85,10 @@ impl VideoInput {
             return Err(EncoderError::InvalidJobSpec(format!("invalid frame rate {}/{}", out_fps.num, out_fps.den)));
         }
 
-        let width = even(target.custom_width.unwrap_or(video.width));
-        let height = even(target.custom_height.unwrap_or(video.height));
+        let rotation = target.transform.rotation;
+        let (picture_w, picture_h) = if rotation.swaps_axes() { (video.height, video.width) } else { (video.width, video.height) };
+        let width = even(target.custom_width.unwrap_or(picture_w));
+        let height = even(target.custom_height.unwrap_or(picture_h));
         if width > MAX_EDGE || height > MAX_EDGE {
             return Err(EncoderError::InvalidJobSpec(format!("output size {width}x{height} exceeds the {MAX_EDGE} pixel limit")));
         }
@@ -99,7 +108,7 @@ impl VideoInput {
             ((wanted * out_fps_f).round().max(1.0)) as u64
         };
 
-        Ok(Self { reader, src_fps, out_fps, dims, first_src, src_frames, count, still })
+        Ok(Self { reader, src_fps, out_fps, dims, first_src, src_frames, count, still, rotation, frame_rate_mode: target.transform.frame_rate_mode })
     }
 
     pub(crate) fn dims(&self) -> Dimensions {
@@ -124,23 +133,140 @@ impl VideoInput {
         self.count as f64 / self.out_fps.as_f64()
     }
 
-    /// Decodes output frame `i`, mapping it to the nearest source frame when the rates differ.
+    /// Decodes output frame `i`: the nearest source frame, or a blend of the two around the instant
+    /// when the rates differ and blending is requested; then rotated upright.
     pub(crate) fn frame(&self, i: u64) -> Result<VideoFrame, EncoderError> {
-        if self.still {
-            return self.reader.frame_at_index(0);
-        }
-        let ratio = self.src_fps.as_f64() / self.out_fps.as_f64();
-        let offset = (i as f64 * ratio).round() as u64;
-        let idx = self.first_src.saturating_add(offset).min(self.src_frames.saturating_sub(1));
-        self.reader.frame_at_index(idx)
+        let frame = if self.still {
+            self.reader.frame_at_index(0)?
+        } else {
+            let ratio = self.src_fps.as_f64() / self.out_fps.as_f64();
+            let position = i as f64 * ratio;
+            let last = self.src_frames.saturating_sub(1);
+            let clamp = |offset: u64| self.first_src.saturating_add(offset).min(last);
+            let floor = position.floor();
+            let fraction = position - floor;
+            let weight = (fraction * 256.0).round() as u32;
+            if self.frame_rate_mode == FrameRateMode::Blend && weight > 0 && weight < 256 {
+                let a = self.reader.frame_at_index(clamp(floor as u64))?;
+                let b = self.reader.frame_at_index(clamp(floor as u64 + 1))?;
+                crate::transform::blend(&a, &b, weight)?
+            } else {
+                self.reader.frame_at_index(clamp(position.round() as u64))?
+            }
+        };
+        crate::transform::rotate(&frame, self.rotation)
     }
 
-    /// Audio matching the video window, or `None` when the source has no audio.
-    pub(crate) fn audio(&self) -> Result<Option<AudioSampleBuffer>, EncoderError> {
+    /// Bytes of one decoded source frame.
+    pub(crate) fn source_frame_bytes(&self) -> usize {
+        self.reader.probe().video.as_ref().map_or(0, |video| {
+            let bytes_per_pixel = if video.bit_depth > 8 { 16 } else { 4 };
+            (video.width as usize).saturating_mul(video.height as usize).saturating_mul(bytes_per_pixel)
+        })
+    }
+
+    /// Audio matching the target format and video window, or `None` when the source has no audio.
+    /// Loudness normalisation needs the whole track, which must fit `limits`; otherwise the audio is
+    /// delivered in bounded windows.
+    pub(crate) fn audio_feed(&self, target: &OutputTarget, limits: &PipelineLimits) -> Result<Option<AudioFeed<'_>>, EncoderError> {
         if self.still {
             return Ok(None);
         }
-        read_audio(&self.reader, self.start_seconds(), Some(self.duration_seconds()))
+        let Some(stream) = self.reader.probe().audio.first() else {
+            return Ok(None);
+        };
+        let source_rate = stream.sample_rate.max(8_000);
+        let settings = target.audio.as_ref();
+        let rate = settings.and_then(|settings| settings.sample_rate).unwrap_or(source_rate);
+        if !(8_000..=384_000).contains(&rate) {
+            return Err(EncoderError::InvalidJobSpec(format!("unsupported output audio sample rate {rate} Hz")));
+        }
+        let layout = settings.and_then(|settings| settings.layout).unwrap_or(ChannelLayout::Stereo);
+        let start = self.start_seconds();
+        let remaining = (self.reader.probe().duration_seconds - start).max(0.0);
+        let seconds = self.duration_seconds().min(remaining);
+        let first = (start.max(0.0) * f64::from(source_rate)).round() as i64;
+        let total = (seconds * f64::from(source_rate)).ceil().max(0.0) as i64;
+        if total == 0 {
+            return Ok(None);
+        }
+        let whole = match target.target_lufs {
+            Some(lufs) => {
+                let source_samples =
+                    usize::try_from(total).map_err(|_| EncoderError::InvalidJobSpec("audio sample count exceeds the platform limit".into()))?;
+                let output_samples = (source_samples as u128)
+                    .checked_mul(u128::from(rate))
+                    .ok_or_else(|| EncoderError::InvalidJobSpec("audio sample count overflow".into()))?
+                    / u128::from(source_rate);
+                let output_samples =
+                    usize::try_from(output_samples).map_err(|_| EncoderError::InvalidJobSpec("resampled audio exceeds the platform limit".into()))?;
+                let source_bytes = source_samples.saturating_mul(stream.channels.clamp(1, 8) as usize).saturating_mul(std::mem::size_of::<f32>());
+                let output_bytes = output_samples.saturating_mul(layout.channel_count()).saturating_mul(std::mem::size_of::<f32>());
+                let transient_bytes = output_bytes.saturating_mul(if rate == source_rate { 1 } else { 2 });
+                let bytes = source_bytes.saturating_add(transient_bytes);
+                if bytes > limits.audio_bytes {
+                    return Err(EncoderError::InvalidJobSpec(format!(
+                        "loudness normalisation holds source and target-format audio buffers: {} MiB is over the {} MiB limit",
+                        bytes >> 20,
+                        limits.audio_bytes >> 20
+                    )));
+                }
+                let raw = self.reader.read_audio_range(first, source_samples, source_rate)?;
+                let mut output = remix_channels(&raw, layout)?;
+                if rate != source_rate {
+                    output = SincResampler::default().resample(&output, rate)?;
+                }
+                let _ = normalize_loudness(&mut output, f64::from(lufs), -1.0)?;
+                Some(output)
+            }
+            None => None,
+        };
+        let window = usize::try_from(source_rate).unwrap_or(48_000).saturating_mul(AUDIO_FEED_SECONDS).max(1);
+        Ok(Some(AudioFeed { reader: &self.reader, source_rate, rate, layout, next: first, end: first.saturating_add(total), window, whole }))
+    }
+}
+
+/// Seconds of audio decoded per window.
+const AUDIO_FEED_SECONDS: usize = 10;
+
+/// Stereo audio delivered one bounded window at a time.
+pub(crate) struct AudioFeed<'a> {
+    reader: &'a MediaReader,
+    source_rate: u32,
+    rate: u32,
+    layout: ChannelLayout,
+    next: i64,
+    end: i64,
+    window: usize,
+    whole: Option<AudioSampleBuffer>,
+}
+
+impl AudioFeed<'_> {
+    pub(crate) fn rate(&self) -> u32 {
+        self.rate
+    }
+
+    pub(crate) fn layout(&self) -> ChannelLayout {
+        self.layout
+    }
+
+    /// The next target-format window, or `None` at the end of the track.
+    pub(crate) fn next_window(&mut self) -> Result<Option<AudioSampleBuffer>, EncoderError> {
+        if let Some(whole) = self.whole.take() {
+            self.next = self.end;
+            return Ok(Some(whole));
+        }
+        if self.next >= self.end {
+            return Ok(None);
+        }
+        let take = usize::try_from(self.end - self.next).unwrap_or(usize::MAX).min(self.window);
+        let chunk = self.reader.audio(self.next, take, self.source_rate)?;
+        self.next += i64::try_from(take).unwrap_or(i64::MAX);
+        let mut output = remix_channels(&chunk, self.layout)?;
+        if self.rate != self.source_rate {
+            output = SincResampler::default().resample(&output, self.rate)?;
+        }
+        Ok(Some(output))
     }
 }
 
