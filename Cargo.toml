@@ -5,6 +5,7 @@ members = [
     "crates/color",
     "crates/core",
     "crates/demux",
+    "crates/shared-stream",
     "crates/audio-dsp",
     "crates/muxers",
     "crates/image-codecs",
@@ -29,6 +30,7 @@ default-members = [
     "crates/color",
     "crates/core",
     "crates/demux",
+    "crates/shared-stream",
     "crates/audio-dsp",
     "crates/muxers",
     "crates/image-codecs",
@@ -89,6 +91,7 @@ craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-li
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }
+encodercraft-shared-stream = { path = "crates/shared-stream" }
 encodercraft-geom = { path = "crates/geom" }
 encodercraft-color = { path = "crates/color" }
 encodercraft-demux = { path = "crates/demux" }
@@ -116,6 +119,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 rayon = "1"
 crossbeam-channel = "0.5"
+iceoryx2 = { version = "0.10", default-features = false, features = ["std"] }
 notify = "8"
 kurbo = { version = "0.13", features = ["serde"] }
 bytemuck = "1"

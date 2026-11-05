@@ -64,6 +64,10 @@ To accommodate different media types, file sizes, and hardware constraints, the 
   3. `encoderCraft` consumes the stream directly into its encoder pipelines without touching disk storage.
 - **Overhead:** Memory bandwidth only; instantaneous startup.
 
+The encoderCraft-local transport primitive uses an iceoryx2 shared-memory service. Its versioned `ECST` packet header carries the packet kind, PTS, duration, and payload length; payloads are capped at 512 MiB and the service applies two-sample bounded buffering with retry-until-delivered backpressure. A received packet borrows its payload from the shared-memory sample rather than copying it into a `Vec`.
+
+This is transport support only, not a completed Mode B pipeline: the wire format does not yet identify pixel/sample formats, `SourceDescriptor::Pipe` is not consumed by the transcode pipeline, and project-reference rendering is not connected. Do not treat raw frame/audio streaming as delivered until those paths have end-to-end coverage.
+
 ### Mode C: Headless Project Delegation (Deferred Rendering)
 - **Use Case:** The user queues a complex project in `encoderCraft` and closes the host application completely (freeing GPU/RAM).
 - **Mechanism:**
@@ -172,8 +176,8 @@ All communication uses standard JSON (or Bincode for internal binary IPC). Every
 
 | Platform | Primary Transport | Path / Address | Security / Isolation |
 |---|---|---|---|
-| **macOS & Linux** | Unix Domain Socket | `/tmp/encodercraft-$UID.sock` (or `$XDG_RUNTIME_DIR/encodercraft.sock`) | File system permissions `0600` (current user only). |
-| **Windows** | Named Pipe | `\\.\pipe\encodercraft-%USERNAME%` | Access control list restricted to user SID. |
+| **macOS & Linux** | Unix Domain Socket | `/tmp/encodercraft-$UID.sock` (UID from the OS; `encodercraft_dispatch::default_socket_path()` is shared by server and clients) | Socket file is created with mode `0600` (current user only); the server refuses to replace a non-socket file at that path. |
+| **Windows** | Loopback TCP JSON-RPC (named pipes are not implemented) | `127.0.0.1:8998` (fallback `8999` in the desktop app) | Loopback-only binding. |
 | **Local Network / Web** | Loopback TCP JSON-RPC | `127.0.0.1:8998` | Bearer token stored in `~/.config/encodercraft/token`. |
 | **Shell & Automation** | Headless CLI command | `encodercraft queue add --spec <file>` | Subprocess exit codes and stdout JSON response. |
 | **AI Coding Agents** | Model Context Protocol (MCP) | `stdio` or SSE | Strict tool schemas for agent inspection and submission. |
@@ -340,4 +344,3 @@ Every application across the entire ArtCraft creative suite has a dedicated comp
 - **Video Codecs Centralization:** [storytold/craft-libs#503](https://github.com/storytold/craft-libs/issues/503) / [storytold/craft-libs#504](https://github.com/storytold/craft-libs/pull/504)
 - **Sibling Codec Migration PRs:** [storytold/filmcraft#3941](https://github.com/storytold/filmcraft/pull/3941), [storytold/effectcraft#2814](https://github.com/storytold/effectcraft/pull/2814), [storytold/soundcraft#1275](https://github.com/storytold/soundcraft/pull/1275)
 - **Master `encoderCraft` Issue:** [el-j/encoderCraft#1](https://github.com/el-j/encoderCraft/issues/1)
-
