@@ -12,6 +12,8 @@
   ],
   "payloads": [
     "NOTICE",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
     "encodercraft-cli.exe",
     "encodercraft.exe"
   ],

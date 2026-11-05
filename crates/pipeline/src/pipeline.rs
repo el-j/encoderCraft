@@ -1780,6 +1780,7 @@ impl StagedOutput {
     fn commit(self) -> Result<(), EncoderError> {
         let file = std::fs::OpenOptions::new()
             .read(true)
+            .write(true)
             .open(&self.staged_path)
             .map_err(|e| EncoderError::Io(format!("failed to reopen {}: {e}", self.staged_path.display())))?;
         craft_atomic::sync_file(&file).map_err(|e| EncoderError::Io(format!("failed to flush {}: {e}", self.staged_path.display())))?;
