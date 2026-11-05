@@ -1,7 +1,7 @@
 //! Corpus of truncated, corrupt and hostile files: opening and decoding must return an error or a
 //! frame, never panic, hang or allocate without bound.
 
-use encodercraft_source::MediaReader;
+use encodercraft_source::{MAX_AUDIO_DECODE_BYTES, MediaReader};
 use std::path::Path;
 
 fn png_header(width: u32, height: u32) -> Vec<u8> {
@@ -38,6 +38,23 @@ fn corpus() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
+fn tiny_pcm_wav() -> Vec<u8> {
+    let mut wav = b"RIFF".to_vec();
+    wav.extend_from_slice(&38u32.to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&8_000u32.to_le_bytes());
+    wav.extend_from_slice(&16_000u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&2u32.to_le_bytes());
+    wav.extend_from_slice(&[0, 0]);
+    wav
+}
+
 #[test]
 fn malformed_files_never_panic_for_any_extension() {
     let dir = tempfile::tempdir().unwrap();
@@ -51,6 +68,18 @@ fn malformed_files_never_panic_for_any_extension() {
             }
         }
     }
+}
+
+#[test]
+fn oversized_audio_sample_count_is_rejected_before_allocation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("small.wav");
+    std::fs::write(&path, tiny_pcm_wav()).unwrap();
+    let reader = MediaReader::open(&path).unwrap();
+    let sample_count = MAX_AUDIO_DECODE_BYTES / 4 + 1;
+
+    let error = reader.read_audio_range(0, sample_count, 8_000).unwrap_err();
+    assert!(error.to_string().contains("over the"));
 }
 
 #[test]
