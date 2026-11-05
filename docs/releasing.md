@@ -23,12 +23,13 @@ User-facing names say **EncoderCraft**. Files, binaries and ids stay lowercase
 2. **Merge `main` into `release`** (or fast-forward it) and push. The workflow starts by itself.
 3. **Wait for the draft.** The Releases page gets a draft with every artifact and
    `SHA256SUMS.txt`. Notes are generated from the merged pull requests.
-4. **Check it.** The `release-smoke` workflow unpacks the Linux tarball, the Windows portable
-   zip and the macOS CLI zip on clean runners (`packaging/smoke/smoke-release.sh`: version,
-   PNG and MP4 conversion, bundled licences, desktop entry, metainfo, icons). Run it by hand with
-   *Actions > release-smoke > Run workflow*. Then download an installer or two and read the job
-   summaries. The workflow reads the draft by its tag, so if it cannot find it, run the script
-   locally against the downloaded archive.
+4. **Check it.** The `release-smoke` workflow runs on clean runners. It unpacks the Linux tarball,
+   Windows portable zip and macOS CLI zip, then installs the Linux deb/rpm, runs the AppImage,
+   mounts and installs the macOS DMG, and silently installs the Windows MSI. It checks GUI and CLI
+   versions, real PNG and MP4 transcodes, licenses, and platform resources. Run it by hand with
+   *Actions > release-smoke > Run workflow*. The workflow reads the draft by its tag, so if it
+   cannot find the draft, download the assets and run the matching script under
+   `packaging/smoke/`.
 5. **Publish** the draft in the GitHub UI. Publishing creates the tag. A version with a suffix
    (`-alpha.1`, `-rc.1`) is marked as a pre-release.
 
@@ -37,7 +38,8 @@ version before releasing again.
 
 **Test runs:** *Actions > Release > Run workflow* with an optional `version` override. On any
 branch other than `release` it is a dry run: the signing jobs are refused by the `release`
-environment and no draft is created.
+environment and no draft is created. Download unsigned workflow artifacts and run the matching
+smoke scripts locally; `release-smoke` downloads assets attached to a draft release.
 
 ## What gets built
 
@@ -72,8 +74,8 @@ regenerate the derived formats with `packaging/icons.sh`.
 Signing secrets are required on the `release` branch. To ship an unsigned pre-release without
 forking the shared workflow, run *Actions > Release > Run workflow* from a non-`release` branch
 with a `version` override: it builds every artifact unsigned and creates no draft. Download the
-artifacts from the run, smoke-test them with `packaging/smoke/smoke-release.sh`, and attach them to
-a pre-release created by hand. Proposing an `allow-unsigned` input to
+artifacts from the run, run the matching archive or installer smoke scripts in
+`packaging/smoke/`, and attach them to a pre-release created by hand. Proposing an `allow-unsigned` input to
 `storytold/craft-common-actions` would remove the manual step.
 
 ## Release notes: known issues

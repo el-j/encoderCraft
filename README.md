@@ -29,6 +29,8 @@ Adobe Media Encoder has long been the default render tool for video editors. How
 | **Automation & AI** | Limited proprietary ExtendScript. | **Autonomous Agent Control:** Headless CLI, Unix domain sockets / Named Pipes IPC, and native **Model Context Protocol (MCP)** server for autonomous AI coding agents. |
 | **Footprint & Licensing** | >3 GB bloat, telemetry, subscription DRM. | **Zero Bloat:** Standalone binary, sub-second startup, zero telemetry, dual-licensed Apache-2.0 / MIT. |
 
+Before a video job reduces bit depth, tone-maps HDR to SDR, discards alpha, or reduces gamut, the desktop app and interactive CLI request approval. The choice can be remembered per source-to-target format pair; unattended CLI, watch-folder, IPC, and MCP jobs stop with a clear error unless an allow decision is already saved.
+
 ---
 
 ## 🏗️ Architecture & Sibling Ecosystem
@@ -152,6 +154,15 @@ cargo run --release -p encodercraft-cli -- encode texture.bmp -p "Still Image PN
 # Image: Transcode to 16-bit Broadcast TIFF
 cargo run --release -p encodercraft-cli -- encode frame.png -p "Broadcast TIFF (16-bit RGB)" -o frame.tiff
 ```
+
+The GUI, IPC daemon, CLI client, and MCP server share the engine command registry:
+```bash
+# Start the local IPC daemon, then list or execute registered commands
+cargo run --release -p encodercraft-cli -- daemon
+cargo run --release -p encodercraft-cli -- command list
+cargo run --release -p encodercraft-cli -- command execute queue.list '{}'
+```
+IPC clients can call `command.list` and `command.execute` (with `commandId` and JSON `params`); MCP clients can use `encodercraft_list_commands` and `encodercraft_execute_command`.
 
 ### 3. Running the Watch Folder Daemon
 ```bash

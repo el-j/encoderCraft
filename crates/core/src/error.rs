@@ -25,6 +25,9 @@ pub enum EncoderError {
     #[error("Invalid job specification: {0}")]
     InvalidJobSpec(String),
 
+    #[error("Lossy conversion requires approval: {0}")]
+    ConversionApprovalRequired(String),
+
     #[error("Job not found in queue: {0}")]
     JobNotFound(String),
 

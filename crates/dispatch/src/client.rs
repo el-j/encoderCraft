@@ -104,6 +104,28 @@ impl DispatchClient {
         response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty list response".into()))
     }
 
+    /// Lists the shared engine commands exposed by the running encoderCraft instance.
+    pub fn list_commands(&self) -> Result<serde_json::Value, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "command.list", json!({}));
+        let response = self.send_request(&request)?;
+        if let Some(error) = response.error {
+            return Err(EncoderError::InvalidJobSpec(error));
+        }
+        response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty command list response".into()))
+    }
+
+    /// Executes a shared engine command on the running encoderCraft instance.
+    pub fn execute_command(&self, command_id: &str, params: serde_json::Value) -> Result<serde_json::Value, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "command.execute", json!({ "commandId": command_id, "params": params }));
+        let response = self.send_request(&request)?;
+        if let Some(error) = response.error {
+            return Err(EncoderError::InvalidJobSpec(error));
+        }
+        response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty command response".into()))
+    }
+
     /// Pings the running encoderCraft daemon.
     pub fn ping(&self) -> Result<bool, EncoderError> {
         let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);

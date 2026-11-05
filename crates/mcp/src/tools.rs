@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use encodercraft_core::{ClientInfo, CraftJobSpec, EncoderError, JobPriority, OutputTarget, SourceDescriptor, StartPolicy};
 use encodercraft_demux::probe_file;
-use encodercraft_engine::QueueManager;
+use encodercraft_engine::{QueueManager, cmd::CommandRegistry};
 use encodercraft_presets::PresetRegistry;
 use serde_json::{Value, json};
 
@@ -113,6 +113,26 @@ pub fn list_tools() -> Value {
                 },
                 "required": ["job_ids", "output_dir"]
             }
+        },
+        {
+            "name": "encodercraft_list_commands",
+            "description": "Lists the shared engine commands available through the GUI, CLI, IPC, and MCP.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "encodercraft_execute_command",
+            "description": "Executes a shared engine command by ID with its JSON parameters.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "command_id": { "type": "string", "description": "A command ID returned by encodercraft_list_commands." },
+                    "params": { "type": "object", "description": "The command's JSON parameters.", "additionalProperties": true }
+                },
+                "required": ["command_id"]
+            }
         }
     ])
 }
@@ -125,6 +145,20 @@ pub fn call_tool(
     preset_registry: &Arc<Mutex<PresetRegistry>>,
 ) -> Result<Value, EncoderError> {
     match name {
+        "encodercraft_list_commands" => {
+            let registry = CommandRegistry::with_preset_registry(Arc::clone(preset_registry));
+            let commands: Vec<_> =
+                registry.list().into_iter().map(|(id, label, description)| json!({ "id": id, "label": label, "description": description })).collect();
+            Ok(json!({ "commands": commands }))
+        }
+        "encodercraft_execute_command" => {
+            let command_id = args
+                .get("command_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| EncoderError::InvalidJobSpec("missing required argument 'command_id'".into()))?;
+            let params = args.get("params").cloned().unwrap_or_else(|| json!({}));
+            CommandRegistry::with_preset_registry(Arc::clone(preset_registry)).dispatch(queue_mgr, command_id, params)
+        }
         "encodercraft_submit_transcode" => {
             let source_path = args
                 .get("source_path")

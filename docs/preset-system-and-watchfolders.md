@@ -86,6 +86,8 @@ The most frequently used preset in modern video workflows is "Match Source". Ins
 └─────────────────────────────────┘
 ```
 
+The built-in Match Source preset keeps the source dimensions, average frame rate, and (when present) 110% of its measured bitrate. It uses H.264 for sources up to 8 bits per component and switches to HEVC Main10 for higher-depth sources, avoiding an unnecessary 8-bit intermediate. PQ/HLG or wide-gamut input is not silently relabelled as BT.709: when the selected encoder cannot signal the source color space, conversion to the supported output color is reported for user consent.
+
 ### Adaptive Bitrate Calculation Formula
 When "Adaptive High Bitrate" is selected, the encoder calculates the target kilobits per second ($R$) dynamically:
 $$R = \text{clamp}\left( W \times H \times F \times C \times 10^{-3},\; R_{\min},\; R_{\max} \right)$$

@@ -33,7 +33,15 @@ reported="$("$cli" --version)"
 [ "$(wc -c < "$work/out.mp4")" -gt 1000 ] || { echo "FAIL: MP4 output is empty" >&2; exit 1; }
 
 gui="$(find "$work" -type f \( -name encodercraft -o -name encodercraft.exe \) | head -n 1)"
-[ -n "$gui" ] || echo "note: archive has no GUI binary (CLI-only package)"
+if [ -n "$gui" ]; then
+  if [[ "$gui" == *.exe ]]; then
+    "$gui" --version >/dev/null
+  else
+    [ "$("$gui" --version)" = "encodercraft $version" ] || { echo "FAIL: GUI version check failed" >&2; exit 1; }
+  fi
+else
+  echo "note: archive has no GUI binary (CLI-only package)"
+fi
 
 for lic in LICENSE-MIT LICENSE-APACHE NOTICE; do
   find "$work" -type f -name "$lic" | grep -q . || { echo "FAIL: $lic not bundled" >&2; exit 1; }

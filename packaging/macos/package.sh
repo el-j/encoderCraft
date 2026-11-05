@@ -117,8 +117,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/encodercraft" "$APP/Contents/MacOS/EncoderCraft"
 cp "$ROOT/assets/app-icon/encodercraft.icns" "$APP/Contents/Resources/EncoderCraft.icns"
-# Required embedded-font notices are independent of optional font inputs.
-cp "$ROOT/NOTICE" "$APP/Contents/Resources/NOTICE"
+# License notices are independent of optional font inputs.
+for license in LICENSE-MIT LICENSE-APACHE NOTICE; do
+  cp "$ROOT/$license" "$APP/Contents/Resources/$license"
+done
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
   -e "s/@BUILD_SHA@/${ENCODERCRAFT_BUILD_SHA:-unknown}/g" \
   "$HERE/Info.plist.in" >"$APP/Contents/Info.plist"

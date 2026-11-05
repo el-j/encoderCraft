@@ -49,14 +49,14 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 | Queue: batch start, pause, stop, duplicate, remove, reset, multi-target progress | Implemented | M23, #60 |
 | Video/still decode and encode through ArtCraft crates | Implemented | M24, M25, #56, #57 |
 | Preview monitor, transport, scopes, Encoding panel | Implemented (no audio playback yet) | #27–#29 |
-| Command registry, menu bar, shortcuts, workspaces | Implemented; drag/float docking and shortcut remapping missing | #30–#33 |
+| Docking, persisted workspaces, configurable shortcuts | All application commands map to registered engine commands; menu, queue-toolbar, context-menu, shortcut, and workspace actions use shared command IDs exposed through IPC, CLI, and MCP. Shared craft-ui docking, persisted layouts, active-panel outline, remappable shortcuts, and minimum-size/Hi-DPI render tests are implemented; side-by-side visual evidence is deferred until reference screenshots are available | #31–#33 |
 | Preferences, watch folders, favourites persistence | Implemented | #38, #39 |
 | Preset Browser table, import/export, delete | Implemented; per-preset editing dialog partial | #35, #37 |
 | Media Browser (browse, thumbnails, add to queue) | Implemented | #36 |
 | Queue table column customisation, in-table context menus | Partial | #34 |
 | ICC, image sequences, 16-bit pipelines | Missing | #22–#24 |
-| Streaming audio, encoder configuration depth | Partial | #17, #18 |
-| Installer smoke tests, fuzzing, E2E QA | Missing | #41–#43 |
+| Bounded video/audio streaming, frame transforms, progress ETA, and encoder configuration depth | Implemented | #17, #18 |
+| Installer smoke tests, fuzzing, E2E QA | Partial: real-media QA is enforced in CI; all seven bounded libFuzzer targets built and passed a local seeded smoke run, while installer execution and sustained fuzzing await clean-runner CI | #41–#43 |
 
 ---
 

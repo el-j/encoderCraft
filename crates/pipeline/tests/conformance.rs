@@ -133,6 +133,14 @@ fn assert_real_video(path: &Path, frames: u64, with_audio: bool) {
     assert!(reader.frame_count().abs_diff(frames) <= slack, "frame count {} of {}, expected {frames}", reader.frame_count(), path.display());
     assert!((probe.duration_seconds - frames as f64 / fps().as_f64()).abs() < 0.1, "duration {}", probe.duration_seconds);
     assert_eq!(!probe.audio.is_empty(), with_audio);
+    if with_audio {
+        let audio_stream = probe.audio.first().unwrap();
+        let first = i64::from(audio_stream.sample_rate / 10);
+        let sample_count = usize::try_from(audio_stream.sample_rate / 50).unwrap();
+        let audio = reader.read_audio_range(first, sample_count, audio_stream.sample_rate).unwrap();
+        let peak = audio.channels().iter().flat_map(|channel| channel.iter()).fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+        assert!(peak > 0.001, "audio stream in {} decoded as silence", path.display());
+    }
 
     for index in [0, frames / 2, frames - 1] {
         let frame = reader.frame_at_index(index).unwrap();
@@ -169,8 +177,7 @@ fn av1_and_vp9_outputs_decode_to_real_pictures() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("source.mp4");
     write_av_source(&source);
-    // WebM carries no audio until an Opus encoder is available.
-    for (name, container, preset, audio) in [("av1.mp4", ContainerType::IsoBmffMp4, "AV1", true), ("vp9.webm", ContainerType::WebM, "VP9", false)] {
+    for (name, container, preset, audio) in [("av1.mp4", ContainerType::IsoBmffMp4, "AV1", true), ("vp9.webm", ContainerType::WebM, "VP9", true)] {
         let out = run(dir.path(), name, container, preset, &source);
         assert_real_video(&out, FRAMES, audio);
     }

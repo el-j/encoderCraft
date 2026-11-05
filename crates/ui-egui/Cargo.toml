@@ -21,6 +21,8 @@ encodercraft-video-codecs = { workspace = true }
 encodercraft-source = { workspace = true }
 encodercraft-watch = { workspace = true }
 filmcraft-scopes = { workspace = true }
+craft-ui = { workspace = true }
+craft-keymap = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
 rfd = { workspace = true }
 serde = { workspace = true }

@@ -1,6 +1,6 @@
 name: release-smoke
 
-# Unpacks the artifacts of a draft release on clean runners and proves they work, before a
+# Installs or unpacks draft-release artifacts on clean runners and proves they work before a
 # maintainer publishes the draft. Runs after the Release workflow, or by hand for any version.
 on:
   workflow_run:
@@ -17,6 +17,27 @@ permissions:
   contents: read
 
 jobs:
+  media-qa:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install FFmpeg tools
+        run: brew install ffmpeg
+      - name: Verify independent media tools
+        run: |
+          ffmpeg -version
+          ffprobe -version
+      - name: Run real-media CLI and queue QA
+        env:
+          ENCODERCRAFT_REQUIRE_FULL_QA: "1"
+        run: cargo test -p encodercraft-cli --test qa_matrix -- --nocapture
+
   version:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
@@ -24,6 +45,8 @@ jobs:
       version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
       - id: v
         run: |
           v="${{ inputs.version }}"
@@ -45,6 +68,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
       - name: Download the release artifact
         shell: bash
         env:
@@ -65,3 +90,79 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: packaging/smoke/smoke-release.sh dl/* "$VERSION"
+
+  install-linux:
+    needs: version
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: deb
+            extension: deb
+          - kind: rpm
+            extension: rpm
+          - kind: appimage
+            extension: AppImage
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+      - name: Download package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          EXTENSION: ${{ matrix.extension }}
+        run: |
+          mkdir -p dl
+          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
+            --pattern "encodercraft-${VERSION}-linux-x86_64.${EXTENSION}" --dir dl
+      - name: Install and smoke-test package
+        env:
+          KIND: ${{ matrix.kind }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bash packaging/smoke/smoke-installed-linux.sh "$KIND" dl/* "$VERSION" packaging/smoke/smoke.bmp
+
+  install-macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+      - name: Download DMG and CLI package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p dl
+          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
+            --pattern "encodercraft-${VERSION}-macos-universal.dmg" --dir dl
+          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
+            --pattern "encodercraft-cli-${VERSION}-macos-universal.zip" --dir dl
+      - name: Install and smoke-test DMG
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bash packaging/smoke/smoke-installed-macos.sh dl/*.dmg dl/*cli*.zip "$VERSION" packaging/smoke/smoke.bmp
+
+  install-windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+      - name: Download MSI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p dl
+          gh release download "v${VERSION}" --repo "${{ github.repository }}" \
+            --pattern "encodercraft-${VERSION}-windows-x64.msi" --dir dl
+      - name: Install and smoke-test MSI
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: ./packaging/smoke/smoke-installed-windows.ps1 -MsiPath (Get-ChildItem dl/*.msi).FullName -Version $env:VERSION -Fixture packaging/smoke/smoke.bmp

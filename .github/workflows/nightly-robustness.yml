@@ -20,3 +20,51 @@ jobs:
         env:
           PROPTEST_CASES: "5000"
         run: cargo test -p encodercraft-source -p encodercraft-pipeline -p encodercraft-engine --release
+
+  libfuzzer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> fuzz/target
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Seed bounded fuzz corpora
+        run: |
+          mkdir -p "$RUNNER_TEMP/encodercraft-corpus"
+          python3 - "$RUNNER_TEMP/encodercraft-corpus/audio.wav" <<'PY'
+          import sys
+          import wave
+
+          with wave.open(sys.argv[1], "wb") as stream:
+              stream.setnchannels(1)
+              stream.setsampwidth(2)
+              stream.setframerate(48000)
+              stream.writeframes(b"\0\0" * 2048)
+          PY
+      - name: Run bounded decoder, parser and state fuzz targets
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/encodercraft-corpus"
+          for target in demux_probe media_decode image_decode audio_decode preset_json queue_journal ipc_message; do
+            corpus="$root/$target"
+            mkdir -p "$corpus"
+            case "$target" in
+              demux_probe|media_decode)
+                cp crates/source/tests/fixtures/*.mp4 crates/source/tests/fixtures/*.mov \
+                  crates/source/tests/fixtures/*.webm "$corpus/"
+                cp packaging/smoke/smoke.bmp "$corpus/"
+                cp "$root/audio.wav" "$corpus/"
+                ;;
+              image_decode) cp packaging/smoke/smoke.bmp "$corpus/" ;;
+              audio_decode) cp "$root/audio.wav" "$corpus/" ;;
+              preset_json) printf '[]' > "$corpus/empty-array.json" ;;
+              queue_journal) printf '{"version":1,"active_parallelism":1,"jobs":[]}' > "$corpus/empty-journal.json" ;;
+              ipc_message) printf '{"id":1,"method":"app.ping","params":{}}' > "$corpus/ping.json" ;;
+            esac
+            cargo fuzz run "$target" "$corpus" -- \
+              -max_total_time=30 -max_len=16777216 -rss_limit_mb=2048 -timeout=15
+          done

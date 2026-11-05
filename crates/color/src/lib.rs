@@ -160,6 +160,8 @@ pub enum ColorPrimaries {
     /// Rec. ITU-R BT.709-6 (HDTV, sRGB standard).
     #[default]
     Bt709 = 1,
+    /// BT.601 SDTV primaries (approximated by BT.709 for RGB gamut transforms).
+    Bt601 = 6,
     /// Unspecified.
     Unspecified = 2,
     /// Rec. ITU-R BT.2020 (Ultra HD, Wide Color Gamut).
@@ -206,28 +208,49 @@ pub enum MatrixCoefficients {
     Bt2020NonConstant = 9,
 }
 
-/// Complete Color Space Tag specifying Primaries, Transfer, and Matrix.
+/// Signal range used by integer component formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColorRange {
+    Full,
+    #[default]
+    Limited,
+}
+
+/// Complete color-space and range tag for a video frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ColorSpaceTag {
     pub primaries: ColorPrimaries,
     pub transfer: TransferFunction,
     pub matrix: MatrixCoefficients,
+    #[serde(default)]
+    pub range: ColorRange,
 }
 
 impl ColorSpaceTag {
     /// Standard Rec.709 colorimetry (HDTV, web SDR).
-    pub const REC709: Self = Self { primaries: ColorPrimaries::Bt709, transfer: TransferFunction::Bt709, matrix: MatrixCoefficients::Bt709 };
+    pub const REC709: Self =
+        Self { primaries: ColorPrimaries::Bt709, transfer: TransferFunction::Bt709, matrix: MatrixCoefficients::Bt709, range: ColorRange::Limited };
 
     /// sRGB colorimetry (standard computer graphics).
-    pub const SRGB: Self = Self { primaries: ColorPrimaries::Bt709, transfer: TransferFunction::Srgb, matrix: MatrixCoefficients::Identity };
+    pub const SRGB: Self =
+        Self { primaries: ColorPrimaries::Bt709, transfer: TransferFunction::Srgb, matrix: MatrixCoefficients::Identity, range: ColorRange::Full };
 
     /// HDR10 colorimetry (BT.2020 WCG + PQ EOTF).
-    pub const HDR10: Self =
-        Self { primaries: ColorPrimaries::Bt2020, transfer: TransferFunction::PerceptualQuantizer, matrix: MatrixCoefficients::Bt2020NonConstant };
+    pub const HDR10: Self = Self {
+        primaries: ColorPrimaries::Bt2020,
+        transfer: TransferFunction::PerceptualQuantizer,
+        matrix: MatrixCoefficients::Bt2020NonConstant,
+        range: ColorRange::Limited,
+    };
 
     /// Apple Display P3 colorimetry.
-    pub const DISPLAY_P3: Self =
-        Self { primaries: ColorPrimaries::DisplayP3, transfer: TransferFunction::Srgb, matrix: MatrixCoefficients::Identity };
+    pub const DISPLAY_P3: Self = Self {
+        primaries: ColorPrimaries::DisplayP3,
+        transfer: TransferFunction::Srgb,
+        matrix: MatrixCoefficients::Identity,
+        range: ColorRange::Full,
+    };
 }
 
 /// Options controlling pixel buffer conversions.

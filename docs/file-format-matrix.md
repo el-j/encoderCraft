@@ -175,3 +175,18 @@ Preset parameters (`VideoEncodeSettings`: codec, keyframe interval, profile, B-f
 | DNxHR | intra | n/a | lb, sq, hq, hqx | n/a | no |
 
 Known upstream gaps: HEVC, AV1 and VP9 encoders expose no B-frames, profiles or HDR signalling; H.264 rate control is single-pass; ProRes 4444 is not encodable. MP4 output is written faststart (`moov` before `mdat`); MOV is not. MXF stores H.264 as Annex B.
+
+## 11. Streaming, memory limits & measurements
+
+Video encoding uses bounded decode and convert queues, a reusable output-frame buffer, and an ordered encode/mux stage. The default frame-queue budget is 256 MiB, with at most eight queued frames per boundary. The budget accounts for stage-local buffers, the recycled output frame, and the temporary linear-float conversion buffer used for high-bit-depth source frames; a source whose minimum working set exceeds the configured budget is rejected before streaming. Cancellation and stage failures discard the staged output and preserve any existing destination.
+
+Source audio is decoded and encoded in 10-second windows. Loudness normalization still requires a whole-track pass; its default 1 GiB limit includes the source-channel and normalized stereo buffers. The CLI exposes both limits as `--frame-memory-mib` and `--normalization-memory-mib`. These settings bound pipeline-managed buffers, not the source decoder's cache: the upstream FilmCraft GOP cache currently uses a process-wide 1 GiB frame budget that encoderCraft cannot configure.
+
+Release-mode measurements on the same 1920x1080 H.264/AAC source family using `YouTube 1080p Full HD`:
+
+| Input duration | Input size | Wall time | Peak RSS |
+|---:|---:|---:|---:|
+| 20.07 s | 76 MiB | 14.70 s | 876 MB |
+| 60.00 s | 217 MiB | 47.69 s | 940 MB |
+
+Measured with `/usr/bin/time -l target/release/encodercraft-cli encode ...` on macOS. The non-linear RSS increase reflects the decoder's GOP cache and fixed stage working set; the complete source is not accumulated in memory. These numbers are measurements, not resource guarantees, and decoder-cache behavior remains upstream-controlled.

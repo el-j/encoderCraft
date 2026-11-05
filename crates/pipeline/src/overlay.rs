@@ -42,6 +42,32 @@ fn glyph_5x7(c: char) -> [u8; 7] {
     }
 }
 
+pub(crate) fn rgb_layout(format: PixelFormat) -> Result<(usize, usize), EncoderError> {
+    match format {
+        PixelFormat::Rgb8 => Ok((3, 1)),
+        PixelFormat::Rgba8 => Ok((4, 1)),
+        PixelFormat::RgbaF32 => Ok((4, 4)),
+        other => Err(EncoderError::UnsupportedCodec(format!("RGB overlay does not support {other:?} frames"))),
+    }
+}
+
+pub(crate) fn blend_rgb(data: &mut [u8], offset: usize, bytes_per_component: usize, color: [f32; 3], alpha: f32) -> Result<(), EncoderError> {
+    for (channel, value) in color.into_iter().enumerate() {
+        let start = offset
+            .checked_add(channel.saturating_mul(bytes_per_component))
+            .ok_or_else(|| EncoderError::Internal("overlay pixel offset overflow".into()))?;
+        if bytes_per_component == 1 {
+            let pixel = data.get_mut(start).ok_or_else(|| EncoderError::Internal("overlay pixel is out of range".into()))?;
+            *pixel = (f32::from(*pixel) * (1.0 - alpha) + value * 255.0 * alpha).round().clamp(0.0, 255.0) as u8;
+        } else {
+            let bytes = data.get_mut(start..start + 4).ok_or_else(|| EncoderError::Internal("overlay float pixel is out of range".into()))?;
+            let current = f32::from_ne_bytes(bytes.try_into().map_err(|_| EncoderError::Internal("overlay float pixel is invalid".into()))?);
+            bytes.copy_from_slice(&(current * (1.0 - alpha) + value * alpha).to_ne_bytes());
+        }
+    }
+    Ok(())
+}
+
 /// Timecode overlay burn-in filter.
 #[derive(Debug, Clone)]
 pub struct TimecodeOverlay {
@@ -65,14 +91,9 @@ impl TimecodeOverlay {
         self.draw_text(frame, &text)
     }
 
-    /// Renders custom text burn-in onto an uncompressed RGB8 or RGBA8 frame.
+    /// Renders custom text burn-in onto an uncompressed RGB8, RGBA8, or RGBAF32 frame.
     pub fn draw_text(&self, frame: &mut VideoFrame, text: &str) -> Result<(), EncoderError> {
-        if frame.format != PixelFormat::Rgb8 && frame.format != PixelFormat::Rgba8 {
-            return Err(EncoderError::UnsupportedCodec(format!(
-                "timecode overlay requires RGB8 or RGBA8 pixel format (frame is {:?})",
-                frame.format
-            )));
-        }
+        let (channels, bytes_per_component) = rgb_layout(frame.format)?;
 
         let char_w = 5 * self.scale;
         let char_h = 7 * self.scale;
@@ -100,11 +121,11 @@ impl TimecodeOverlay {
             OverlayPosition::Center => ((fw.saturating_sub(box_width)) / 2, (fh.saturating_sub(box_height)) / 2),
         };
 
-        let channels = if frame.format == PixelFormat::Rgb8 { 3 } else { 4 };
         let bg_alpha = self.bg_opacity.clamp(0.0, 1.0);
         let text_alpha = self.text_opacity.clamp(0.0, 1.0);
 
-        let data = frame.data_mut();
+        let (data, stride) = frame.plane_mut(0)?;
+        let bytes_per_pixel = channels * bytes_per_component;
 
         // 1. Draw pill background (semi-transparent dark)
         for by in 0..box_height {
@@ -117,12 +138,8 @@ impl TimecodeOverlay {
                 if px >= fw {
                     break;
                 }
-                let idx = (py * fw + px) * channels;
-                if let Some(pixel) = data.get_mut(idx..idx + 3) {
-                    for ch in pixel.iter_mut() {
-                        *ch = ((*ch as f32) * (1.0 - bg_alpha)).clamp(0.0, 255.0) as u8;
-                    }
-                }
+                let idx = py * stride + px * bytes_per_pixel;
+                blend_rgb(data, idx, bytes_per_component, [0.0; 3], bg_alpha)?;
             }
         }
 
@@ -149,13 +166,8 @@ impl TimecodeOverlay {
                                 if px >= fw {
                                     break;
                                 }
-                                let idx = (py * fw + px) * channels;
-                                if let Some(pixel) = data.get_mut(idx..idx + 3) {
-                                    for channel in pixel.iter_mut() {
-                                        let current = *channel as f32;
-                                        *channel = (current * (1.0 - text_alpha) + 255.0 * text_alpha).clamp(0.0, 255.0) as u8;
-                                    }
-                                }
+                                let idx = py * stride + px * bytes_per_pixel;
+                                blend_rgb(data, idx, bytes_per_component, [1.0; 3], text_alpha)?;
                             }
                         }
                     }
@@ -186,12 +198,7 @@ impl WatermarkOverlay {
 
     /// Blends the watermark onto an uncompressed video frame.
     pub fn draw(&self, frame: &mut VideoFrame) -> Result<(), EncoderError> {
-        if frame.format != PixelFormat::Rgb8 && frame.format != PixelFormat::Rgba8 {
-            return Err(EncoderError::UnsupportedCodec(format!(
-                "watermark overlay requires RGB8 or RGBA8 pixel format (frame is {:?})",
-                frame.format
-            )));
-        }
+        let (frame_channels, bytes_per_component) = rgb_layout(frame.format)?;
 
         let fw = frame.dimensions.width as usize;
         let fh = frame.dimensions.height as usize;
@@ -210,10 +217,10 @@ impl WatermarkOverlay {
             OverlayPosition::Center => ((fw.saturating_sub(ww)) / 2, (fh.saturating_sub(wh)) / 2),
         };
 
-        let frame_channels = if frame.format == PixelFormat::Rgb8 { 3 } else { 4 };
         let master_opacity = self.opacity;
 
-        let frame_data = frame.data_mut();
+        let (frame_data, frame_stride) = frame.plane_mut(0)?;
+        let bytes_per_pixel = frame_channels * bytes_per_component;
 
         for wy in 0..wh {
             let py = origin_y + wy;
@@ -227,25 +234,17 @@ impl WatermarkOverlay {
                 }
 
                 let wm_idx = (wy * ww + wx) * 4;
-                let src_r = self.rgba_data.get(wm_idx).copied().unwrap_or(0) as f32;
-                let src_g = self.rgba_data.get(wm_idx + 1).copied().unwrap_or(0) as f32;
-                let src_b = self.rgba_data.get(wm_idx + 2).copied().unwrap_or(0) as f32;
+                let src_r = self.rgba_data.get(wm_idx).copied().unwrap_or(0) as f32 / 255.0;
+                let src_g = self.rgba_data.get(wm_idx + 1).copied().unwrap_or(0) as f32 / 255.0;
+                let src_b = self.rgba_data.get(wm_idx + 2).copied().unwrap_or(0) as f32 / 255.0;
                 let src_a = (self.rgba_data.get(wm_idx + 3).copied().unwrap_or(0) as f32 / 255.0) * master_opacity;
 
                 if src_a <= 0.001 {
                     continue;
                 }
 
-                let dst_idx = (py * fw + px) * frame_channels;
-                if let Some(dest) = frame_data.get_mut(dst_idx..dst_idx + 3) {
-                    let d_r = dest[0] as f32;
-                    let d_g = dest[1] as f32;
-                    let d_b = dest[2] as f32;
-
-                    dest[0] = (src_r * src_a + d_r * (1.0 - src_a)).clamp(0.0, 255.0) as u8;
-                    dest[1] = (src_g * src_a + d_g * (1.0 - src_a)).clamp(0.0, 255.0) as u8;
-                    dest[2] = (src_b * src_a + d_b * (1.0 - src_a)).clamp(0.0, 255.0) as u8;
-                }
+                let dst_idx = py * frame_stride + px * bytes_per_pixel;
+                blend_rgb(frame_data, dst_idx, bytes_per_component, [src_r, src_g, src_b], src_a)?;
             }
         }
 

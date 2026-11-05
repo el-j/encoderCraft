@@ -7,11 +7,16 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod conversion;
 pub mod ipc;
 pub mod queue;
 pub mod state;
 
 pub use cmd::{CommandRegistry, CommandSpec};
+pub use conversion::{ConversionDecision, LossyConversion, LossyConversionChange, LossyConversionKey, assess_lossy_conversions};
 pub use ipc::EngineIpcHandler;
 pub use queue::QueueManager;
-pub use state::{AppPreferences, LogEntry, QueueJournal, QueuedJob, load_journal, load_preferences, save_journal_atomic, save_preferences_atomic};
+pub use state::{
+    AppPreferences, LogEntry, QueueJournal, QueuedJob, default_config_dir, default_preferences_path, load_journal, load_preferences,
+    save_journal_atomic, save_preferences_atomic,
+};

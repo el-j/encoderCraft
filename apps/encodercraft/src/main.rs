@@ -36,10 +36,12 @@ fn main() -> Result<(), eframe::Error> {
     let app_dir = get_app_data_dir();
     let _ = std::fs::create_dir_all(&app_dir);
     let journal_file = app_dir.join("queue-state.json");
-    let prefs_file = app_dir.join("preferences.json");
+    let config_dir = encodercraft_engine::default_config_dir().unwrap_or_else(|| app_dir.clone());
+    let prefs_file = config_dir.join("preferences.json");
 
     let queue_mgr = Arc::new(QueueManager::new_persisted(journal_file).unwrap_or_else(|_| QueueManager::new_in_memory()));
-    let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
+    queue_mgr.set_conversion_preferences_path(prefs_file.clone());
+    let preset_registry = Arc::new(Mutex::new(PresetRegistry::new(Some(config_dir.join("presets")))));
     let prefs = encodercraft_engine::load_preferences(&prefs_file).unwrap_or_default();
 
     let handler = Arc::new(EngineIpcHandler::new(queue_mgr.clone(), preset_registry.clone()));
@@ -70,9 +72,7 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(|_cc| {
             let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
-            if let Some(path) = encodercraft_ui_egui::settings::default_config_dir() {
-                app = app.with_config_dir(path);
-            }
+            app = app.with_config_dir(config_dir);
             if prefs.theme == "High Contrast" {
                 app.brightness = encodercraft_ui_egui::Brightness::HighContrast;
                 app.tokens = encodercraft_ui_egui::Tokens::for_brightness(app.brightness);

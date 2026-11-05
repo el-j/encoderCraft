@@ -5,13 +5,14 @@
 //! resolutions, bitrates, audio channels, and loudness targets. Parity with
 //! Adobe Media Encoder's "Preset > Create Encoding Preset..." dialog.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use egui::{Context, RichText, Window};
 use encodercraft_color::PixelFormat;
 use encodercraft_core::{ChannelLayout, ContainerType, Rational64};
+use encodercraft_engine::{QueueManager, cmd::CommandRegistry};
 use encodercraft_geom::ScaleMode;
-use encodercraft_presets::{EncodingPreset, MatchSourceOr, PresetAudioSettings, PresetCategory, PresetRegistry, PresetVideoSettings};
+use encodercraft_presets::{EncodingPreset, MatchSourceOr, PresetAudioSettings, PresetCategory, PresetVideoSettings};
 
 use crate::theme::Tokens;
 
@@ -75,8 +76,8 @@ impl PresetEditorState {
         *self = Self { is_open: true, ..Default::default() };
     }
 
-    /// Validates and saves the configured preset to the registry.
-    pub fn save(&mut self, registry: &Arc<Mutex<PresetRegistry>>) -> bool {
+    /// Validates and saves the configured preset through the shared engine command.
+    pub fn save(&mut self, commands: &CommandRegistry, queue_mgr: &Arc<QueueManager>) -> bool {
         let trimmed_name = self.name.trim();
         if trimmed_name.is_empty() {
             self.error_message = Some("Preset name cannot be empty".into());
@@ -106,6 +107,7 @@ impl PresetEditorState {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             })
         } else {
             None
@@ -134,15 +136,14 @@ impl PresetEditorState {
             audio,
         };
 
-        let mut reg = registry.lock().unwrap_or_else(PoisonError::into_inner);
-        match reg.save_custom_preset(preset) {
-            Ok(()) => {
+        match commands.dispatch(queue_mgr, "preset.create", serde_json::json!({ "preset": preset })) {
+            Ok(_) => {
                 self.is_open = false;
                 self.error_message = None;
                 true
             }
-            Err(e) => {
-                self.error_message = Some(format!("Failed to save preset: {e}"));
+            Err(error) => {
+                self.error_message = Some(format!("Failed to save preset: {error}"));
                 false
             }
         }
@@ -150,7 +151,13 @@ impl PresetEditorState {
 }
 
 /// Renders the preset editor window if open.
-pub fn render_preset_editor(ctx: &Context, state: &mut PresetEditorState, registry: &Arc<Mutex<PresetRegistry>>, tokens: &Tokens) {
+pub fn render_preset_editor(
+    ctx: &Context,
+    state: &mut PresetEditorState,
+    commands: &CommandRegistry,
+    queue_mgr: &Arc<QueueManager>,
+    tokens: &Tokens,
+) {
     if !state.is_open {
         return;
     }
@@ -347,7 +354,7 @@ pub fn render_preset_editor(ctx: &Context, state: &mut PresetEditorState, regist
                 // Action buttons
                 ui.horizontal(|ui| {
                     if ui.button(RichText::new("Save Preset").strong().color(tokens.accent_primary)).clicked() {
-                        let _ = state.save(registry);
+                        let _ = state.save(commands, queue_mgr);
                     }
                     if ui.button("Cancel").clicked() {
                         state.is_open = false;
@@ -364,16 +371,20 @@ pub fn render_preset_editor(ctx: &Context, state: &mut PresetEditorState, regist
 #[cfg(test)]
 mod tests {
     use super::*;
+    use encodercraft_presets::PresetRegistry;
+    use std::sync::Mutex;
 
     #[test]
     fn test_preset_editor_validation_and_save() {
         let registry = Arc::new(Mutex::new(PresetRegistry::default()));
+        let queue = Arc::new(QueueManager::new_in_memory());
+        let commands = CommandRegistry::with_preset_registry(Arc::clone(&registry));
         let mut state = PresetEditorState::default();
         state.open_new();
 
         // 1. Empty name should fail validation
         state.name = "   ".into();
-        assert!(!state.save(&registry));
+        assert!(!state.save(&commands, &queue));
         assert!(state.error_message.is_some());
 
         // 2. Valid configuration should succeed
@@ -386,7 +397,7 @@ mod tests {
         state.channel_layout = ChannelLayout::Stereo;
         state.target_lufs = Some(-14.0);
 
-        assert!(state.save(&registry));
+        assert!(state.save(&commands, &queue));
         assert!(!state.is_open);
         assert!(state.error_message.is_none());
 

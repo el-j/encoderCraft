@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use egui::{RichText, Ui};
-use encodercraft_engine::QueueManager;
+use encodercraft_engine::{QueueManager, cmd::CommandRegistry};
 use encodercraft_presets::PresetRegistry;
 use encodercraft_watch::{PostProcessAction, WatchFolderConfig, WatchFolderService};
 
@@ -39,6 +39,7 @@ pub fn render_watch_panel(
     state: &mut WatchPanelState,
     queue_mgr: &Arc<QueueManager>,
     preset_registry: &Arc<Mutex<PresetRegistry>>,
+    commands: &CommandRegistry,
     tokens: &Tokens,
 ) {
     ui.vertical(|ui| {
@@ -77,7 +78,7 @@ pub fn render_watch_panel(
             }
 
             if ui.button("Scan Now").on_hover_text("Immediately scan watch folders for settled media files").clicked() {
-                trigger_watch_scan(state, queue_mgr, preset_registry);
+                trigger_watch_scan(state, queue_mgr, preset_registry, commands);
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -195,7 +196,12 @@ pub fn render_watch_panel(
 }
 
 /// Triggers a scan pass across all active watch folders and automatically queues settled jobs.
-pub fn trigger_watch_scan(state: &mut WatchPanelState, queue_mgr: &Arc<QueueManager>, preset_registry: &Arc<Mutex<PresetRegistry>>) {
+pub fn trigger_watch_scan(
+    state: &mut WatchPanelState,
+    queue_mgr: &Arc<QueueManager>,
+    preset_registry: &Arc<Mutex<PresetRegistry>>,
+    commands: &CommandRegistry,
+) {
     if state.configs.is_empty() {
         return;
     }
@@ -211,13 +217,28 @@ pub fn trigger_watch_scan(state: &mut WatchPanelState, queue_mgr: &Arc<QueueMana
             let count = jobs.len();
             state.last_detected_count = count;
             state.last_scan_time = Some(std::time::Instant::now());
+            let mut queued = 0;
+            let mut failures = Vec::new();
 
             for (_folder_id, spec) in jobs {
-                let _ = queue_mgr.submit_job(spec);
+                let params = match serde_json::to_value(spec) {
+                    Ok(params) => params,
+                    Err(error) => {
+                        failures.push(format!("could not serialize detected job: {error}"));
+                        continue;
+                    }
+                };
+                match commands.dispatch(queue_mgr, "queue.add", params) {
+                    Ok(_) => queued += 1,
+                    Err(error) => failures.push(error.to_string()),
+                }
             }
 
-            if count > 0 {
-                state.status_message = Some(format!("Found & queued {count} settled media files."));
+            if failures.is_empty() && count > 0 {
+                state.status_message = Some(format!("Found & queued {queued} settled media files."));
+            } else if let Some(first_error) = failures.first() {
+                state.status_message =
+                    Some(format!("Queued {queued} of {count} settled files; {} could not be queued. First error: {first_error}", failures.len()));
             } else {
                 state.status_message = Some("Watch scan complete: no new settled files.".into());
             }

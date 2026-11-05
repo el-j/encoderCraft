@@ -53,7 +53,7 @@ impl<W: Write + Seek> MkvMuxerBuilder<W> {
     }
 
     /// Declares an audio stream track.
-    pub fn add_audio_stream(&mut self, cfg: &AudioStreamConfig) -> usize {
+    pub fn add_audio_stream(&mut self, cfg: &AudioStreamConfig) -> Result<usize, EncoderError> {
         let codec_id = match &cfg.codec_fourcc {
             b"Opus" | b"opus" => "A_OPUS",
             b"vorb" => "A_VORBIS",
@@ -65,9 +65,31 @@ impl<W: Write + Seek> MkvMuxerBuilder<W> {
         let mut spec = TrackSpec::new(TrackKind::Audio, codec_id);
         spec.audio = Some((cfg.sample_rate as f64, cfg.layout as u64, Some(cfg.bits_per_sample as u64)));
         spec.codec_private = cfg.codec_private.clone();
+        if codec_id == "A_OPUS" {
+            let header = cfg
+                .codec_private
+                .get(..19)
+                .filter(|header| header.starts_with(b"OpusHead"))
+                .ok_or_else(|| EncoderError::InvalidJobSpec("Opus track is missing a valid OpusHead header".into()))?;
+            let channel_count = u8::try_from(cfg.layout.channel_count())
+                .map_err(|_| EncoderError::InvalidJobSpec("Opus channel count exceeds the header limit".into()))?;
+            if cfg.sample_rate != 48_000
+                || !matches!(cfg.layout, encodercraft_core::ChannelLayout::Mono | encodercraft_core::ChannelLayout::Stereo)
+                || header.get(8).copied() != Some(1)
+                || header.get(9).copied() != Some(channel_count)
+            {
+                return Err(EncoderError::InvalidJobSpec("Opus tracks require matching mono/stereo layout at 48 kHz".into()));
+            }
+            let preskip = u16::from_le_bytes([
+                *header.get(10).ok_or_else(|| EncoderError::InvalidJobSpec("OpusHead is missing its pre-skip".into()))?,
+                *header.get(11).ok_or_else(|| EncoderError::InvalidJobSpec("OpusHead is missing its pre-skip".into()))?,
+            ]);
+            spec.codec_delay_ns = u64::from(preskip).saturating_mul(1_000_000_000) / 48_000;
+            spec.seek_pre_roll_ns = 80_000_000;
+        }
 
         self.tracks.push(spec);
-        self.tracks.len() - 1
+        Ok(self.tracks.len() - 1)
     }
 
     /// Builds the active `MkvMuxer` writing the initial EBML header and Track entries.
@@ -126,6 +148,30 @@ mod tests {
     use encodercraft_core::Rational64;
     use encodercraft_geom::Dimensions;
     use std::io::Cursor;
+
+    #[test]
+    fn opus_audio_track_records_preskip_and_rejects_malformed_headers() {
+        let mut header = vec![0; 19];
+        header[..8].copy_from_slice(b"OpusHead");
+        header[8] = 1;
+        header[9] = 2;
+        header[10..12].copy_from_slice(&120u16.to_le_bytes());
+        let config = AudioStreamConfig {
+            codec_fourcc: *b"Opus",
+            sample_rate: 48_000,
+            layout: encodercraft_core::ChannelLayout::Stereo,
+            bits_per_sample: 16,
+            codec_private: header,
+        };
+        let mut builder = MkvMuxerBuilder::new(Cursor::new(Vec::new()), true);
+        assert_eq!(builder.add_audio_stream(&config).unwrap(), 0);
+        assert_eq!(builder.tracks[0].codec_delay_ns, 2_500_000);
+        assert_eq!(builder.tracks[0].seek_pre_roll_ns, 80_000_000);
+
+        let mut invalid_builder = MkvMuxerBuilder::new(Cursor::new(Vec::new()), true);
+        let invalid = AudioStreamConfig { codec_private: Vec::new(), ..config };
+        assert!(invalid_builder.add_audio_stream(&invalid).is_err());
+    }
 
     #[test]
     fn test_mkv_muxer_video_writing() {

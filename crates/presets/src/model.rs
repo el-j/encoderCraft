@@ -53,6 +53,9 @@ pub struct PresetVideoSettings {
     /// Colour tag written into the bitstream; `None` keeps the codec default (BT.709).
     #[serde(default)]
     pub color: Option<ColorTag>,
+    /// Match the source video bitrate when it is available; otherwise use `target_bitrate_kbps`.
+    #[serde(default)]
+    pub match_source_bitrate: bool,
 }
 
 /// Audio configuration settings inside a preset recipe.
@@ -88,6 +91,10 @@ impl EncodingPreset {
             bframes: v.bframes,
             rate_mode: v.rate_mode,
             color: v.color,
+            pixel_format: match v.pixel_format {
+                MatchSourceOr::MatchSource => None,
+                MatchSourceOr::Exact(format) => Some(format),
+            },
         })
     }
 }

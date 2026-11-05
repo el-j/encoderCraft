@@ -11,6 +11,7 @@ pub struct JobProgress {
     processed_frames: AtomicU64,
     total_frames: AtomicU64,
     fps_fixed: AtomicU64, // 16.16 fixed point FPS
+    target_start_nanos: AtomicU64,
     cancelled: AtomicBool,
     paused: AtomicBool,
     target_index: AtomicU64,
@@ -30,6 +31,7 @@ impl JobProgress {
             processed_frames: AtomicU64::new(0),
             total_frames: AtomicU64::new(total_frames),
             fps_fixed: AtomicU64::new(0),
+            target_start_nanos: AtomicU64::new(0),
             cancelled: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             target_index: AtomicU64::new(0),
@@ -44,8 +46,18 @@ impl JobProgress {
 
     /// Starts target `index`: its own frame counters restart, overall progress stays monotonic.
     pub fn begin_target(&self, index: u64) {
+        self.reset_target(index, 0);
+    }
+
+    pub(crate) fn begin_target_at(&self, index: u64, start_time: Instant) {
+        self.reset_target(index, start_time.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64);
+    }
+
+    fn reset_target(&self, index: u64, start_nanos: u64) {
         self.processed_frames.store(0, Ordering::Release);
         self.total_frames.store(0, Ordering::Release);
+        self.fps_fixed.store(0, Ordering::Release);
+        self.target_start_nanos.store(start_nanos, Ordering::Release);
         self.target_index.store(index, Ordering::Release);
     }
 
@@ -67,10 +79,12 @@ impl JobProgress {
     /// Increments processed frame count by one and updates instantaneous FPS.
     pub fn advance_frame(&self, start_time: Instant) {
         let count = self.processed_frames.fetch_add(1, Ordering::AcqRel) + 1;
-        let elapsed_sec = start_time.elapsed().as_secs_f64();
+        let elapsed_nanos =
+            ((start_time.elapsed().as_nanos().min(u128::from(u64::MAX))) as u64).saturating_sub(self.target_start_nanos.load(Ordering::Acquire));
+        let elapsed_sec = elapsed_nanos as f64 / 1_000_000_000.0;
         if elapsed_sec > 0.05 {
             let fps = (count as f64) / elapsed_sec;
-            let fixed = (fps * 65536.0) as u64;
+            let fixed = (fps * 65536.0).min(u64::MAX as f64) as u64;
             self.fps_fixed.store(fixed, Ordering::Release);
         }
     }
@@ -98,6 +112,17 @@ impl JobProgress {
     pub fn current_fps(&self) -> f64 {
         let fixed = self.fps_fixed.load(Ordering::Acquire);
         (fixed as f64) / 65536.0
+    }
+
+    /// Estimated seconds remaining in the current target, or `None` before a usable rate exists.
+    pub fn eta_seconds(&self) -> Option<u64> {
+        let remaining = self.total_frames().saturating_sub(self.processed_frames());
+        let fps = self.current_fps();
+        if fps <= 0.0 || !fps.is_finite() {
+            return None;
+        }
+        let seconds = (remaining as f64 / fps).ceil();
+        Some(seconds.min(u64::MAX as f64) as u64)
     }
 
     /// Signals cancellation of the running encoding job.
@@ -170,6 +195,27 @@ mod tests {
         }
         assert_eq!(progress.target_index(), 1);
         assert_eq!(last, 100.0);
+    }
+
+    #[test]
+    fn eta_uses_the_current_target_rate_and_resets_between_targets() {
+        let progress = JobProgress::new(100);
+        let start = Instant::now();
+        progress.set_target_count(2);
+        progress.begin_target_at(0, start);
+        progress.set_total_frames(100);
+        assert_eq!(progress.eta_seconds(), None);
+        std::thread::sleep(Duration::from_millis(60));
+        for _ in 0..10 {
+            progress.advance_frame(start);
+        }
+        let eta = progress.eta_seconds().unwrap();
+        assert!((1..=2).contains(&eta), "unexpected ETA: {eta}");
+        assert!(progress.current_fps() > 0.0);
+
+        progress.begin_target_at(1, start);
+        assert_eq!(progress.current_fps(), 0.0);
+        assert_eq!(progress.eta_seconds(), None);
     }
 
     #[test]

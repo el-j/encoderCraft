@@ -27,6 +27,8 @@ pub struct VideoStreamInfo {
     pub color_space: ColorSpaceTag,
     pub frame_rate: Rational64,
     pub bit_depth: u8,
+    #[serde(default)]
+    pub bitrate: Option<u64>,
     pub duration_seconds: Option<f64>,
 }
 
@@ -237,6 +239,7 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
                 color_space: ColorSpaceTag::SRGB,
                 frame_rate: Rational64::FPS_24,
                 bit_depth: img.bit_depth,
+                bitrate: None,
                 duration_seconds: None,
             });
         }
@@ -250,6 +253,7 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
                 color_space: ColorSpaceTag::SRGB,
                 frame_rate: Rational64::FPS_24,
                 bit_depth: img.bit_depth,
+                bitrate: None,
                 duration_seconds: None,
             });
         }
@@ -263,12 +267,13 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
                 color_space: ColorSpaceTag::SRGB,
                 frame_rate: Rational64::FPS_24,
                 bit_depth: img.bit_depth,
+                bitrate: None,
                 duration_seconds: None,
             });
         }
         ContainerKind::IsoBmffMp4 | ContainerKind::QuickTimeMov => {
             if let Ok(mp4) = craft_media::isobmff::open(bytes) {
-                populate_isobmff_streams(&mp4, &mut duration_seconds, &mut video_streams, &mut audio_streams);
+                populate_isobmff_streams(&mp4, &mut duration_seconds, &mut video_streams, &mut audio_streams)?;
             } else {
                 metadata.insert("container".into(), container.display_name().into());
             }
@@ -301,7 +306,7 @@ fn populate_isobmff_streams(
     duration_seconds: &mut Option<f64>,
     video_streams: &mut Vec<VideoStreamInfo>,
     audio_streams: &mut Vec<AudioStreamInfo>,
-) {
+) -> Result<(), EncoderError> {
     let dur = if mp4.timescale > 0 { Some(mp4.duration as f64 / mp4.timescale as f64) } else { None };
     *duration_seconds = dur;
 
@@ -313,14 +318,16 @@ fn populate_isobmff_streams(
                 {
                     let codec_str = track.codec().map(|c| c.name().to_string()).unwrap_or_else(|| "video".to_string());
                     let bit_depth = if v.depth > 0 { (v.depth & 0xFF) as u8 } else { 8 };
+                    let frame_rate = frame_rate_from_timing(track.timescale, track.samples.iter().map(|sample| sample.duration))?;
                     video_streams.push(VideoStreamInfo {
                         stream_index: idx,
                         codec_name: codec_str,
                         dimensions: dims,
                         pixel_format: PixelFormat::Yuv420p,
                         color_space: ColorSpaceTag::REC709,
-                        frame_rate: Rational64::new(track.timescale as i64, 1).unwrap_or(Rational64::FPS_24),
+                        frame_rate,
                         bit_depth,
+                        bitrate: None,
                         duration_seconds: dur,
                     });
                 }
@@ -349,6 +356,36 @@ fn populate_isobmff_streams(
             _ => {}
         }
     }
+    Ok(())
+}
+
+fn frame_rate_from_timing(timescale: u32, sample_durations: impl IntoIterator<Item = u32>) -> Result<Rational64, EncoderError> {
+    let (sample_count, duration_ticks) = sample_durations
+        .into_iter()
+        .try_fold((0u128, 0u128), |(count, total), duration| Some((count.checked_add(1)?, total.checked_add(u128::from(duration))?)))
+        .ok_or_else(|| EncoderError::InvalidContainer("ISO BMFF video sample timing overflowed".into()))?;
+    if timescale == 0 || sample_count == 0 || duration_ticks == 0 {
+        return Err(EncoderError::InvalidContainer("ISO BMFF video track has no usable frame timing".into()));
+    }
+
+    let numerator = u128::from(timescale)
+        .checked_mul(sample_count)
+        .ok_or_else(|| EncoderError::InvalidContainer("ISO BMFF frame-rate numerator overflowed".into()))?;
+    let divisor = gcd_u128(numerator, duration_ticks);
+    let numerator =
+        i64::try_from(numerator / divisor).map_err(|_| EncoderError::InvalidContainer("ISO BMFF frame rate exceeds supported range".into()))?;
+    let denominator =
+        i64::try_from(duration_ticks / divisor).map_err(|_| EncoderError::InvalidContainer("ISO BMFF frame rate exceeds supported range".into()))?;
+    Rational64::new(numerator, denominator).map_err(|error| EncoderError::InvalidContainer(format!("invalid ISO BMFF frame rate: {error}")))
+}
+
+fn gcd_u128(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        let remainder = a % b;
+        a = b;
+        b = remainder;
+    }
+    a
 }
 
 fn populate_matroska_streams(
@@ -374,6 +411,7 @@ fn populate_matroska_streams(
                         color_space: ColorSpaceTag::REC709,
                         frame_rate: Rational64::FPS_24,
                         bit_depth: 8,
+                        bitrate: None,
                         duration_seconds: dur,
                     });
                 }
@@ -441,6 +479,7 @@ fn populate_mxf_streams(
                         color_space: ColorSpaceTag::REC709,
                         frame_rate: fps,
                         bit_depth,
+                        bitrate: None,
                         duration_seconds: dur,
                     });
                 }
@@ -514,7 +553,7 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
             && let Ok(file_handle) = File::open(path)
             && let Ok(mp4) = craft_media::isobmff::open(file_handle)
         {
-            populate_isobmff_streams(&mp4, &mut info.duration_seconds, &mut info.video_streams, &mut info.audio_streams);
+            populate_isobmff_streams(&mp4, &mut info.duration_seconds, &mut info.video_streams, &mut info.audio_streams)?;
         } else if matches!(info.container, ContainerKind::Matroska | ContainerKind::WebM)
             && let Ok(file_handle) = File::open(path)
             && let Ok(mkv) = craft_media::matroska::open(file_handle)
@@ -534,6 +573,19 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isobmff_frame_rate_uses_sample_timing() {
+        assert_eq!(frame_rate_from_timing(30_000, vec![1_001; 15]).unwrap(), Rational64::new(30_000, 1_001).unwrap());
+        assert_eq!(frame_rate_from_timing(30_000, vec![1_001, 2_002]).unwrap(), Rational64::new(20_000, 1_001).unwrap());
+    }
+
+    #[test]
+    fn isobmff_frame_rate_rejects_missing_or_invalid_timing() {
+        assert!(matches!(frame_rate_from_timing(0, vec![1]), Err(EncoderError::InvalidContainer(_))));
+        assert!(matches!(frame_rate_from_timing(1, Vec::new()), Err(EncoderError::InvalidContainer(_))));
+        assert!(matches!(frame_rate_from_timing(1, vec![0]), Err(EncoderError::InvalidContainer(_))));
+    }
 
     #[test]
     fn test_probe_wav_bytes() {

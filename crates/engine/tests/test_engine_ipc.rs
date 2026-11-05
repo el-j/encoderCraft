@@ -29,6 +29,20 @@ fn test_ipc_handler_ping_and_version() {
 }
 
 #[test]
+fn ipc_exposes_the_shared_command_registry() {
+    let queue_mgr = Arc::new(QueueManager::new_in_memory());
+    let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
+    let handler = EngineIpcHandler::new(queue_mgr, preset_registry);
+
+    let list = handler.handle(&IpcRequest::new(20, "command.list", json!({})));
+    let commands = list.result.unwrap();
+    assert!(commands.as_array().is_some_and(|items| items.iter().any(|item| item.get("id").and_then(|id| id.as_str()) == Some("queue.select_all"))));
+
+    let execute = handler.handle(&IpcRequest::new(21, "command.execute", json!({ "commandId": "queue.select_all", "params": {} })));
+    assert_eq!(execute.result.unwrap().get("jobIds").and_then(serde_json::Value::as_array).map(Vec::len), Some(0));
+}
+
+#[test]
 fn test_ipc_handler_queue_workflow() {
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
     let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));

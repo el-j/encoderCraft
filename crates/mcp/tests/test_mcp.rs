@@ -37,6 +37,7 @@ fn test_mcp_handshake_and_tools() {
     let list_resp: Value = serde_json::from_str(&server.process_message(&list_req.to_string()).unwrap()).unwrap();
     let tools = list_resp.get("result").unwrap().get("tools").and_then(Value::as_array).unwrap();
     assert!(tools.len() >= 4);
+    assert!(tools.iter().any(|tool| tool.get("name").and_then(Value::as_str) == Some("encodercraft_execute_command")));
 
     // 3. Call encodercraft_list_presets
     let call_req = json!({
@@ -50,6 +51,37 @@ fn test_mcp_handshake_and_tools() {
     });
     let call_resp: Value = serde_json::from_str(&server.process_message(&call_req.to_string()).unwrap()).unwrap();
     assert!(call_resp.get("result").unwrap().get("content").is_some());
+
+    let command_list = json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "encodercraft_list_commands",
+            "arguments": {}
+        }
+    });
+    let command_list_resp: Value = serde_json::from_str(&server.process_message(&command_list.to_string()).unwrap()).unwrap();
+    let command_list_text = command_list_resp["result"]["content"][0]["text"].as_str().unwrap();
+    let command_list_value: Value = serde_json::from_str(command_list_text).unwrap();
+    assert!(command_list_value["commands"].as_array().unwrap().iter().any(|item| item["id"] == "queue.select_all"));
+
+    let command_execute = json!({
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "encodercraft_execute_command",
+            "arguments": {
+                "command_id": "queue.select_all",
+                "params": {}
+            }
+        }
+    });
+    let command_execute_resp: Value = serde_json::from_str(&server.process_message(&command_execute.to_string()).unwrap()).unwrap();
+    let command_execute_text = command_execute_resp["result"]["content"][0]["text"].as_str().unwrap();
+    let command_execute_value: Value = serde_json::from_str(command_execute_text).unwrap();
+    assert_eq!(command_execute_value["jobIds"].as_array().map(Vec::len), Some(0));
 
     // 4. Call encodercraft_submit_transcode
     let transcode_req = json!({

@@ -12,7 +12,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
         // 1. Match Source - Adaptive High Bitrate
         EncodingPreset {
             name: "Match Source - High Bitrate".into(),
-            description: "Matches source dimensions, frame rate, and channels with high-quality H.264 video and AAC audio".into(),
+            description: "Matches source dimensions, frame rate, and bitrate; uses HEVC for high-bit-depth sources and AAC audio".into(),
             category: PresetCategory::Web,
             container: ContainerType::IsoBmffMp4,
             video: Some(PresetVideoSettings {
@@ -21,19 +21,20 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 height: MatchSourceOr::MatchSource,
                 frame_rate: MatchSourceOr::MatchSource,
                 scale_mode: ScaleMode::Fit,
-                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
+                pixel_format: MatchSourceOr::MatchSource,
                 target_bitrate_kbps: 12000,
                 keyframe_interval: 48,
                 profile: None,
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: true,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
                 sample_rate: MatchSourceOr::MatchSource,
                 layout: MatchSourceOr::MatchSource,
-                bitrate_kbps: Some(320),
+                bitrate_kbps: Some(256),
                 target_lufs: Some(-14.0),
             }),
         },
@@ -56,6 +57,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -84,6 +86,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -112,6 +115,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -140,6 +144,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -168,6 +173,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -196,6 +202,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -224,6 +231,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: None,
         },
@@ -246,6 +254,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 bframes: None,
                 rate_mode: Default::default(),
                 color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),

@@ -59,6 +59,7 @@ authors = ["el-j", "ArtCraft Contributors"]
 
 [workspace.dependencies]
 # Upstream shared ArtCraft libraries (official storytold/craft-libs repository)
+craft-atomic = { git = "https://github.com/storytold/craft-libs" }
 craft-media = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["isobmff", "matroska", "bitstream"] }
 
 # Official ArtCraft repositories (mapped to canonical `craft-*` crate names; transitions to craft-libs once #504 & #439-#448 merge)
@@ -69,11 +70,13 @@ craft-vp8 = { package = "filmcraft-vp8", git = "https://github.com/storytold/fil
 craft-hevcenc = { package = "effectcraft-hevcenc", git = "https://github.com/storytold/effectcraft" }
 craft-av1enc = { package = "effectcraft-av1enc", git = "https://github.com/storytold/effectcraft" }
 craft-vp9enc = { package = "effectcraft-vp9enc", git = "https://github.com/storytold/effectcraft" }
+effectcraft-opusenc = { git = "https://github.com/storytold/effectcraft", rev = "7870b5916ae0749d497d880989683bf2946d6c8b" }
 filmcraft-scopes = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-captions = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-time = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-media = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-color = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft" }
 photocraft-codecs = { git = "https://github.com/storytold/photocraft" }
 filmcraft-mxf = { git = "https://github.com/storytold/filmcraft" }
@@ -81,6 +84,8 @@ craft-aac = { package = "filmcraft-aac", git = "https://github.com/storytold/fil
 craft-opus = { package = "filmcraft-opus", git = "https://github.com/storytold/filmcraft" }
 craft-audio-io = { package = "soundcraft-audio-io", git = "https://github.com/storytold/soundcraft" }
 craft-dsp = { package = "soundcraft-dsp", git = "https://github.com/storytold/soundcraft" }
+craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", features = ["serde", "native-windows"] }
+craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", features = ["egui"] }
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }
@@ -134,6 +139,18 @@ dbg_macro = "warn"
 todo = "warn"
 type_complexity = "allow"
 
+[patch.crates-io]
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+
 [profile.dev.package."*"]
 opt-level = 2
 debug = false
@@ -147,4 +164,3 @@ opt-level = 3
 lto = "thin"
 codegen-units = 16
 debug = 0
-

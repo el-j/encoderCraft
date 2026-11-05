@@ -30,6 +30,20 @@ fn test_app_creation_and_frame_render() {
 }
 
 #[test]
+fn app_renders_at_minimum_size_and_high_dpi_scales() {
+    let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+    let ctx = egui::Context::default();
+    for (width, height, ppp) in [(720.0, 480.0, 1.0), (1120.0, 720.0, 1.5), (1440.0, 960.0, 2.0)] {
+        ctx.set_pixels_per_point(ppp);
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height))), ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        assert!(!output.shapes.is_empty(), "expected visible UI shapes at {width}x{height}, {ppp}x");
+        output.textures_delta.clear();
+    }
+}
+
+#[test]
 fn commands_and_workspaces_drive_the_frame() {
     use encodercraft_ui_egui::commands::AppCommand;
     use encodercraft_ui_egui::workspace::{PREVIEW_WORKSPACE, PanelId};
@@ -50,7 +64,11 @@ fn commands_and_workspaces_drive_the_frame() {
     }
     app.workspaces.activate(PREVIEW_WORKSPACE);
     if let Some(w) = app.workspaces.current_mut() {
-        w.panels.retain(|p| *p == PanelId::Encoding);
+        for panel in PanelId::ALL {
+            if panel != PanelId::Encoding {
+                w.set_visible(panel, false).unwrap();
+            }
+        }
     }
     egui::__run_test_ui(|ui| app.render(ui));
 }
@@ -59,15 +77,19 @@ fn commands_and_workspaces_drive_the_frame() {
 fn workspace_file_is_written_and_restored() {
     let dir = tempfile::tempdir().unwrap();
     let path = encodercraft_ui_egui::settings::workspaces_path(dir.path());
+    let shortcuts_path = encodercraft_ui_egui::settings::shortcuts_path(dir.path());
     assert!(!path.exists());
     let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
         .with_config_dir(dir.path().to_path_buf());
     app.workspaces.save_as("Mine").unwrap();
+    app.workspace_shortcuts.set_binding(encodercraft_ui_egui::settings::WorkspaceShortcutAction::FocusNext, "Alt+F8".into()).unwrap();
     egui::__run_test_ui(|ui| app.render(ui));
     let again = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
         .with_config_dir(dir.path().to_path_buf());
     assert_eq!(again.workspaces.active, "Mine");
+    assert_eq!(again.workspace_shortcuts.focus_next, "Alt+F8");
     assert!(path.exists());
+    assert!(shortcuts_path.exists());
 }
 
 #[test]
@@ -81,14 +103,18 @@ fn preferences_watch_folders_and_favorites_persist() {
     let mut app = new_app();
     app.prefs_state.prefs.max_parallel_jobs = 5;
     app.prefs_state.prefs.play_completion_sound = false;
+    app.run_command(encodercraft_ui_egui::commands::AppCommand::ThemeLight);
+    assert_eq!(app.prefs_state.prefs.theme, "Light");
     app.watch_state.configs.push(encodercraft_watch::WatchFolderConfig::new("w1", "/in".into(), "/out".into(), "P"));
     app.media_state.model.toggle_favorite(dir.path());
     egui::__run_test_ui(|ui| app.render(ui));
     assert!(settings::preferences_path(dir.path()).exists());
+    assert_eq!(encodercraft_engine::load_preferences(&settings::preferences_path(dir.path())).unwrap().theme, "Light");
 
     let again = new_app();
     assert_eq!(again.prefs_state.prefs.max_parallel_jobs, 5);
     assert!(!again.prefs_state.prefs.play_completion_sound);
+    assert_eq!(again.brightness, Brightness::Light);
     assert_eq!(again.watch_state.configs.len(), 1);
     assert_eq!(again.media_state.model.favorites, vec![dir.path().to_path_buf()]);
     assert_eq!(again.queue_mgr.parallelism(), 5);

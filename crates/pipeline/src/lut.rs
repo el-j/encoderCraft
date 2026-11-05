@@ -190,6 +190,21 @@ impl Lut3D {
                 }
                 Ok(())
             }
+            PixelFormat::RgbaF32 => {
+                let data = frame.data_mut();
+                for pixel in data.as_chunks_mut::<16>().0 {
+                    let channels = pixel.as_chunks_mut::<4>().0;
+                    if channels.len() != 4 {
+                        return Err(EncoderError::Internal("RGBAF32 LUT received an incomplete pixel".into()));
+                    }
+                    let values = [f32::from_ne_bytes(channels[0]), f32::from_ne_bytes(channels[1]), f32::from_ne_bytes(channels[2])];
+                    let [r, g, b] = self.evaluate(values[0], values[1], values[2]);
+                    for (channel, value) in channels.iter_mut().zip([r, g, b]) {
+                        *channel = value.to_ne_bytes();
+                    }
+                }
+                Ok(())
+            }
             _ => Err(EncoderError::UnsupportedCodec(format!("3D LUT application not supported for pixel format {:?}", frame.format))),
         }
     }

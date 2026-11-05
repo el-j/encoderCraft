@@ -13,9 +13,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use encodercraft_color::{ColorSpaceTag, PixelFormat};
-use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError, Rational64, VideoFrame};
+use encodercraft_color::{ColorPrimaries, ColorRange, ColorSpaceTag, MatrixCoefficients, PixelFormat, TransferFunction};
+use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError, MAX_FRAME_BUFFER_BYTES, Rational64, VideoFrame};
 use encodercraft_geom::Dimensions;
+use filmcraft_color::{ColorInfo, Matrix, Primaries, Range, Transfer};
+use filmcraft_frame::PixelData;
 use filmcraft_media::reader::FileReader;
 use filmcraft_media::sequence::{FrameLoader, ImageSequenceSource, Numbered, sequence_frames};
 use filmcraft_media::{FrameRequest, MediaError, MediaKind, SharedReader, SharedSource};
@@ -46,8 +48,63 @@ pub struct VideoProbe {
     pub frame_rate: Rational64,
     pub codec: String,
     pub pixel_format: String,
+    pub bit_depth: u8,
+    pub color_space: ColorSpaceTag,
     pub has_alpha: bool,
     pub bitrate: Option<u64>,
+}
+
+fn color_space_tag(color: ColorInfo) -> ColorSpaceTag {
+    let primaries = match color.primaries {
+        Primaries::Bt2020 => ColorPrimaries::Bt2020,
+        Primaries::P3D65 => ColorPrimaries::DisplayP3,
+        Primaries::Bt601_625 | Primaries::Bt601_525 => ColorPrimaries::Bt601,
+        Primaries::Bt709 => ColorPrimaries::Bt709,
+    };
+    let transfer = match color.transfer {
+        Transfer::Srgb => TransferFunction::Srgb,
+        Transfer::Linear => TransferFunction::Linear,
+        Transfer::Pq => TransferFunction::PerceptualQuantizer,
+        Transfer::Hlg => TransferFunction::HybridLogGamma,
+        Transfer::Bt709 => TransferFunction::Bt709,
+    };
+    let matrix = match color.matrix {
+        Matrix::Bt601 => MatrixCoefficients::Smpte170M,
+        Matrix::Bt2020Ncl => MatrixCoefficients::Bt2020NonConstant,
+        Matrix::Bt709 => MatrixCoefficients::Bt709,
+    };
+    ColorSpaceTag { primaries, transfer, matrix, range: if color.range == Range::Full { ColorRange::Full } else { ColorRange::Limited } }
+}
+
+fn bit_depth_from_pixel_format(pixel_format: &str) -> u8 {
+    let format = pixel_format.to_ascii_lowercase();
+    if format.contains("p010") || format.contains("p012") {
+        return if format.contains("p012") { 12 } else { 10 };
+    }
+    [16, 12, 10, 9]
+        .into_iter()
+        .find(|depth| format.contains(&format!("{depth}-bit")) || format.contains(&format!("{depth}bit")) || format.contains(&format!("p{depth}")))
+        .unwrap_or(8)
+}
+
+fn pixel_format_from_source(source: &str, bit_depth: u8) -> Option<PixelFormat> {
+    let format = source.to_ascii_lowercase();
+    if format.contains("444") {
+        return (bit_depth >= 12).then_some(PixelFormat::Yuv444p12);
+    }
+    if format.contains("422") {
+        return Some(if bit_depth >= 10 { PixelFormat::Yuv422p10 } else { PixelFormat::Yuv422p });
+    }
+    if format.contains("420") || format.contains("nv12") || format.contains("p010") || format.contains("p012") {
+        return Some(if bit_depth >= 10 { PixelFormat::Yuv420p10 } else { PixelFormat::Yuv420p });
+    }
+    if format.contains("rgba") {
+        return Some(PixelFormat::Rgba8);
+    }
+    if format.contains("rgb") {
+        return Some(PixelFormat::Rgb8);
+    }
+    None
 }
 
 /// Description of the first audio stream of a source.
@@ -268,6 +325,8 @@ impl MediaReader {
                 frame_rate: Rational64 { num: 1, den: 1 },
                 codec: ext.to_ascii_uppercase(),
                 pixel_format: format!("{:?}", image.layout()),
+                bit_depth: 8,
+                color_space: ColorSpaceTag::SRGB,
                 has_alpha: matches!(image.layout(), photocraft_codecs::ChannelLayout::Rgba | photocraft_codecs::ChannelLayout::GrayA),
                 bitrate: None,
             }),
@@ -293,6 +352,8 @@ impl MediaReader {
                 frame_rate: fps_of(v.frame_rate.num, v.frame_rate.den),
                 codec: v.codec.clone(),
                 pixel_format: v.pixel_format.clone(),
+                bit_depth: bit_depth_from_pixel_format(&v.pixel_format),
+                color_space: color_space_tag(v.color),
                 has_alpha: v.has_alpha,
                 bitrate: v.bitrate,
             }),
@@ -325,7 +386,7 @@ impl MediaReader {
         if frames.is_finite() && frames >= 1.0 { frames as u64 } else { 1 }
     }
 
-    /// Decodes the frame with the given index as straight-alpha RGBA8.
+    /// Decodes the frame with the given index as straight-alpha RGBA8, or RGBAF32 for high-depth video.
     pub fn frame_at_index(&self, index: u64) -> Result<VideoFrame, EncoderError> {
         guard("decode", || self.frame_at_index_unguarded(index))
     }
@@ -351,17 +412,72 @@ impl MediaReader {
             );
         }
         let source = self.source.as_ref().ok_or_else(|| EncoderError::Internal("reader has no source".into()))?;
+        if video.bit_depth > 8 {
+            let dims = Dimensions { width: video.width, height: video.height };
+            let frame_bytes = PixelFormat::RgbaF32.required_buffer_size(dims)?;
+            if frame_bytes > MAX_FRAME_BUFFER_BYTES {
+                return Err(EncoderError::InvalidJobSpec(format!(
+                    "high-bit-depth frame buffer ({} MiB) exceeds the {} MiB limit",
+                    frame_bytes / (1024 * 1024),
+                    MAX_FRAME_BUFFER_BYTES / (1024 * 1024)
+                )));
+            }
+        }
         let time = if matches!(self.probe.kind, SourceKind::Still) {
             Tick::ZERO
         } else {
             Tick::from_rational(idx, video.frame_rate.den, video.frame_rate.num)
         };
         let decoded = source.video_frame(FrameRequest::full(time)).map_err(|e| map_media_error(&self.probe.name, e))?;
-        let rgba = decoded.to_rgba8();
         let dims = Dimensions { width: decoded.width, height: decoded.height };
-        let color = if matches!(self.probe.kind, SourceKind::Still) { ColorSpaceTag::SRGB } else { ColorSpaceTag::REC709 };
+        let color = if matches!(self.probe.kind, SourceKind::Still) {
+            ColorSpaceTag::SRGB
+        } else {
+            match &decoded.data {
+                filmcraft_frame::PixelData::Rgba8(_)
+                | filmcraft_frame::PixelData::RgbaF32(_)
+                | filmcraft_frame::PixelData::Yuv8 { .. }
+                | filmcraft_frame::PixelData::Yuv16 { .. } => color_space_tag(decoded.color),
+            }
+        };
         let timebase = Rational64 { num: video.frame_rate.den, den: video.frame_rate.num };
-        VideoFrame::from_raw_bytes(dims, PixelFormat::Rgba8, color, idx, 1, timebase, rgba)
+        if matches!(&decoded.data, PixelData::Yuv16 { bits, .. } if *bits > 8) || matches!(&decoded.data, PixelData::RgbaF32(_)) {
+            let frame_bytes = PixelFormat::RgbaF32.required_buffer_size(dims)?;
+            let mut rgba = decoded.to_linear_f32();
+            let expected_samples = (dims.width as usize)
+                .checked_mul(dims.height as usize)
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| EncoderError::InvalidJobSpec("high-bit-depth frame dimensions overflow".into()))?;
+            if rgba.len() != expected_samples {
+                return Err(EncoderError::InvalidContainer(format!(
+                    "decoded high-bit-depth frame has {} samples; expected {expected_samples}",
+                    rgba.len()
+                )));
+            }
+            for pixel in rgba.as_chunks_mut::<4>().0 {
+                let alpha = pixel[3];
+                if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                    return Err(EncoderError::InvalidContainer("decoded high-bit-depth frame contains invalid alpha".into()));
+                }
+                if alpha > 0.0 {
+                    for channel in &mut pixel[..3] {
+                        *channel = filmcraft_color::from_linear(*channel / alpha, decoded.color.transfer);
+                    }
+                } else {
+                    pixel[..3].fill(0.0);
+                }
+            }
+            let mut data = Vec::with_capacity(frame_bytes);
+            for value in rgba {
+                if !value.is_finite() {
+                    return Err(EncoderError::InvalidContainer("decoded high-bit-depth frame contains a non-finite sample".into()));
+                }
+                data.extend_from_slice(&value.to_ne_bytes());
+            }
+            VideoFrame::from_raw_bytes(dims, PixelFormat::RgbaF32, color, idx, 1, timebase, data)
+        } else {
+            VideoFrame::from_raw_bytes(dims, PixelFormat::Rgba8, color, idx, 1, timebase, decoded.to_rgba8())
+        }
     }
 
     /// Decodes `frames` samples per channel starting at `start` (in samples at `sample_rate`).
@@ -477,16 +593,23 @@ pub fn probe_media_info(path: &Path) -> Result<encodercraft_demux::MediaInfo, En
             Some(stream) => {
                 stream.dimensions = dimensions;
                 stream.frame_rate = v.frame_rate;
+                stream.color_space = v.color_space;
+                stream.bit_depth = v.bit_depth;
+                stream.bitrate = v.bitrate;
+                if let Some(pixel_format) = pixel_format_from_source(&v.pixel_format, v.bit_depth) {
+                    stream.pixel_format = pixel_format;
+                }
                 stream.duration_seconds = Some(probe.duration_seconds);
             }
             None => info.video_streams.push(VideoStreamInfo {
                 stream_index: 0,
                 codec_name: v.codec.clone(),
                 dimensions,
-                pixel_format: PixelFormat::Yuv420p,
-                color_space: ColorSpaceTag::REC709,
+                pixel_format: pixel_format_from_source(&v.pixel_format, v.bit_depth).unwrap_or(PixelFormat::Yuv420p),
+                color_space: v.color_space,
                 frame_rate: v.frame_rate,
-                bit_depth: 8,
+                bit_depth: v.bit_depth,
+                bitrate: v.bitrate,
                 duration_seconds: Some(probe.duration_seconds),
             }),
         }

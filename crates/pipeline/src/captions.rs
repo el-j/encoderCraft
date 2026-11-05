@@ -6,7 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-use encodercraft_color::PixelFormat;
 use encodercraft_core::{CaptionExportFormat, EncoderError, VideoFrame};
 use filmcraft_captions::{Cue, Document, Format, WriteOptions};
 use filmcraft_time::{TICKS_PER_SECOND, Tick};
@@ -148,9 +147,7 @@ impl Default for CaptionBurner {
 impl CaptionBurner {
     /// Renders any active subtitle cues at `pts_seconds` directly onto the given frame.
     pub fn burn(&self, frame: &mut VideoFrame, track: &CaptionTrack, pts_seconds: f64) -> Result<(), EncoderError> {
-        if frame.format != PixelFormat::Rgb8 && frame.format != PixelFormat::Rgba8 {
-            return Err(EncoderError::UnsupportedCodec(format!("caption burn-in requires RGB8 or RGBA8 frame (got {:?})", frame.format)));
-        }
+        crate::overlay::rgb_layout(frame.format)?;
 
         // Find active cues at current presentation timestamp
         let mut active_text = String::new();
@@ -196,11 +193,12 @@ impl CaptionBurner {
         let box_x = fw.saturating_sub(box_width) / 2;
         let box_y = fh.saturating_sub(box_height + self.margin_bottom);
 
-        let channels = if frame.format == PixelFormat::Rgb8 { 3 } else { 4 };
+        let (channels, bytes_per_component) = crate::overlay::rgb_layout(frame.format)?;
         let bg_alpha = self.bg_opacity.clamp(0.0, 1.0);
         let text_alpha = self.text_opacity.clamp(0.0, 1.0);
 
-        let data = frame.data_mut();
+        let (data, stride) = frame.plane_mut(0)?;
+        let bytes_per_pixel = channels * bytes_per_component;
 
         // 1. Draw rounded/pill dark background
         for by in 0..box_height {
@@ -213,12 +211,8 @@ impl CaptionBurner {
                 if px >= fw {
                     break;
                 }
-                let idx = (py * fw + px) * channels;
-                if let Some(pixel) = data.get_mut(idx..idx + 3) {
-                    for ch in pixel.iter_mut() {
-                        *ch = ((*ch as f32) * (1.0 - bg_alpha)).clamp(0.0, 255.0) as u8;
-                    }
-                }
+                let idx = py * stride + px * bytes_per_pixel;
+                crate::overlay::blend_rgb(data, idx, bytes_per_component, [0.0; 3], bg_alpha)?;
             }
         }
 
@@ -244,13 +238,8 @@ impl CaptionBurner {
                                 if px >= fw {
                                     continue;
                                 }
-                                let idx = (py * fw + px) * channels;
-                                if let Some(pixel) = data.get_mut(idx..idx + 3) {
-                                    for channel in pixel.iter_mut() {
-                                        let original = *channel as f32;
-                                        *channel = (original * (1.0 - text_alpha) + 255.0 * text_alpha).clamp(0.0, 255.0) as u8;
-                                    }
-                                }
+                                let idx = py * stride + px * bytes_per_pixel;
+                                crate::overlay::blend_rgb(data, idx, bytes_per_component, [1.0; 3], text_alpha)?;
                             }
                         }
                     }
@@ -265,7 +254,7 @@ impl CaptionBurner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use encodercraft_color::ColorSpaceTag;
+    use encodercraft_color::{ColorSpaceTag, PixelFormat};
     use encodercraft_geom::Dimensions;
     use tempfile::tempdir;
 

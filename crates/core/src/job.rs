@@ -6,8 +6,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::audio::ChannelLayout;
 use crate::error::EncoderError;
 use crate::timecode::Rational64;
+use encodercraft_color::PixelFormat;
 
 /// Execution priority of a queued job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -625,6 +627,56 @@ impl ColorTag {
     }
 }
 
+/// Clockwise rotation applied to the picture before scaling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Rotation {
+    #[default]
+    None,
+    Cw90,
+    Cw180,
+    Cw270,
+}
+
+impl Rotation {
+    /// Whether the rotation swaps width and height.
+    pub fn swaps_axes(self) -> bool {
+        matches!(self, Self::Cw90 | Self::Cw270)
+    }
+}
+
+/// How frames are chosen when the output frame rate differs from the source's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FrameRateMode {
+    /// Drop or repeat the nearest source frame.
+    #[default]
+    Nearest,
+    /// Blend the two source frames around each output instant.
+    Blend,
+}
+
+/// Spatial resampling filter used when frame dimensions change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScalingFilter {
+    /// Two-tap linear interpolation.
+    #[default]
+    Bilinear,
+    /// Cubic convolution with a Catmull-Rom kernel.
+    Bicubic,
+    /// Windowed-sinc reconstruction with a three-lobe Lanczos kernel.
+    Lanczos3,
+}
+
+/// Geometry and timing conversion of the video stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VideoTransform {
+    pub scale_mode: encodercraft_geom::ScaleMode,
+    pub scaling_filter: ScalingFilter,
+    pub rotation: Rotation,
+    pub frame_rate_mode: FrameRateMode,
+}
+
 /// Video encoder settings of a target; every field falls back to a codec default when `None`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -639,6 +691,18 @@ pub struct VideoEncodeSettings {
     pub bframes: Option<u8>,
     pub rate_mode: RateMode,
     pub color: Option<ColorTag>,
+    /// Requested encoded pixel format; `None` selects the codec/container default.
+    #[serde(default)]
+    pub pixel_format: Option<PixelFormat>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AudioEncodeSettings {
+    pub codec: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub layout: Option<ChannelLayout>,
+    pub bitrate_kbps: Option<u32>,
 }
 
 /// Output target specifications.
@@ -686,6 +750,11 @@ pub struct OutputTarget {
     /// Codec, GOP, B-frame, rate-control and colour settings of the video stream.
     #[serde(default)]
     pub video: VideoEncodeSettings,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioEncodeSettings>,
+    /// Scale mode, rotation and frame-rate conversion.
+    #[serde(default)]
+    pub transform: VideoTransform,
 }
 
 impl Default for OutputTarget {
@@ -712,6 +781,8 @@ impl Default for OutputTarget {
             image_quality: None,
             selection: SourceSelection::default(),
             video: VideoEncodeSettings::default(),
+            audio: None,
+            transform: VideoTransform::default(),
         }
     }
 }
@@ -800,6 +871,7 @@ mod tests {
         };
 
         let json = spec.to_json().unwrap();
+        assert!(!json.contains("\"audio\""), "targets without audio settings should preserve the legacy JSON shape");
         let deserialized = CraftJobSpec::from_json(&json).unwrap();
         assert_eq!(spec, deserialized);
     }

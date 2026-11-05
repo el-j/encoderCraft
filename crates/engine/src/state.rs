@@ -8,13 +8,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use encodercraft_core::{CraftJobSpec, EncoderError, JobStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::conversion::ConversionDecision;
+
 /// Snapshot of an individual job in the encoding queue.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueuedJob {
     pub spec: CraftJobSpec,
+    /// One-time lossy-conversion approvals scoped to this queued job.
+    #[serde(default)]
+    pub conversion_approvals: Vec<crate::conversion::LossyConversionKey>,
     pub status: JobStatus,
     pub progress_percent: f64,
     pub current_fps: f64,
+    #[serde(default)]
+    pub target_eta_seconds: Option<u64>,
     pub added_at_unix_ms: u64,
     pub completed_at_unix_ms: Option<u64>,
     pub error_message: Option<String>,
@@ -27,9 +34,11 @@ impl QueuedJob {
 
         Self {
             spec,
+            conversion_approvals: Vec::new(),
             status: JobStatus::Queued,
             progress_percent: 0.0,
             current_fps: 0.0,
+            target_eta_seconds: None,
             added_at_unix_ms: now,
             completed_at_unix_ms: None,
             error_message: None,
@@ -71,6 +80,9 @@ pub struct AppPreferences {
     /// Shut the computer down after the queue has finished, after a cancellable countdown.
     #[serde(default)]
     pub auto_shutdown: bool,
+    /// Persistent allow/deny decisions for exact source-to-target lossy video conversions.
+    #[serde(default)]
+    pub lossy_conversion_decisions: Vec<ConversionDecision>,
 }
 
 fn default_true() -> bool {
@@ -86,7 +98,26 @@ fn default_theme() -> String {
 }
 
 /// Current preferences file schema.
-pub const PREFERENCES_SCHEMA_VERSION: u32 = 1;
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 2;
+
+/// The shared per-user configuration directory used by the desktop app and headless clients.
+pub fn default_config_dir() -> Option<std::path::PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))
+    }?;
+    Some(base.join("encoderCraft"))
+}
+
+/// Shared preferences file used for saved conversion decisions.
+pub fn default_preferences_path() -> Option<std::path::PathBuf> {
+    default_config_dir().map(|dir| dir.join("preferences.json"))
+}
 
 impl AppPreferences {
     /// Upgrades older files and clamps values a hand-edited file could set out of range.
@@ -95,7 +126,7 @@ impl AppPreferences {
             self.schema_version = PREFERENCES_SCHEMA_VERSION;
         }
         self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 8);
-        if self.theme != "Dark" && self.theme != "High Contrast" {
+        if !matches!(self.theme.as_str(), "Dark" | "Medium Dark" | "Light" | "High Contrast") {
             self.theme = default_theme();
         }
     }
@@ -112,6 +143,7 @@ impl Default for AppPreferences {
             max_parallel_jobs: 2,
             theme: "Dark".into(),
             auto_shutdown: false,
+            lossy_conversion_decisions: Vec::new(),
         }
     }
 }
@@ -215,6 +247,7 @@ mod prefs_tests {
         assert_eq!(p.max_parallel_jobs, 8);
         assert_eq!(p.theme, "Dark");
         assert!(!p.auto_start_queue);
+        assert!(p.lossy_conversion_decisions.is_empty());
     }
 
     #[test]
@@ -226,6 +259,16 @@ mod prefs_tests {
         assert_eq!(load_preferences(&path).unwrap(), p);
         std::fs::write(&path, "{broken").unwrap();
         assert!(load_preferences(&path).is_err());
+    }
+
+    #[test]
+    fn preference_migration_preserves_supported_themes() {
+        for theme in ["Dark", "Medium Dark", "Light", "High Contrast"] {
+            let mut preferences = AppPreferences { theme: theme.into(), schema_version: 1, ..AppPreferences::default() };
+            preferences.migrate();
+            assert_eq!(preferences.theme, theme);
+            assert_eq!(preferences.schema_version, PREFERENCES_SCHEMA_VERSION);
+        }
     }
 }
 

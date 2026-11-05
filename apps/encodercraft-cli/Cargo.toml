@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 encodercraft-core = { workspace = true }
+encodercraft-geom = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-pipeline = { workspace = true }
 encodercraft-presets = { workspace = true }
@@ -29,3 +30,5 @@ env_logger = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 encodercraft-spatial-io = { workspace = true }
+encodercraft-color = { workspace = true }
+encodercraft-image-codecs = { workspace = true }

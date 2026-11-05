@@ -15,6 +15,25 @@ fn test_cli_help_and_presets() {
     assert!(stdout.contains("probe"));
     assert!(stdout.contains("presets"));
     assert!(stdout.contains("watch"));
+    assert!(stdout.contains("--rotate"));
+    assert!(stdout.contains("--frame-memory-mib"));
+    assert!(stdout.contains("--normalization-memory-mib"));
+}
+
+#[test]
+fn test_cli_rejects_invalid_transform_and_memory_options() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    for (flag, value, message) in [
+        ("--rotate", "45", "invalid rotation"),
+        ("--scale-mode", "warp", "invalid scale mode"),
+        ("--frame-rate-mode", "interpolate", "invalid frame-rate mode"),
+        ("--frame-memory-mib", "0", "between 1 and 65536 MiB"),
+        ("--normalization-memory-mib", "many", "positive integer MiB"),
+    ] {
+        let output = Command::new(bin).args(["encode", "input.mov", flag, value]).output().expect("run cli");
+        assert!(!output.status.success(), "{flag} {value} unexpectedly succeeded");
+        assert!(String::from_utf8_lossy(&output.stderr).contains(message), "{flag} {value}: {}", String::from_utf8_lossy(&output.stderr));
+    }
 
     // 2. presets output
     let p_output = Command::new(bin).arg("presets").output().expect("failed to run presets");
@@ -90,6 +109,29 @@ fn test_cli_encode_reports_failure_with_nonzero_exit() {
     let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
     let output = Command::new(bin).args(["encode", "/nonexistent/in.mov"]).output().expect("failed to run encode");
     assert!(!output.status.success());
+}
+
+#[test]
+fn test_cli_unattended_lossy_conversion_requires_a_saved_allow() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../crates/source/tests/fixtures/prores.mov");
+    let output_path = dir.path().join("unapproved.mp4");
+    let output = Command::new(bin)
+        .args(["encode"])
+        .arg(&source)
+        .args(["-p", "YouTube 1080p Full HD", "-o"])
+        .arg(&output_path)
+        .env("XDG_CONFIG_HOME", dir.path().join("xdg"))
+        .env("HOME", dir.path().join("home"))
+        .env("APPDATA", dir.path().join("appdata"))
+        .output()
+        .expect("run encode");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Lossy conversion requires approval"), "{stderr}");
+    assert!(!output_path.exists());
 }
 
 /// Converts a known picture to every still preset through the CLI and checks the result by
