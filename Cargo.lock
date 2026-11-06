@@ -3710,7 +3710,7 @@ dependencies = [
 [[package]]
 name = "photocraft-codecs"
 version = "0.20.1"
-source = "git+https://github.com/storytold/photocraft#98bcbfab9005b4915b3143b4daed91df365db107"
+source = "git+https://github.com/storytold/photocraft#8f7d916ba5ce6d94f2334d47bb23b84ff6cbaff2"
 dependencies = [
  "craft-jpeg",
  "exr",
