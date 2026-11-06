@@ -129,6 +129,7 @@ pub fn render_prefs_dialog(
                     *on_theme_change = Some("High Contrast".into());
                 }
             });
+            ui.checkbox(&mut state.prefs.system_title_bar, "Use the system title bar (applies after restart)");
         });
 
         ui.add_space(8.0);

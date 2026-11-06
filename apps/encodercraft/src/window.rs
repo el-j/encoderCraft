@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use encodercraft_ui_egui::titlebar::TitleBarStyle;
 use serde::{Deserialize, Serialize};
 
 /// The first window's size, in points.
@@ -72,8 +73,29 @@ pub fn default_fits(monitor: [f32; 2]) -> bool {
     (0..2).all(|i| DEFAULT_SIZE[i] <= monitor[i] - SCREEN_ROOM[i])
 }
 
+/// Who draws the window frame: macOS keeps the traffic lights over an integrated strip, Windows
+/// draws its own caption buttons, and Linux follows the shared `craft-window` probe (an app-drawn
+/// frame only where the compositor leaves it to the app). `system_title_bar` or the
+/// `ENCODERCRAFT_TITLEBAR` override force the OS frame / the app's.
+pub fn title_bar_style(system_title_bar: bool) -> TitleBarStyle {
+    let choice = craft_window::Choice::probe(craft_window::Prefix::new("ENCODERCRAFT"));
+    decide_title_bar(cfg!(target_os = "macos"), cfg!(windows), matches!(choice.frame(), craft_window::Frame::App(_)), system_title_bar)
+}
+
+fn decide_title_bar(macos: bool, windows: bool, app_frame: bool, system_title_bar: bool) -> TitleBarStyle {
+    if system_title_bar {
+        TitleBarStyle::System
+    } else if macos {
+        TitleBarStyle::Integrated
+    } else if windows || app_frame {
+        TitleBarStyle::Custom
+    } else {
+        TitleBarStyle::System
+    }
+}
+
 /// Window options for [`eframe::run_native`].
-pub fn native_options(saved: Option<WindowGeometry>) -> eframe::NativeOptions {
+pub fn native_options(saved: Option<WindowGeometry>, title_bar: TitleBarStyle) -> eframe::NativeOptions {
     let geometry = saved.unwrap_or(WindowGeometry { pos: None, size: DEFAULT_SIZE, maximized: false });
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("encoderCraft")
@@ -81,7 +103,11 @@ pub fn native_options(saved: Option<WindowGeometry>) -> eframe::NativeOptions {
         .with_inner_size(geometry.size)
         .with_min_inner_size(MIN_SIZE)
         .with_maximized(geometry.maximized)
-        .with_drag_and_drop(true);
+        .with_drag_and_drop(true)
+        .with_decorations(!title_bar.is_custom());
+    if title_bar == TitleBarStyle::Integrated {
+        viewport = viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);
+    }
     if let Some(pos) = geometry.pos {
         viewport = viewport.with_position(pos);
     }
@@ -173,6 +199,18 @@ mod tests {
         assert!(default_fits([2560.0, 1440.0]));
         assert!(!default_fits([1440.0, 900.0]));
         assert!(!default_fits([1366.0, 768.0]));
+    }
+
+    #[test]
+    fn title_bar_decision_table() {
+        // macOS: integrated strip; Windows: own caption; Linux: only when the compositor says so.
+        assert_eq!(decide_title_bar(true, false, false, false), TitleBarStyle::Integrated);
+        assert_eq!(decide_title_bar(false, true, false, false), TitleBarStyle::Custom);
+        assert_eq!(decide_title_bar(false, false, true, false), TitleBarStyle::Custom);
+        assert_eq!(decide_title_bar(false, false, false, false), TitleBarStyle::System);
+        // The preference always forces the OS frame.
+        assert_eq!(decide_title_bar(true, false, false, true), TitleBarStyle::System);
+        assert_eq!(decide_title_bar(false, true, true, true), TitleBarStyle::System);
     }
 
     #[test]

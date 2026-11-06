@@ -80,6 +80,9 @@ pub struct AppPreferences {
     /// Shut the computer down after the queue has finished, after a cancellable countdown.
     #[serde(default)]
     pub auto_shutdown: bool,
+    /// Use the operating system's title bar instead of the app-drawn one (takes effect on restart).
+    #[serde(default)]
+    pub system_title_bar: bool,
     /// Persistent allow/deny decisions for exact source-to-target lossy video conversions.
     #[serde(default)]
     pub lossy_conversion_decisions: Vec<ConversionDecision>,
@@ -143,6 +146,7 @@ impl Default for AppPreferences {
             max_parallel_jobs: 2,
             theme: "Dark".into(),
             auto_shutdown: false,
+            system_title_bar: false,
             lossy_conversion_decisions: Vec::new(),
         }
     }

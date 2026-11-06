@@ -27,6 +27,7 @@ pub mod queue_panel;
 pub mod scope_view;
 pub mod settings;
 pub mod theme;
+pub mod titlebar;
 pub mod transport;
 pub mod watch_panel;
 pub mod workspace;
