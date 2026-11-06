@@ -135,8 +135,7 @@ impl QueueManager {
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .and_then(|path| path.parent().map(PathBuf::from))
-            .or_else(crate::state::default_config_dir)
-            .ok_or_else(|| EncoderError::Io("no per-user configuration directory is available".into()))?;
+            .ok_or_else(|| EncoderError::Io("no configuration directory is set for this queue".into()))?;
         Ok(config_dir.join(name))
     }
 
@@ -162,7 +161,7 @@ impl QueueManager {
     }
 
     fn preferences_file_path(&self) -> Option<PathBuf> {
-        self.conversion_preferences_path.lock().unwrap_or_else(PoisonError::into_inner).clone().or_else(crate::state::default_preferences_path)
+        self.conversion_preferences_path.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     /// Lossy conversions in `spec` that do not yet have a saved allow/deny decision.
@@ -1048,6 +1047,21 @@ mod tests {
     use encodercraft_core::{ClientInfo, ContainerType, OutputTarget, SourceDescriptor, StartPolicy};
     use std::path::PathBuf;
     use tempfile::tempdir;
+
+    /// A queue with no configured directory must not fall back to the user's own preferences: tests
+    /// and embedders that forget the path used to overwrite the real theme and settings.
+    #[test]
+    fn unconfigured_queue_never_touches_user_preferences() {
+        let queue = QueueManager::new_in_memory();
+        assert_eq!(queue.app_preferences().unwrap(), AppPreferences::default());
+        assert!(queue.save_app_preferences(AppPreferences { theme: "High Contrast".into(), ..AppPreferences::default() }).is_err());
+        assert!(queue.config_file_path("favorites.json").is_err());
+
+        let dir = tempdir().unwrap();
+        queue.set_conversion_preferences_path(dir.path().join("preferences.json"));
+        queue.save_app_preferences(AppPreferences { theme: "Light".into(), ..AppPreferences::default() }).unwrap();
+        assert_eq!(queue.app_preferences().unwrap().theme, "Light");
+    }
 
     fn make_test_spec(id: &str, priority: JobPriority) -> CraftJobSpec {
         CraftJobSpec {
