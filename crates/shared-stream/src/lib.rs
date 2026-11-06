@@ -232,15 +232,30 @@ impl SharedStreamPacket {
     }
 }
 
+/// Attempts to open or create a service; the two ends of a stream create it concurrently and the
+/// loser of that race (seen on Windows) gets a transient failure that a retry resolves.
+const SERVICE_OPEN_ATTEMPTS: u32 = 20;
+
 fn stream_service(node: &Node<IpcService>, name: &ServiceName) -> Result<SharedService, EncoderError> {
-    node.service_builder(name)
-        .publish_subscribe::<[u8]>()
-        .enable_safe_overflow(false)
-        .subscriber_max_borrowed_samples(STREAM_BUFFER_DEPTH)
-        .history_size(0)
-        .subscriber_max_buffer_size(STREAM_BUFFER_DEPTH)
-        .open_or_create()
-        .map_err(|error| io_error("open shared stream service", error))
+    let mut attempt = 1;
+    loop {
+        let opened = node
+            .service_builder(name)
+            .publish_subscribe::<[u8]>()
+            .enable_safe_overflow(false)
+            .subscriber_max_borrowed_samples(STREAM_BUFFER_DEPTH)
+            .history_size(0)
+            .subscriber_max_buffer_size(STREAM_BUFFER_DEPTH)
+            .open_or_create();
+        match opened {
+            Ok(service) => return Ok(service),
+            Err(error) if attempt >= SERVICE_OPEN_ATTEMPTS => return Err(io_error("open shared stream service", error)),
+            Err(_) => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+    }
 }
 
 fn encode_header(header: SharedStreamHeader, bytes: &mut [u8]) -> Result<(), EncoderError> {
