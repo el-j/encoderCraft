@@ -973,6 +973,9 @@ dependencies = [
  "encodercraft-ui-egui",
  "env_logger",
  "log",
+ "serde",
+ "serde_json",
+ "tempfile",
  "winresource",
 ]
 
