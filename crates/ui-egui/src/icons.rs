@@ -28,6 +28,7 @@ pub enum Icon {
     Folder,
     Gear,
     Search,
+    Filter,
     Preset,
     Link,
     Clock,
@@ -35,6 +36,7 @@ pub enum Icon {
     Close,
     Sliders,
     ListView,
+    GridView,
     Info,
 }
 
@@ -226,6 +228,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.circle(6.8, 6.8, 4.3);
             pen.line(&[(10.0, 10.0), (14.0, 14.0)]);
         }
+        Filter => pen.fill(&[(2.0, 3.0), (14.0, 3.0), (9.0, 8.0), (9.0, 13.0), (7.0, 14.0), (7.0, 8.0)]),
         Preset => {
             pen.fill(&[(9.0, 2.0), (4.5, 8.5), (8.0, 8.5), (7.0, 14.0), (11.5, 7.5), (8.0, 7.5)]);
         }
@@ -254,6 +257,13 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             for y in [4.0, 8.0, 12.0] {
                 pen.dot(3.0, y, 0.8);
                 pen.line(&[(5.5, y), (14.0, y)]);
+            }
+        }
+        GridView => {
+            for y in [2.5, 7.0, 11.5] {
+                for x in [2.5, 7.0, 11.5] {
+                    pen.rect(x, y, x + 2.0, y + 2.0);
+                }
             }
         }
         Info => {
@@ -417,6 +427,7 @@ mod tests {
         Icon::Folder,
         Icon::Gear,
         Icon::Search,
+        Icon::Filter,
         Icon::Preset,
         Icon::Link,
         Icon::Clock,
@@ -424,6 +435,7 @@ mod tests {
         Icon::Close,
         Icon::Sliders,
         Icon::ListView,
+        Icon::GridView,
         Icon::Info,
     ];
 

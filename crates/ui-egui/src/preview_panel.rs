@@ -613,6 +613,7 @@ mod tests {
 
         let queue = Arc::new(QueueManager::new_in_memory());
         let mut app = crate::app::EncoderCraftApp::new(queue.clone(), Arc::new(Mutex::new(PresetRegistry::default())));
+        assert!(app.workspaces.activate(crate::workspace::PREVIEW_WORKSPACE));
         app.add_file_job(source);
         let queued = queue.list_jobs();
         assert_eq!(queued.len(), 1);
