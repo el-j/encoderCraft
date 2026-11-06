@@ -207,6 +207,7 @@ pub fn call_tool(
             };
 
             let assigned = queue_mgr.submit_job(spec)?;
+            start_worker_unless_stopped(queue_mgr);
             Ok(json!({
                 "jobId": assigned,
                 "status": "Queued",
@@ -289,6 +290,7 @@ pub fn call_tool(
                 };
 
                 let assigned = queue_mgr.submit_job(spec)?;
+                start_worker_unless_stopped(queue_mgr);
                 queued_ids.push(assigned);
             }
 
@@ -366,5 +368,12 @@ pub fn call_tool(
             Ok(json!({ "modifiedCount": count }))
         }
         _ => Err(EncoderError::InvalidJobSpec(format!("unknown MCP tool '{name}'"))),
+    }
+}
+
+/// Headless servers have no GUI to start the queue, so submitting a job drains it unless the user stopped it.
+fn start_worker_unless_stopped(queue_mgr: &Arc<QueueManager>) {
+    if !queue_mgr.is_stop_requested() {
+        queue_mgr.start_background_worker();
     }
 }

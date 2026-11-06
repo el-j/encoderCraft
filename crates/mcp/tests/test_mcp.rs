@@ -160,3 +160,68 @@ fn test_mcp_handshake_and_tools() {
     let manage_resp: Value = serde_json::from_str(&server.process_message(&manage_req.to_string()).unwrap()).unwrap();
     assert!(manage_resp.get("result").unwrap().get("content").is_some());
 }
+
+/// One second of 48 kHz mono 16-bit silence-free tone as a canonical WAV file.
+fn write_test_wav(path: &std::path::Path) {
+    let samples: Vec<i16> = (0..48_000_i32).map(|n| ((n % 100) as i16 - 50) * 200).collect();
+    let data_len = (samples.len() * 2) as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000_u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000_u32.to_le_bytes());
+    bytes.extend_from_slice(&2_u16.to_le_bytes());
+    bytes.extend_from_slice(&16_u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    std::fs::write(path, bytes).unwrap();
+}
+
+fn call_tool(server: &McpServer, id: u64, name: &str, arguments: Value) -> Value {
+    let req = json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name, "arguments": arguments } });
+    let resp: Value = serde_json::from_str(&server.process_message(&req.to_string()).unwrap()).unwrap();
+    serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+/// A headless MCP client must be able to submit a job and have it run without any GUI starting the queue.
+#[test]
+fn submitted_job_runs_to_completion_without_a_gui() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("tone.wav");
+    let output = dir.path().join("tone.flac");
+    write_test_wav(&source);
+
+    let queue_mgr = Arc::new(QueueManager::new_in_memory());
+    let server = McpServer::new(queue_mgr, Arc::new(Mutex::new(PresetRegistry::default())));
+
+    let submitted = call_tool(
+        &server,
+        1,
+        "encodercraft_submit_transcode",
+        json!({
+            "source_path": source.to_string_lossy(),
+            "preset_name": "Lossless FLAC Master (24-bit 48kHz)",
+            "output_path": output.to_string_lossy(),
+        }),
+    );
+    let job_id = submitted["jobId"].as_str().unwrap().to_string();
+
+    let mut status = String::new();
+    for _ in 0..240 {
+        let job = call_tool(&server, 2, "encodercraft_get_queue_status", json!({ "job_id": job_id }));
+        status = job["status"].as_str().unwrap_or_default().to_string();
+        if matches!(status.as_str(), "Completed" | "Failed" | "Cancelled") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    assert_eq!(status, "Completed");
+    assert!(std::fs::metadata(&output).map(|m| m.len() > 0).unwrap_or(false));
+}
