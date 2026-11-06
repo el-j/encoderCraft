@@ -67,7 +67,8 @@ fn main() -> Result<(), eframe::Error> {
         IpcServer::bind_unix(&sock_file, handler).ok()
     };
 
-    let options = window::native_options(window::load(&config_dir));
+    let title_bar = window::title_bar_style(prefs.system_title_bar);
+    let options = window::native_options(window::load(&config_dir), title_bar);
     let saved_window = window::load(&config_dir);
     let window_config_dir = config_dir.clone();
 
@@ -78,7 +79,7 @@ fn main() -> Result<(), eframe::Error> {
             options,
             Box::new(|_cc| {
                 let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
-                app = app.with_config_dir(config_dir);
+                app = app.with_config_dir(config_dir).with_title_bar(title_bar);
                 app.prefs_state.prefs = prefs;
 
                 Ok(Box::new(DesktopApp {

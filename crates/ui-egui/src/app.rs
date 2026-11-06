@@ -25,6 +25,8 @@ pub struct EncoderCraftApp {
     pub preset_registry: Arc<Mutex<PresetRegistry>>,
     engine_commands: encodercraft_engine::cmd::CommandRegistry,
     pub tokens: Tokens,
+    /// Who draws the window frame; the menu bar doubles as the title bar.
+    pub title_bar: crate::titlebar::TitleBarStyle,
     pub brightness: Brightness,
     pub queue_state: QueuePanelState,
     pub shutdown_watch: crate::queue_footer::ShutdownWatch,
@@ -76,6 +78,7 @@ impl EncoderCraftApp {
             engine_commands: encodercraft_engine::cmd::CommandRegistry::with_preset_registry(Arc::clone(&preset_registry)),
             preset_registry,
             tokens,
+            title_bar: crate::titlebar::TitleBarStyle::default(),
             brightness,
             queue_state: QueuePanelState::default(),
             shutdown_watch: crate::queue_footer::ShutdownWatch::default(),
@@ -107,6 +110,12 @@ impl EncoderCraftApp {
             pending_conversion_approvals: VecDeque::new(),
             conversion_status: None,
         }
+    }
+
+    /// Chooses who draws the window frame (decided by the desktop runner before the window opens).
+    pub fn with_title_bar(mut self, style: crate::titlebar::TitleBarStyle) -> Self {
+        self.title_bar = style;
+        self
     }
 
     /// Loads preferences, watch folders and workspaces from `dir` and keeps saving changes back.
@@ -843,8 +852,15 @@ impl EncoderCraftApp {
         }
 
         // 1. Top Application Menu Bar
-        egui::Panel::top("top_menu_bar").show(ui, |ui| {
-            ui.horizontal(|ui| {
+        let style = self.title_bar;
+        let bar_frame = egui::Frame::new().fill(self.tokens.bg_panel).inner_margin(egui::Margin::symmetric(4, 0));
+        let bar = egui::Panel::top("top_menu_bar").frame(bar_frame).exact_size(crate::titlebar::BAR_HEIGHT).show(ui, |ui| {
+            let bar_rect = ui.max_rect().expand2(egui::vec2(4.0, 0.0));
+            if style.drags_window() {
+                crate::titlebar::drag_area(ui, bar_rect);
+            }
+            ui.horizontal_centered(|ui| {
+                ui.add_space(style.leading_inset());
                 let state = self.command_state();
                 let mut chosen = None;
                 for menu in crate::commands::Menu::ALL {
@@ -872,7 +888,12 @@ impl EncoderCraftApp {
                     self.run_command(cmd);
                 }
             });
+            bar_rect
         });
+        if style.is_custom() {
+            crate::titlebar::caption_buttons(ui, &self.tokens, bar.inner);
+            crate::titlebar::resize_zones(ui);
+        }
 
         // 2. Bottom Status Bar
         egui::Panel::bottom("status_bar").show(ui, |ui| {

@@ -120,3 +120,18 @@ fn preferences_watch_folders_and_favorites_persist() {
     assert_eq!(again.media_state.model.favorites, vec![dir.path().to_path_buf()]);
     assert_eq!(again.queue_mgr.parallelism(), 5);
 }
+
+#[test]
+fn app_renders_with_every_title_bar_style() {
+    use encodercraft_ui_egui::titlebar::TitleBarStyle;
+    for style in [TitleBarStyle::System, TitleBarStyle::Custom, TitleBarStyle::Integrated] {
+        let mut app =
+            EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default()))).with_title_bar(style);
+        let ctx = egui::Context::default();
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1120.0, 720.0))), ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        assert!(!output.shapes.is_empty(), "{style:?} rendered nothing");
+        output.textures_delta.clear();
+    }
+}
