@@ -41,6 +41,12 @@ pub struct EncoderCraftApp {
     pub log_state: LogDialogState,
     pub prefs_state: PrefsDialogState,
     pub show_about_dialog: bool,
+    /// The workspace name dialog (Save As or Rename) is open for this command.
+    name_dialog: Option<crate::commands::AppCommand>,
+    /// Set by the Quit command; the next frame asks the window to close.
+    quit_requested: bool,
+    #[cfg(target_os = "macos")]
+    native_menu: Option<craft_menu::NativeMenu>,
     pub last_watch_tick: Option<std::time::Instant>,
     pub was_worker_running: bool,
     pub completion_banner_timer: Option<std::time::Instant>,
@@ -93,6 +99,10 @@ impl EncoderCraftApp {
             log_state: LogDialogState::default(),
             prefs_state: PrefsDialogState::default(),
             show_about_dialog: false,
+            name_dialog: None,
+            quit_requested: false,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
             last_watch_tick: None,
             was_worker_running: false,
             completion_banner_timer: None,
@@ -333,6 +343,11 @@ impl EncoderCraftApp {
             | C::ResetWorkspace
             | C::DeleteWorkspace
             | C::SetPanelVisibility => self.run_workspace_app_command(cmd),
+            C::Quit => {
+                if self.dispatch_app_command_value(C::Quit, serde_json::json!({})).is_some() {
+                    self.quit_requested = true;
+                }
+            }
             C::About => {
                 if self.dispatch_app_command_value(C::About, serde_json::json!({})).is_some() {
                     self.show_about_dialog = true;
@@ -679,6 +694,135 @@ impl EncoderCraftApp {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    fn menu_inputs_snapshot(&self) -> (Vec<String>, String, Vec<(crate::workspace::PanelId, bool)>) {
+        let panels = crate::workspace::PanelId::ALL
+            .into_iter()
+            .map(|panel| (panel, self.workspaces.current().is_some_and(|ws| ws.is_visible(panel))))
+            .collect();
+        (self.workspaces.names(), self.workspaces.active.clone(), panels)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn menu_bar(&self) -> craft_menu::MenuBar {
+        let state = self.command_state();
+        let (workspaces, active_workspace, panels) = self.menu_inputs_snapshot();
+        crate::menus::build_bar(&crate::menus::MenuInputs {
+            shortcuts: &self.workspace_shortcuts,
+            state: &state,
+            workspaces,
+            active_workspace,
+            panels,
+        })
+    }
+
+    /// Installs the native macOS menu bar; returns whether it is in use. Call once from the
+    /// eframe creator, on the main thread.
+    #[cfg(target_os = "macos")]
+    pub fn install_native_menu(&mut self, ctx: &egui::Context) -> bool {
+        let layout = craft_menu::mac_layout(&self.menu_bar(), &craft_menu::LayoutOptions::new("encoderCraft"));
+        self.native_menu = craft_menu::mac::install_with(ctx, &layout.bar, craft_menu::mac::MacOptions::default().window_list(false));
+        self.native_menu.is_some()
+    }
+
+    /// Whether the menus live in the system menu bar instead of the window.
+    pub fn has_native_menu(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.native_menu.is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// Feeds native menu key equivalents to egui; call from `eframe::App::raw_input_hook`.
+    pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = self.native_menu.as_mut() {
+            menu.raw_input(raw);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = raw;
+    }
+
+    /// Runs the native menu's clicks and brings its items up to date.
+    fn drive_native_menu(&mut self, ctx: &egui::Context) {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(mut menu) = self.native_menu.take() else { return };
+            menu.set_gate(craft_menu::Gate {
+                modal: self.prefs_state.is_open
+                    || self.show_about_dialog
+                    || self.name_dialog.is_some()
+                    || !self.pending_conversion_approvals.is_empty(),
+                recording_shortcut: self.prefs_state.shortcut_recording.is_some(),
+                text_editing: ctx.egui_wants_keyboard_input(),
+            });
+            for click in menu.take_clicks(ctx) {
+                match crate::menus::resolve(&click) {
+                    Some(action) => self.run_menu_action(action),
+                    None => log::warn!("unknown menu command {}", click.id),
+                }
+            }
+            let layout = craft_menu::mac_layout(&self.menu_bar(), &craft_menu::LayoutOptions::new("encoderCraft"));
+            menu.sync(layout);
+            self.native_menu = Some(menu);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = ctx;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn run_menu_action(&mut self, action: crate::menus::MenuAction) {
+        use crate::commands::AppCommand as C;
+        use crate::menus::MenuAction;
+        match action {
+            MenuAction::Command(command @ (C::SaveWorkspaceAs | C::RenameWorkspace)) => {
+                self.workspace_name_input.clear();
+                self.name_dialog = Some(command);
+            }
+            MenuAction::Command(command) => {
+                if command.enabled(&self.command_state()) {
+                    self.run_command(command);
+                }
+            }
+            MenuAction::ActivateWorkspace(name) => {
+                if self.dispatch_workspace_mutation(C::ActivateWorkspace, serde_json::json!({ "name": name })).is_some() {
+                    self.reconcile_focused_panel();
+                }
+            }
+            MenuAction::TogglePanel(panel) => {
+                let visible = self.workspaces.current().is_some_and(|ws| !ws.is_visible(panel));
+                self.set_workspace_panel_visible(panel, visible);
+            }
+        }
+    }
+
+    fn render_name_dialog(&mut self, ctx: &egui::Context) {
+        let Some(command) = self.name_dialog else { return };
+        let title = if command == crate::commands::AppCommand::RenameWorkspace { "Rename Workspace" } else { "Save Workspace As" };
+        let mut confirmed = false;
+        let mut cancelled = false;
+        egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO).show(ctx, |ui| {
+            let edit = ui.add(egui::TextEdit::singleline(&mut self.workspace_name_input).hint_text("Workspace name"));
+            edit.request_focus();
+            let entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            ui.horizontal(|ui| {
+                confirmed = (ui.add_enabled(!self.workspace_name_input.trim().is_empty(), egui::Button::new("OK")).clicked()) || entered;
+                cancelled = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+            });
+        });
+        if confirmed && !self.workspace_name_input.trim().is_empty() {
+            self.name_dialog = None;
+            self.run_workspace_app_command(command);
+        } else if cancelled {
+            self.name_dialog = None;
+            self.workspace_name_input.clear();
+        }
+    }
+
     fn window_menu(&mut self, ui: &mut Ui) {
         ui.separator();
         ui.label(RichText::new("Workspace").small().color(self.tokens.text_dim));
@@ -851,13 +995,26 @@ impl EncoderCraftApp {
             }
         }
 
+        self.drive_native_menu(&ctx);
+        if std::mem::take(&mut self.quit_requested) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        self.render_name_dialog(&ctx);
+
         // 1. Top Application Menu Bar
         let style = self.title_bar;
+        let native = self.has_native_menu();
         let bar_frame = egui::Frame::new().fill(self.tokens.bg_panel).inner_margin(egui::Margin::symmetric(4, 0));
         let bar = egui::Panel::top("top_menu_bar").frame(bar_frame).exact_size(crate::titlebar::BAR_HEIGHT).show(ui, |ui| {
             let bar_rect = ui.max_rect().expand2(egui::vec2(4.0, 0.0));
             if style.drags_window() {
                 crate::titlebar::drag_area(ui, bar_rect);
+            }
+            if native {
+                // The menus are in the system menu bar; the strip only names the window.
+                let title = format!("encoderCraft — {}", self.workspaces.active);
+                ui.centered_and_justified(|ui| ui.label(RichText::new(title).small().color(self.tokens.text_dim)));
+                return bar_rect;
             }
             ui.horizontal_centered(|ui| {
                 ui.add_space(style.leading_inset());

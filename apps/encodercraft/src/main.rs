@@ -29,6 +29,10 @@ impl eframe::App for DesktopApp {
         self.window.update(ui.ctx(), Some(&self.config_dir));
         self.inner.render(ui);
     }
+
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.inner.raw_input_hook(raw_input);
+    }
 }
 
 fn main() -> Result<(), eframe::Error> {
@@ -38,10 +42,14 @@ fn main() -> Result<(), eframe::Error> {
         return Ok(());
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("encodercraft {}\n\nUSAGE: encodercraft [--version] [--help]\n\nFor headless use see encodercraft-cli.", env!("CARGO_PKG_VERSION"));
+        println!(
+            "encodercraft {}\n\nUSAGE: encodercraft [--version] [--help] [--in-window-menus]\n\n  --in-window-menus  keep the menus in the window on macOS instead of the system menu bar\n\nFor headless use see encodercraft-cli.",
+            env!("CARGO_PKG_VERSION")
+        );
         return Ok(());
     }
     env_logger::init();
+    let in_window_menus = args.iter().any(|a| a == "--in-window-menus");
 
     let app_dir = get_app_data_dir();
     let _ = std::fs::create_dir_all(&app_dir);
@@ -77,10 +85,16 @@ fn main() -> Result<(), eframe::Error> {
         eframe::run_native(
             "encoderCraft",
             options,
-            Box::new(|_cc| {
+            Box::new(|cc| {
                 let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
                 app = app.with_config_dir(config_dir).with_title_bar(title_bar);
                 app.prefs_state.prefs = prefs;
+                #[cfg(target_os = "macos")]
+                if !in_window_menus {
+                    app.install_native_menu(&cc.egui_ctx);
+                }
+                #[cfg(not(target_os = "macos"))]
+                let _ = (&cc, in_window_menus);
 
                 Ok(Box::new(DesktopApp {
                     inner: app,

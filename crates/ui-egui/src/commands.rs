@@ -50,6 +50,7 @@ pub enum AppCommand {
     AddStitched,
     AddWatchFolder,
     ShowLog,
+    Quit,
     Preferences,
     ThemeDark,
     ThemeLight,
@@ -202,6 +203,7 @@ pub const COMMANDS: &[CommandInfo] = &[
     info(AppCommand::AddStitched, "file.add_stitched", "Add Stitched Sequence...", Menu::File, None, Some("queue.prepare_stitch_sources"), false),
     info(AppCommand::AddWatchFolder, "file.add_watch_folder", "Add Watch Folder...", Menu::File, None, Some("watch.add_folder"), false),
     info(AppCommand::ShowLog, "file.show_log", "Show Encoding Log...", Menu::File, Some(Shortcut::cmd(Key::L)), Some("queue.log"), true),
+    info(AppCommand::Quit, "file.quit", "Quit encoderCraft", Menu::File, Some(Shortcut::cmd(Key::Q)), Some("app.quit"), true),
     info(AppCommand::Preferences, "edit.preferences", "Preferences...", Menu::Edit, Some(Shortcut::cmd(Key::Comma)), Some("preferences.get"), false),
     info(AppCommand::ThemeDark, "edit.theme_dark", "Theme: Dark", Menu::Edit, None, Some("preferences.set_theme"), true),
     info(AppCommand::ThemeLight, "edit.theme_light", "Theme: Light", Menu::Edit, None, Some("preferences.set_theme"), false),
@@ -373,7 +375,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const ALL: [AppCommand; 46] = [
+    const ALL: [AppCommand; 47] = [
         AppCommand::AddMedia,
         AppCommand::AddMediaItem,
         AppCommand::OpenMediaFolder,
@@ -386,6 +388,7 @@ mod tests {
         AppCommand::AddStitched,
         AppCommand::AddWatchFolder,
         AppCommand::ShowLog,
+        AppCommand::Quit,
         AppCommand::Preferences,
         AppCommand::ThemeDark,
         AppCommand::ThemeLight,
