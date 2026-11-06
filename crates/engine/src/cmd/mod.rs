@@ -51,10 +51,10 @@ impl Default for CommandRegistry {
 }
 
 impl CommandRegistry {
-    /// Builds the registry with all built-in commands registered.
+    /// Builds the registry with all built-in commands registered and an in-memory preset store, so it
+    /// never reads or writes the user's own presets. Applications use [`Self::with_preset_registry`].
     pub fn new() -> Self {
-        let preset_dir = crate::state::default_config_dir().map(|dir| dir.join("presets"));
-        Self::with_preset_registry(Arc::new(Mutex::new(encodercraft_presets::PresetRegistry::new(preset_dir))))
+        Self::with_preset_registry(Arc::new(Mutex::new(encodercraft_presets::PresetRegistry::new(None))))
     }
 
     /// Builds the registry with the preset store shared by the GUI and headless clients.

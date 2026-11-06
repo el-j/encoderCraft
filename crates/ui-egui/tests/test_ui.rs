@@ -49,7 +49,8 @@ fn commands_and_workspaces_drive_the_frame() {
     use encodercraft_ui_egui::workspace::{PREVIEW_WORKSPACE, PanelId};
 
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
-    let mut app = EncoderCraftApp::new(queue_mgr, Arc::new(Mutex::new(PresetRegistry::default())));
+    let config = tempfile::tempdir().unwrap();
+    let mut app = EncoderCraftApp::new(queue_mgr, Arc::new(Mutex::new(PresetRegistry::default()))).with_config_dir(config.path().to_path_buf());
 
     app.run_command(AppCommand::ThemeHighContrast);
     assert_eq!(app.brightness, Brightness::HighContrast);
