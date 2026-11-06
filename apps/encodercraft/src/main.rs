@@ -5,6 +5,8 @@
 // Release builds on Windows are GUI programs: no console window behind the app.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
+mod window;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +17,8 @@ use encodercraft_ui_egui::EncoderCraftApp;
 
 struct DesktopApp {
     inner: EncoderCraftApp,
+    window: window::Tracker,
+    config_dir: PathBuf,
     _ipc_tcp: Option<IpcServer>,
     #[cfg(unix)]
     _ipc_unix: Option<IpcServer>,
@@ -22,13 +26,19 @@ struct DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.window.update(ui.ctx(), Some(&self.config_dir));
         self.inner.render(ui);
     }
 }
 
 fn main() -> Result<(), eframe::Error> {
-    if std::env::args().skip(1).any(|a| a == "--version" || a == "-V") {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("encodercraft {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("encodercraft {}\n\nUSAGE: encodercraft [--version] [--help]\n\nFor headless use see encodercraft-cli.", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     env_logger::init();
@@ -57,31 +67,35 @@ fn main() -> Result<(), eframe::Error> {
         IpcServer::bind_unix(&sock_file, handler).ok()
     };
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("encoderCraft")
-            .with_inner_size([1120.0, 720.0])
-            .with_min_inner_size([720.0, 480.0])
-            .with_drag_and_drop(true),
-        ..Default::default()
-    };
+    let options = window::native_options(window::load(&config_dir));
+    let saved_window = window::load(&config_dir);
+    let window_config_dir = config_dir.clone();
 
-    eframe::run_native(
-        "encoderCraft",
-        options,
-        Box::new(|_cc| {
-            let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
-            app = app.with_config_dir(config_dir);
-            app.prefs_state.prefs = prefs;
+    // A panic in platform or GPU code ends the window with an error instead of aborting the process.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eframe::run_native(
+            "encoderCraft",
+            options,
+            Box::new(|_cc| {
+                let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
+                app = app.with_config_dir(config_dir);
+                app.prefs_state.prefs = prefs;
 
-            Ok(Box::new(DesktopApp {
-                inner: app,
-                _ipc_tcp: ipc_tcp,
-                #[cfg(unix)]
-                _ipc_unix: ipc_unix,
-            }))
-        }),
-    )
+                Ok(Box::new(DesktopApp {
+                    inner: app,
+                    window: window::Tracker::new(saved_window),
+                    config_dir: window_config_dir,
+                    _ipc_tcp: ipc_tcp,
+                    #[cfg(unix)]
+                    _ipc_unix: ipc_unix,
+                }))
+            }),
+        )
+    }));
+    outcome.unwrap_or_else(|_| {
+        log::error!("the window stopped after an internal error");
+        Err(eframe::Error::AppCreation("internal error in the window system".into()))
+    })
 }
 
 fn get_app_data_dir() -> PathBuf {
