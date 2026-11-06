@@ -24,6 +24,7 @@ filmcraft-scopes = { workspace = true }
 craft-ui = { workspace = true }
 craft-keymap = { workspace = true }
 craft-window = { workspace = true }
+craft-menu = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
 rfd = { workspace = true }
 serde = { workspace = true }

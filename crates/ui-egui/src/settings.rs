@@ -63,7 +63,7 @@ impl WorkspaceShortcuts {
         Some(Chord::new(Mods { cmd: shortcut.primary, shift: shortcut.shift, alt: shortcut.alt, ..Mods::NONE }, key))
     }
 
-    fn command_chord(&self, command: crate::commands::AppCommand) -> Option<Chord> {
+    pub fn command_chord(&self, command: crate::commands::AppCommand) -> Option<Chord> {
         if let Some(action) = Self::action_for_command(command) {
             return Chord::parse(self.binding(action)).ok();
         }

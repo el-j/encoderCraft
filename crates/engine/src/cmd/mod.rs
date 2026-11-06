@@ -972,6 +972,11 @@ impl CommandRegistry {
             }))
         }));
 
+        // The engine only acknowledges; the window that owns the process closes itself.
+        self.register(CommandSpec::new("app.quit", "Quit encoderCraft", "Asks the running application to quit", |_, _| {
+            Ok(serde_json::json!({ "quit": true }))
+        }));
+
         for (command_id, add_target) in [("queue.prepare_apply_preset", false), ("queue.prepare_add_preset_target", true)] {
             let presets = Arc::clone(&presets);
             self.register(CommandSpec::new(

@@ -15,6 +15,7 @@ pub mod inspector;
 pub mod log_dialog;
 pub mod media_browser;
 pub mod media_model;
+pub mod menus;
 pub mod monitor_geom;
 pub mod output_render;
 pub mod prefs_dialog;
