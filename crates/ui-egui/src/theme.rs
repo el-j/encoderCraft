@@ -48,17 +48,17 @@ impl Tokens {
     pub fn dark() -> Self {
         Self {
             dark: true,
-            bg_app: Color32::from_rgb(24, 24, 26),
-            bg_panel: Color32::from_rgb(32, 32, 35),
-            bg_panel_darker: Color32::from_rgb(20, 20, 22),
-            bg_surface: Color32::from_rgb(42, 42, 46),
-            bg_surface_hover: Color32::from_rgb(52, 52, 58),
-            bg_surface_active: Color32::from_rgb(60, 60, 68),
-            border_subtle: Color32::from_rgb(50, 50, 56),
-            border_strong: Color32::from_rgb(70, 70, 80),
-            text_primary: Color32::from_rgb(240, 240, 245),
-            text_secondary: Color32::from_rgb(180, 180, 190),
-            text_dim: Color32::from_rgb(120, 120, 130),
+            bg_app: Color32::from_rgb(27, 27, 27),
+            bg_panel: Color32::from_rgb(35, 35, 35),
+            bg_panel_darker: Color32::from_rgb(26, 26, 26),
+            bg_surface: Color32::from_rgb(45, 45, 45),
+            bg_surface_hover: Color32::from_rgb(58, 58, 58),
+            bg_surface_active: Color32::from_rgb(68, 68, 68),
+            border_subtle: Color32::from_rgb(56, 56, 56),
+            border_strong: Color32::from_rgb(84, 84, 84),
+            text_primary: Color32::from_rgb(232, 232, 232),
+            text_secondary: Color32::from_rgb(176, 176, 176),
+            text_dim: Color32::from_rgb(128, 128, 128),
             accent_primary: Color32::from_rgb(14, 134, 255),
             accent_hover: Color32::from_rgb(45, 155, 255),
             status_queued: Color32::from_rgb(140, 140, 150),
@@ -181,4 +181,24 @@ pub fn apply_theme(ctx: &egui::Context, tokens: &Tokens) {
         s.spacing.interact_size.y = 20.0;
         s.spacing.menu_margin = egui::Margin::symmetric(6, 4);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dark_theme_is_neutral_grey_without_accent_fills() {
+        let t = Tokens::dark();
+        for c in [t.bg_app, t.bg_panel, t.bg_panel_darker, t.bg_surface, t.border_subtle] {
+            assert!(c.r() == c.g() && c.g() == c.b(), "{c:?} must be neutral grey");
+        }
+        assert!(t.bg_panel_darker.r() > 16 && t.bg_panel.r() < 60);
+        assert_ne!(t.accent_primary, Color32::YELLOW);
+    }
+
+    #[test]
+    fn default_brightness_is_dark() {
+        assert_eq!(Brightness::default(), Brightness::Dark);
+    }
 }

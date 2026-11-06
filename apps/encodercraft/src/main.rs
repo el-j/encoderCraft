@@ -72,10 +72,6 @@ fn main() -> Result<(), eframe::Error> {
         Box::new(|_cc| {
             let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
             app = app.with_config_dir(config_dir);
-            if prefs.theme == "High Contrast" {
-                app.brightness = encodercraft_ui_egui::Brightness::HighContrast;
-                app.tokens = encodercraft_ui_egui::Tokens::for_brightness(app.brightness);
-            }
             app.prefs_state.prefs = prefs;
 
             Ok(Box::new(DesktopApp {
