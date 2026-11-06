@@ -49,7 +49,7 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 | Queue: batch start, pause, stop, duplicate, remove, reset, multi-target progress | Implemented | M23, #60 |
 | Video/still decode and encode through ArtCraft crates | Implemented | M24, M25, #56, #57 |
 | Preview monitor, transport, scopes, Encoding panel | Implemented (no audio playback yet) | #27–#29 |
-| Docking, persisted workspaces, configurable shortcuts | All application commands map to registered engine commands; menu, queue-toolbar, context-menu, shortcut, and workspace actions use shared command IDs exposed through IPC, CLI, and MCP. Shared craft-ui docking, persisted layouts, active-panel outline, remappable shortcuts, and minimum-size/Hi-DPI render tests are implemented; side-by-side visual evidence is deferred until reference screenshots are available | #31–#33 |
+| Docking, persisted workspaces, configurable shortcuts | All application commands map to registered engine commands; menu, queue-toolbar, context-menu, shortcut, and workspace actions use shared command IDs exposed through IPC, CLI, and MCP. Shared craft-ui docking, persisted layouts, active-panel outline, remappable shortcuts, and minimum-size/Hi-DPI render tests are implemented. The supplied reference now informs the default panel arrangement and proportions; side-by-side visual validation remains unverified because native screenshot capture is unavailable in the current environment | #31–#33 |
 | Preferences, watch folders, favourites persistence | Implemented | #38, #39 |
 | Preset Browser table, import/export, delete | Implemented; per-preset editing dialog partial | #35, #37 |
 | Media Browser (browse, thumbnails, add to queue) | Implemented | #36 |

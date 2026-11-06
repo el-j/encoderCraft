@@ -88,14 +88,11 @@ fn split(axis: SplitAxis, ratio: f32, first: Node<PanelId>, second: Node<PanelId
 }
 
 fn default_layout(name: &str) -> Workspace {
-    let left = split(SplitAxis::Vertical, 0.52, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets));
-    let right = split(
-        SplitAxis::Horizontal,
-        0.67,
-        tabs(PanelId::Preview),
-        split(SplitAxis::Vertical, 0.68, Node::Tabs { panels: vec![PanelId::Queue, PanelId::WatchFolders], active: 0 }, tabs(PanelId::Encoding)),
-    );
+    let left = split(SplitAxis::Vertical, 0.57, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets));
+    let queue_encoding =
+        split(SplitAxis::Vertical, 0.67, Node::Tabs { panels: vec![PanelId::Queue, PanelId::WatchFolders], active: 0 }, tabs(PanelId::Encoding));
     let layout = match name {
+        DEFAULT_WORKSPACE => split(SplitAxis::Horizontal, 0.44, left, queue_encoding),
         QUEUE_WORKSPACE => split(
             SplitAxis::Horizontal,
             0.24,
@@ -113,7 +110,7 @@ fn default_layout(name: &str) -> Workspace {
             split(SplitAxis::Vertical, 0.5, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets)),
             split(SplitAxis::Horizontal, 0.78, tabs(PanelId::Preview), tabs(PanelId::Encoding)),
         ),
-        _ => split(SplitAxis::Horizontal, 0.2, left, right),
+        _ => split(SplitAxis::Horizontal, 0.44, left, queue_encoding),
     };
     Workspace { name: name.into(), dock: DockWorkspace::new(Layout { root: Some(layout), floating: Vec::new() }) }
 }
@@ -292,20 +289,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_layout_contains_every_registered_panel_and_validates() {
+    fn builtin_layouts_validate_and_expose_their_expected_panels() {
         let workspace = WorkspaceSet::default();
         let current = workspace.current().expect("default workspace exists");
         assert!(current.dock.validate().is_ok());
-        for panel in PanelId::ALL {
-            assert!(current.is_visible(panel), "{panel:?} should be visible");
+        for panel in [PanelId::MediaBrowser, PanelId::Presets, PanelId::Queue, PanelId::WatchFolders, PanelId::Encoding] {
+            assert!(current.is_visible(panel), "{panel:?} should be visible in the default workspace");
         }
+        assert!(!current.is_visible(PanelId::Preview));
+        let preview = workspace.workspaces.iter().find(|item| item.name == PREVIEW_WORKSPACE).expect("preview workspace exists");
+        assert!(preview.dock.validate().is_ok());
+        assert!(preview.is_visible(PanelId::Preview));
     }
 
     #[test]
-    fn default_layout_matches_the_target_panel_arrangement() {
-        fn split(node: &Node<PanelId>) -> Option<(SplitAxis, &Node<PanelId>, &Node<PanelId>)> {
+    fn default_layout_matches_the_target_panel_arrangement_and_proportions() {
+        fn split(node: &Node<PanelId>) -> Option<(SplitAxis, f32, &Node<PanelId>, &Node<PanelId>)> {
             match node {
-                Node::Split { axis, first, second, .. } => Some((*axis, first, second)),
+                Node::Split { axis, size: SplitSize::Ratio(ratio), first, second } => Some((*axis, *ratio, first, second)),
                 _ => None,
             }
         }
@@ -316,17 +317,17 @@ mod tests {
 
         let workspace = WorkspaceSet::default();
         let root = workspace.current().and_then(|current| current.dock.layout.root.as_ref()).expect("default layout has a root");
-        let (axis, left, right) = split(root).expect("default layout root is split");
+        let (axis, root_ratio, left, right) = split(root).expect("default layout root is split");
         assert_eq!(axis, SplitAxis::Horizontal);
-        let (axis, media, presets) = split(left).expect("left column is split");
+        assert!((root_ratio - 0.44).abs() < f32::EPSILON);
+        let (axis, left_ratio, media, presets) = split(left).expect("left column is split");
         assert_eq!(axis, SplitAxis::Vertical);
+        assert!((left_ratio - 0.57).abs() < f32::EPSILON);
         assert!(only_panel(media, PanelId::MediaBrowser));
         assert!(only_panel(presets, PanelId::Presets));
-        let (axis, preview, queue_column) = split(right).expect("right workspace is split");
-        assert_eq!(axis, SplitAxis::Horizontal);
-        assert!(only_panel(preview, PanelId::Preview));
-        let (axis, queue_watch, encoding) = split(queue_column).expect("queue and encoding panels are split");
+        let (axis, queue_ratio, queue_watch, encoding) = split(right).expect("queue and encoding panels are split");
         assert_eq!(axis, SplitAxis::Vertical);
+        assert!((queue_ratio - 0.67).abs() < f32::EPSILON);
         assert!(matches!(queue_watch, Node::Tabs { panels, active: 0 } if panels.as_slice() == [PanelId::Queue, PanelId::WatchFolders]));
         assert!(only_panel(encoding, PanelId::Encoding));
     }
@@ -372,9 +373,10 @@ mod tests {
     #[test]
     fn reset_restores_the_builtin_layout() {
         let mut set = WorkspaceSet::default();
-        set.current_mut().unwrap().set_visible(PanelId::Preview, false).unwrap();
+        set.current_mut().unwrap().set_visible(PanelId::Queue, false).unwrap();
         set.reset_active();
-        assert!(set.current().unwrap().is_visible(PanelId::Preview));
+        assert!(set.current().unwrap().is_visible(PanelId::Queue));
+        assert!(!set.current().unwrap().is_visible(PanelId::Preview));
     }
 
     #[test]
