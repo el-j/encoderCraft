@@ -1493,7 +1493,7 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 [[package]]
 name = "filmcraft-aac"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "thiserror 2.0.21",
@@ -1502,7 +1502,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-ac3"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1510,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-apv"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -1520,7 +1520,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-av1"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -1530,12 +1530,12 @@ dependencies = [
 [[package]]
 name = "filmcraft-avi"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 
 [[package]]
 name = "filmcraft-bitstream"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs?rev=c5a1cbfb5f9049f9270955caffb5bee5997aebf7)",
 ]
@@ -1543,7 +1543,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-captions"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-color",
  "filmcraft-project",
@@ -1556,7 +1556,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-codecs"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-aac",
  "filmcraft-ac3",
@@ -1593,7 +1593,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-color"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "serde",
 ]
@@ -1601,7 +1601,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-dng"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
@@ -1610,7 +1610,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-dnx"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -1620,7 +1620,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-frame"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-color",
  "filmcraft-time",
@@ -1631,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-geom"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "serde",
 ]
@@ -1639,7 +1639,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-h264"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -1649,7 +1649,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-h264enc"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -1659,7 +1659,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-hevc"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -1669,7 +1669,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-isobmff"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs?rev=c5a1cbfb5f9049f9270955caffb5bee5997aebf7)",
 ]
@@ -1677,7 +1677,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-matroska"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs?rev=c5a1cbfb5f9049f9270955caffb5bee5997aebf7)",
 ]
@@ -1685,7 +1685,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-media"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-color",
  "filmcraft-dng",
@@ -1700,7 +1700,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-mpa"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "thiserror 2.0.21",
@@ -1709,7 +1709,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-mpeg2v"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
@@ -1718,7 +1718,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-mpegts"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1726,7 +1726,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-mxf"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "chrono",
 ]
@@ -1734,17 +1734,17 @@ dependencies = [
 [[package]]
 name = "filmcraft-ogg"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 
 [[package]]
 name = "filmcraft-opus"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 
 [[package]]
 name = "filmcraft-project"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-color",
  "filmcraft-geom",
@@ -1759,7 +1759,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-prores"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -1769,7 +1769,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-scopes"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-color",
  "serde",
@@ -1778,7 +1778,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-text"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-color",
  "harfrust",
@@ -1791,7 +1791,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-time"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "serde",
 ]
@@ -1799,7 +1799,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-vp8"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1807,7 +1807,7 @@ dependencies = [
 [[package]]
 name = "filmcraft-vp9"
 version = "0.17.0"
-source = "git+https://github.com/storytold/filmcraft#d24ce15e292d9b1d658327e088bedaba39580f2c"
+source = "git+https://github.com/storytold/filmcraft#4b3dcf3c4811365a99667f94ee5073413c176e0b"
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
@@ -4931,7 +4931,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.6",
  "windows-sys 0.61.2",
