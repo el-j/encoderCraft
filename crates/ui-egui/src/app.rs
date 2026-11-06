@@ -694,6 +694,7 @@ impl EncoderCraftApp {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn menu_inputs_snapshot(&self) -> (Vec<String>, String, Vec<(crate::workspace::PanelId, bool)>) {
         let panels = crate::workspace::PanelId::ALL
             .into_iter()
@@ -702,6 +703,7 @@ impl EncoderCraftApp {
         (self.workspaces.names(), self.workspaces.active.clone(), panels)
     }
 
+    #[cfg(target_os = "macos")]
     fn menu_bar(&self) -> craft_menu::MenuBar {
         let state = self.command_state();
         let (workspaces, active_workspace, panels) = self.menu_inputs_snapshot();
@@ -772,6 +774,7 @@ impl EncoderCraftApp {
         let _ = ctx;
     }
 
+    #[cfg(target_os = "macos")]
     fn run_menu_action(&mut self, action: crate::menus::MenuAction) {
         use crate::commands::AppCommand as C;
         use crate::menus::MenuAction;
