@@ -66,9 +66,18 @@ pub fn render_prefs_dialog(
             ui.label(RichText::new("General Options").strong());
             ui.add_space(4.0);
 
-            ui.checkbox(&mut state.prefs.play_completion_sound, "Play completion chime when queue finishes");
+            ui.checkbox(&mut state.prefs.play_completion_sound, "Play chime when finished encoding");
             ui.checkbox(&mut state.prefs.auto_start_queue, "Auto-start queue when media is added");
-            ui.checkbox(&mut state.prefs.remove_finished_on_exit, "Remove finished jobs from queue on exit");
+            ui.checkbox(&mut state.prefs.auto_start_on_idle, "Start queue automatically when idle for");
+            if state.prefs.auto_start_on_idle {
+                ui.horizontal(|ui| {
+                    ui.add_space(20.0);
+                    ui.add(egui::Slider::new(&mut state.prefs.idle_timeout_minutes, 1..=60).text("minutes"));
+                });
+            }
+            ui.checkbox(&mut state.prefs.increment_output_filename, "Increment output file names if file exists");
+            ui.checkbox(&mut state.prefs.remove_finished_on_exit, "Remove completed items from queue on exit");
+            ui.checkbox(&mut state.prefs.auto_encode_watch_folders, "Automatically encode watch folders");
             ui.checkbox(&mut state.prefs.auto_shutdown, "Shut down the computer when the queue finishes");
 
             ui.add_space(4.0);

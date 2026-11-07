@@ -421,7 +421,13 @@ impl QueueManager {
     /// Executes a claimed job, mirrors live progress into the journal and records the outcome.
     fn run_job(&self, job_id: &str, spec: &CraftJobSpec) -> Result<(), EncoderError> {
         let start_time = std::time::Instant::now();
-        let resolved = self.resolve_presets(spec);
+        let mut resolved = self.resolve_presets(spec);
+        let increment = self.app_preferences().map(|p| p.increment_output_filename).unwrap_or(true);
+        if increment {
+            for target in &mut resolved.targets {
+                target.output_path = crate::automation::resolve_unique_output_path(&target.output_path, true);
+            }
+        }
         let approvals = self.conversion_approvals_for_job(job_id)?;
         let pipeline = TranscodePipeline::with_limits(resolved, self.pipeline_limits);
         let progress = pipeline.progress();
@@ -1479,5 +1485,16 @@ mod tests {
         let jobs2 = queue.list_jobs();
         assert_eq!(jobs2[0].spec.job_id, "job-1");
         assert_eq!(jobs2[1].spec.job_id, "job-2");
+    }
+
+    #[test]
+    fn test_destination_collision_increment_preference() {
+        let dir = tempfile::tempdir().unwrap();
+        let existing_out = dir.path().join("existing.mp4");
+        std::fs::write(&existing_out, b"content").unwrap();
+
+        let queue = QueueManager::new_in_memory();
+        let unique = crate::automation::resolve_unique_output_path(&existing_out, queue.app_preferences().unwrap().increment_output_filename);
+        assert_eq!(unique, dir.path().join("existing_1.mp4"));
     }
 }

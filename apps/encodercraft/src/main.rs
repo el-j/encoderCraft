@@ -33,6 +33,10 @@ impl eframe::App for DesktopApp {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         self.inner.raw_input_hook(raw_input);
     }
+
+    fn on_exit(&mut self) {
+        self.inner.on_exit();
+    }
 }
 
 fn main() -> Result<(), eframe::Error> {

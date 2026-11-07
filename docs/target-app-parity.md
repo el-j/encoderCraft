@@ -137,8 +137,11 @@ Based on black-box measurements of the reference Adobe Media Encoder 2026 UI, th
 | **Folder Monitoring** | Monitors directory, queues detected media, encodes with preset. | Continuous OS event monitoring (`notify` crate) with poll fallback. | **Full Parity.** |
 | **Settle-Time Delay** | Rudimentary timer; often begins before large network copies finish. | Robust 3-stage settle protocol: size quiescence + exclusive lock probe + quiet window. | **Superior.** Zero corrupted partial-file encodes. |
 | **Recursive Ingest** | Optional recursive subfolder scanning. | Configurable recursion depth, glob pattern filters, and ignore lists. | **Full Parity.** |
-| **Multi-Target Folder Actions** | Drop one file, trigger multiple output presets into designated target directories. | Full support for 1-to-$N$ output routing per watched directory. | **100% Parity.** |
-| **Post-Encode Archiving** | Can delete or keep original file. | Configurable: Keep, Move to `_processed/`, Delete, or Move to `_errors/` with diagnostic log. | **Superior.** Enterprise pipeline ready. |
+| **Multi-Target Folder Actions** | Drop one file, trigger multiple output presets into designated target directories. | Full support for 1-to-$N$ output routing per watched directory with per-target subdirectories. | **Verified (Parity).** Implemented in #146. |
+| **Post-Encode Archiving** | Can delete or keep original file. | Configurable: Keep, Move to `/Source/` or `_processed/`, Timestamped archive (`/Archive/YYYY-MM-DD`), Delete, or Move to `_errors/`. | **Superior.** Enterprise pipeline ready (#146). |
+| **Idle Queue Automation** | Start queue automatically when idle for [X] minutes. | User inactivity tracking with auto-start timer configurable in Preferences. | **Verified (Parity).** Implemented in #144. |
+| **Output File Incrementing** | Increment output file names if file exists (`_1`, `_2`). | Non-destructive automatic collision resolution with sequential numeric suffix. | **Verified (Parity).** Implemented in #145. |
+| **Completion Chime Alert** | Play chime when finished encoding; remove completed on exit. | Non-blocking system audio notification (`play_completion_chime`) and clean exit journal pruning. | **Verified (Parity).** Implemented in #147. |
 
 ---
 

@@ -247,21 +247,21 @@ Tracked under Milestone [M32 - Export Settings Inspector & Effects Pipeline](htt
 - [x] **M32.4: SDR Conform HDR Tone-Mapping (HLG/PQ to Rec.709) (#142)** – Extended Reinhard tone-mapping curve in `encodercraft-color` (`apply_sdr_conform`) with highlight preservation and target luminance scaling.
 - [x] **M32.5: Source vs Output Compare View & Interactive Crop (#143)** – Inspector preview canvas supporting Source, Output, and Split Compare mode with interactive split slider; source frame crop margin controls (`CropConfig`).
 
-## Milestone 33: Multi-Domain Media Export & Format Breadth
+## Milestone 33: Queue Automation, Watch Folder Depth & Preferences
 
-Tracked under Milestone [M33 - Multi-Domain Media Export & Format Breadth](https://github.com/el-j/encoderCraft/milestone/12).
+Tracked under Milestone [M33 - Queue Automation, Watch Folder Depth & Preferences](https://github.com/el-j/encoderCraft/milestone/11).
 
-- [ ] **M33.1: 3D Scene & Asset Batch Transcoding (#144)**
-- [ ] **M33.2: PBR Game Texture Map Packing & Compression (#145)**
-- [ ] **M33.3: Prepress & Document Export Pipelines (#146)**
-- [ ] **M33.4: Professional Cinema RAW & Camera Ingest Formats (#147)**
+- [x] **M33.1: Auto-Start Queue on Idle Timeout (#144)** – Mouse/keyboard activity tracker (`last_user_interaction`), idle duration detection, and automatic queue kick-off when idle timeout expires.
+- [x] **M33.2: Automatic File Name Incrementing on Destination Collision (#145)** – Collision resolver (`resolve_unique_output_path`) appending `_1`, `_2`, etc. if output path exists; configurable in Preferences.
+- [x] **M33.3: Watch Folder Multi-Target Output Routing & Archiving (#146)** – 1-to-N output preset targets (`targets`) per watch folder with dedicated subdirectories; automated source post-processing: `LeaveInPlace`, `MoveToProcessed (/Source/)`, `MoveToArchive (/Archive/YYYY-MM-DD)`, `DeleteSource`.
+- [x] **M33.4: Completion Chime Audio Alert & Clean Exit Queue Pruning (#147)** – Non-blocking system audio notification (`play_completion_chime`) on queue completion; automatically clear completed jobs on clean application exit (`remove_finished_on_exit`).
 
-## Milestone 34: Headless Daemon, Watch Folder Service & Farm API Parity
+## Milestone 34: Audio Channel Mapping & Broadcast MXF Profiles
 
-Tracked under Milestone [M34 - Headless Daemon, Watch Folder Service & Farm API Parity](https://github.com/el-j/encoderCraft/milestone/13).
+Tracked under Milestone [M34 - Audio Channel Mapping & Broadcast MXF Profiles](https://github.com/el-j/encoderCraft/milestone/12).
 
-- [ ] **M34.1: Background Transcoding Daemon & REST / WebSocket API (#148)**
-- [ ] **M34.2: Automated Watch Folder Service with Network Ingest & Auto-Routing (#149)**
+- [ ] **M34.1: Multichannel Audio Matrix Router & Channel Mapping (#148)** – Custom mono, stereo, 5.1 surround stem routing and assignment in export settings and pipeline.
+- [ ] **M34.2: Broadcast Delivery MXF Profiles (#149)** – Sony XDCAM HD422, Panasonic AVC-Intra, and DPP AS-11 OP-1a MXF broadcast presets.
 
 ## Known Issues (alpha.1, tracked above)
 

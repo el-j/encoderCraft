@@ -50,6 +50,7 @@ pub struct EncoderCraftApp {
     pub last_watch_tick: Option<std::time::Instant>,
     pub was_worker_running: bool,
     pub completion_banner_timer: Option<std::time::Instant>,
+    pub last_user_interaction: std::time::Instant,
     pub workspaces: crate::workspace::WorkspaceSet,
     pub workspace_shortcuts: crate::settings::WorkspaceShortcuts,
     pub focused_panel: crate::workspace::PanelId,
@@ -106,6 +107,7 @@ impl EncoderCraftApp {
             last_watch_tick: None,
             was_worker_running: false,
             completion_banner_timer: None,
+            last_user_interaction: std::time::Instant::now(),
             workspaces: crate::workspace::WorkspaceSet::default(),
             workspace_shortcuts: crate::settings::WorkspaceShortcuts::default(),
             focused_panel: crate::workspace::PanelId::Queue,
@@ -975,6 +977,14 @@ impl EncoderCraftApp {
         }
     }
 
+    /// Invoked upon application shutdown: performs final cleanups such as removing completed
+    /// queue items if configured in preferences.
+    pub fn on_exit(&mut self) {
+        if self.prefs_state.prefs.remove_finished_on_exit {
+            let _ = self.queue_mgr.clear_completed_jobs();
+        }
+    }
+
     /// Renders the complete application frame inside an egui Ui.
     pub fn render(&mut self, ui: &mut Ui) {
         if !self.fonts_installed {
@@ -996,7 +1006,8 @@ impl EncoderCraftApp {
         }
 
         self.drive_native_menu(&ctx);
-        if std::mem::take(&mut self.quit_requested) {
+        if std::mem::take(&mut self.quit_requested) || ctx.input(|i| i.viewport().close_requested()) {
+            self.on_exit();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         self.render_name_dialog(&ctx);
@@ -1104,7 +1115,7 @@ impl EncoderCraftApp {
 
         // Periodic Watch Folder Ingest Polling
         let now = std::time::Instant::now();
-        let should_poll_watch = self.watch_state.auto_encode_enabled
+        let should_poll_watch = (self.watch_state.auto_encode_enabled && self.prefs_state.prefs.auto_encode_watch_folders)
             && !self.watch_state.configs.is_empty()
             && self.last_watch_tick.is_none_or(|last| now.duration_since(last) > std::time::Duration::from_secs(2));
 
@@ -1118,14 +1129,36 @@ impl EncoderCraftApp {
             // Queue finished!
             if self.prefs_state.prefs.play_completion_sound {
                 self.completion_banner_timer = Some(std::time::Instant::now());
+                encodercraft_engine::play_completion_chime();
             }
         }
         self.was_worker_running = is_worker_active;
         self.queue_state.is_running = is_worker_active && !self.queue_mgr.is_paused();
 
+        let has_input = ui.input(|i| !i.events.is_empty() || i.pointer.has_pointer());
+        if has_input {
+            self.last_user_interaction = std::time::Instant::now();
+        }
+
+        let has_pending_jobs = self.queue_mgr.list_jobs().iter().any(|j| matches!(j.status, encodercraft_core::JobStatus::Queued));
+
+        if encodercraft_engine::should_idle_auto_start(
+            self.prefs_state.prefs.auto_start_on_idle,
+            self.last_user_interaction.elapsed(),
+            self.prefs_state.prefs.idle_timeout_minutes,
+            has_pending_jobs,
+            is_worker_active,
+        ) {
+            let _ = self.queue_mgr.start_queue();
+        }
+
         let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
         if self.queue_state.is_running || is_worker_active || is_hovering || should_poll_watch {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        } else if self.prefs_state.prefs.auto_start_on_idle && has_pending_jobs {
+            let idle_needed = std::time::Duration::from_secs(self.prefs_state.prefs.idle_timeout_minutes as u64 * 60);
+            let remaining = idle_needed.saturating_sub(self.last_user_interaction.elapsed());
+            ui.ctx().request_repaint_after(remaining.min(std::time::Duration::from_secs(1)));
         }
 
         let selected_job_spec = self

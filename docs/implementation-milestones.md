@@ -592,6 +592,27 @@ flowchart LR
 
 ---
 
+### Milestone 33: Queue Automation, Watch Folder Depth & Preferences
+**Objective:** Match Adobe Media Encoder preferences and automated batch queue behaviors: auto-start queue on idle timeout, output filename auto-incrementing on collision, 1-to-N watch folder routing, source file archiving, and completion chime alert. Tracked under Milestone [M33 - Queue Automation, Watch Folder Depth & Preferences](https://github.com/el-j/encoderCraft/milestone/11).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Auto-Start Queue on Idle Timeout ([#144](https://github.com/el-j/encoderCraft/issues/144)):**
+   - Inactivity tracker for mouse and keyboard interactions (`last_user_interaction`).
+   - Configurable in Preferences -> General (toggle and idle minutes slider).
+   - Automatically kicks off transcoding when the queue has pending jobs and user is idle.
+2. [x] **Automatic File Name Incrementing ([#145](https://github.com/el-j/encoderCraft/issues/145)):**
+   - Output collision resolver (`resolve_unique_output_path`) appending `_1`, `_2`, etc. when destination files already exist on disk.
+   - Configurable via Preferences -> General (`increment_output_filename`).
+3. [x] **Watch Folder Multi-Target Routing & Archiving ([#146](https://github.com/el-j/encoderCraft/issues/146)):**
+   - 1-to-N output preset assignments with per-target destination subfolders.
+   - Post-processing actions: `LeaveInPlace`, `MoveToProcessed (/Source/)`, `MoveToArchive (/Archive/YYYY-MM-DD)`, and `DeleteSource`.
+   - Auto-encode toggle in Watch Folders panel and Preferences.
+4. [x] **Completion Chime Alert & Remove Completed on Exit ([#147](https://github.com/el-j/encoderCraft/issues/147)):**
+   - Non-blocking audio notification on queue completion (`play_completion_chime`) using OS-native system sound or alert.
+   - Queue clean-up on exit (`remove_finished_on_exit`) clearing completed jobs from the journal.
+
+---
+
 ---
 
 ## 3. Risk Mitigation & Technical Contingencies

@@ -6,12 +6,14 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod automation;
 pub mod cmd;
 pub mod conversion;
 pub mod ipc;
 pub mod queue;
 pub mod state;
 
+pub use automation::{play_completion_chime, resolve_unique_output_path, should_idle_auto_start};
 pub use cmd::{CommandRegistry, CommandSpec};
 pub use conversion::{ConversionDecision, LossyConversion, LossyConversionChange, LossyConversionKey, assess_lossy_conversions};
 pub use ipc::EngineIpcHandler;
