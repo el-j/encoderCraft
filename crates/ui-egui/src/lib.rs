@@ -27,6 +27,8 @@ pub mod queue_footer;
 pub mod queue_panel;
 pub mod scope_view;
 pub mod settings;
+pub mod source_properties;
+pub mod stitch_dialog;
 pub mod theme;
 pub mod titlebar;
 pub mod transport;
@@ -35,5 +37,7 @@ pub mod workspace;
 
 pub use app::EncoderCraftApp;
 pub use preset_editor::{PresetEditorState, render_preset_editor};
+pub use source_properties::{SourcePropertiesState, render_source_properties_dialog};
+pub use stitch_dialog::{StitchDialogState, render_stitch_dialog};
 pub use theme::{Brightness, Tokens, apply_theme};
 pub use watch_panel::{WatchPanelState, render_watch_panel};

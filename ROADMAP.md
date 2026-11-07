@@ -263,6 +263,14 @@ Tracked under Milestone [M34 - Audio Channel Mapping & Broadcast MXF Profiles](h
 - [x] **M34.1: Multichannel Audio Matrix Router & Channel Mapping (#148)** – Multichannel matrix router (`AudioChannelMapping`), track layouts (`AudioTrackLayout::DiscreteMono`, `StereoPairs`, `Surround51`, `Surround71`), interactive GUI routing grid in Audio tab, and pipeline routing execution (`apply_audio_matrix`).
 - [x] **M34.2: Broadcast Delivery MXF Profiles (#149)** – Factory broadcast compliance presets for Sony XDCAM HD422 1080 (50 Mbps), Panasonic AVC-Intra 100 1080, DPP AS-11 UK HD Delivery (25p / EBU R128), and AMWA AS-10 Broadcast Shim in MXF OP-1a with 8-channel 24-bit 48 kHz PCM audio.
 
+## Milestone 35: Source Properties, Quick Preset Switcher & Stitch Dialog
+
+Tracked under Milestone [M35 - Source Properties, Quick Preset Switcher & Stitch Dialog](https://github.com/el-j/encoderCraft/milestone/13).
+
+- [x] **M35.1: Source Properties Essence Inspection Modal Dialog (#160)** – Dedicated modal stream essence viewer (`SourcePropertiesDialog`, Cmd+I) inspecting file size, container format, video dimensions, pixel aspect ratio, frame rate, codec, bit depth, color space primaries/transfer/matrix/range, audio sample rate, channels, bit depth, duration, and timecode; includes one-click "Copy Information" clipboard export.
+- [x] **M35.2: Inline Format and Preset Quick-Switch Popups in Queue Table (#161)** – Interactive in-place dropdown selectors directly in the queue table summary row for instant format and preset switching without entering the inspector modal, featuring container auto-extension sync and "Custom Export Settings..." link.
+- [x] **M35.3: Interactive Stitch Clips Destination and Preset Dialog (#162)** – Dedicated sequence assembly dialog with clip order re-ordering (Up/Down), output path picker, preset selector, and expandable queue child clips display.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).

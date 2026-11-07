@@ -40,6 +40,9 @@ pub struct EncoderCraftApp {
     pub inspector_state: InspectorState,
     pub log_state: LogDialogState,
     pub prefs_state: PrefsDialogState,
+    pub source_properties_state: crate::source_properties::SourcePropertiesState,
+    pub stitch_state: crate::stitch_dialog::StitchDialogState,
+    pub pending_source_properties: Option<std::path::PathBuf>,
     pub show_about_dialog: bool,
     /// The workspace name dialog (Save As or Rename) is open for this command.
     name_dialog: Option<crate::commands::AppCommand>,
@@ -99,6 +102,9 @@ impl EncoderCraftApp {
             inspector_state: InspectorState::default(),
             log_state: LogDialogState::default(),
             prefs_state: PrefsDialogState::default(),
+            source_properties_state: crate::source_properties::SourcePropertiesState::default(),
+            stitch_state: crate::stitch_dialog::StitchDialogState::default(),
+            pending_source_properties: None,
             show_about_dialog: false,
             name_dialog: None,
             quit_requested: false,
@@ -270,6 +276,18 @@ impl EncoderCraftApp {
                     self.log_state.is_open = !self.log_state.is_open;
                 }
             }
+            C::SourceProperties => {
+                if let Some(id) = ids.first() {
+                    let jobs = self.queue_mgr.list_jobs();
+                    if let Some(j) = jobs.iter().find(|job| &job.spec.job_id == id)
+                        && let encodercraft_core::SourceDescriptor::File { path, .. } = &j.spec.source
+                    {
+                        self.source_properties_state.open_for_file(path.clone());
+                    }
+                } else if let Some(path) = self.media_state.selected.clone().or_else(|| self.pending_media_item.clone()) {
+                    self.source_properties_state.open_for_file(path);
+                }
+            }
             C::Preferences => {
                 if let Some(value) = self.dispatch_app_command_value(C::Preferences, serde_json::json!({})) {
                     match serde_json::from_value(value) {
@@ -419,13 +437,8 @@ impl EncoderCraftApp {
                 }
             }
             C::StitchSelected => {
-                let output_path = std::env::temp_dir().join("stitched_batch.mp4");
-                if let Some(spec) = self.dispatch_prepared_app_job_spec(
-                    command,
-                    serde_json::json!({ "jobIds": ids, "outputPath": output_path, "presetName": "Match Source - High Bitrate" }),
-                ) {
-                    self.submit_job_for_review(spec);
-                }
+                let all_jobs = self.queue_mgr.list_jobs();
+                self.stitch_state.open_for_jobs(ids, &all_jobs);
             }
             C::SetDestination => {
                 if let Some(folder) = rfd::FileDialog::new().set_title("Select Output Directory").pick_folder() {
@@ -1213,6 +1226,25 @@ impl EncoderCraftApp {
             self.set_brightness(Self::brightness_from_theme(&theme));
         }
 
+        // 7. Source Properties Dialog (AME Parity: Cmd+I)
+        crate::source_properties::render_source_properties_dialog(&ctx, &mut self.source_properties_state, &self.tokens);
+
+        // 8. Stitch Sequence Dialog (AME Parity)
+        let mut on_stitch = None;
+        crate::stitch_dialog::render_stitch_dialog(&ctx, &mut self.stitch_state, &self.tokens, &mut on_stitch);
+        if let Some((job_ids, out_path, preset_name)) = on_stitch
+            && let Some(spec) = self.dispatch_prepared_app_job_spec(
+                crate::commands::AppCommand::StitchSelected,
+                serde_json::json!({
+                    "jobIds": job_ids,
+                    "outputPath": out_path,
+                    "presetName": preset_name,
+                }),
+            )
+        {
+            self.submit_job_for_review(spec);
+        }
+
         self.save_settings_if_changed();
         self.drive_auto_shutdown(&ctx);
 
@@ -1526,6 +1558,9 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
                     self.app.pending_media_item = Some(path);
                     self.app.run_command(crate::commands::AppCommand::AddMediaItem);
                 }
+                if let Some(path) = self.app.media_state.inspect_properties.take() {
+                    self.app.source_properties_state.open_for_file(path);
+                }
             }
 
             PanelId::Presets => {
@@ -1554,8 +1589,12 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
                         auto_shutdown: &mut self.app.prefs_state.prefs.auto_shutdown,
                         on_add_media: &mut add_media,
                         selected_renderer: &mut self.app.prefs_state.prefs.selected_renderer,
+                        on_show_source_properties: &mut self.app.pending_source_properties,
                     },
                 );
+                if let Some(path) = self.app.pending_source_properties.take() {
+                    self.app.source_properties_state.open_for_file(path);
+                }
                 if add_media {
                     self.app.pick_media();
                 }

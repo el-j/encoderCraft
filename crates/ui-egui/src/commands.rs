@@ -68,6 +68,7 @@ pub enum AppCommand {
     SetDestination,
     AddOutputTarget,
     InspectSettings,
+    SourceProperties,
     ClearFinished,
     CreatePreset,
     ImportPresets,
@@ -99,6 +100,10 @@ pub struct Shortcut {
 impl Shortcut {
     const fn cmd(key: Key) -> Self {
         Self { primary: true, shift: false, alt: false, key }
+    }
+
+    const fn shift_cmd(key: Key) -> Self {
+        Self { primary: true, shift: true, alt: false, key }
     }
 
     const fn plain(key: Key) -> Self {
@@ -203,6 +208,15 @@ pub const COMMANDS: &[CommandInfo] = &[
     info(AppCommand::AddStitched, "file.add_stitched", "Add Stitched Sequence...", Menu::File, None, Some("queue.prepare_stitch_sources"), false),
     info(AppCommand::AddWatchFolder, "file.add_watch_folder", "Add Watch Folder...", Menu::File, None, Some("watch.add_folder"), false),
     info(AppCommand::ShowLog, "file.show_log", "Show Encoding Log...", Menu::File, Some(Shortcut::cmd(Key::L)), Some("queue.log"), true),
+    info(
+        AppCommand::SourceProperties,
+        "file.source_properties",
+        "Source Properties...",
+        Menu::File,
+        Some(Shortcut::shift_cmd(Key::I)),
+        Some("media.source_properties"),
+        false,
+    ),
     info(AppCommand::Quit, "file.quit", "Quit encoderCraft", Menu::File, Some(Shortcut::cmd(Key::Q)), Some("app.quit"), true),
     info(AppCommand::Preferences, "edit.preferences", "Preferences...", Menu::Edit, Some(Shortcut::cmd(Key::Comma)), Some("preferences.get"), false),
     info(AppCommand::ThemeDark, "edit.theme_dark", "Theme: Dark", Menu::Edit, None, Some("preferences.set_theme"), true),
@@ -304,6 +318,7 @@ impl AppCommand {
             AppCommand::RevealOutput | AppCommand::CopyOutputPath => s.has_output,
             AppCommand::RevealSource | AppCommand::CopySourcePath => s.has_source,
             AppCommand::ExportSettings => s.selected > 0,
+            AppCommand::SourceProperties => s.has_source || s.selected > 0,
             AppCommand::StitchSelected => s.selected > 1,
             AppCommand::ClearFinished => s.finished > 0,
             AppCommand::SelectAll => s.jobs > 0,
@@ -350,7 +365,8 @@ pub fn context_menu_commands(context: CommandContextMenu) -> impl Iterator<Item 
     COMMANDS.iter().filter(move |info| match context {
         CommandContextMenu::QueueRow => matches!(
             info.command,
-            AppCommand::RevealOutput
+            AppCommand::SourceProperties
+                | AppCommand::RevealOutput
                 | AppCommand::CopyOutputPath
                 | AppCommand::RevealSource
                 | AppCommand::CopySourcePath
@@ -365,7 +381,10 @@ pub fn context_menu_commands(context: CommandContextMenu) -> impl Iterator<Item 
         ),
         CommandContextMenu::Preset => matches!(info.command, AppCommand::ApplyPreset | AppCommand::AddPresetTarget | AppCommand::DeletePreset),
         CommandContextMenu::MediaItem => {
-            matches!(info.command, AppCommand::AddMediaItem | AppCommand::OpenMediaFolder | AppCommand::ToggleMediaFavorite)
+            matches!(
+                info.command,
+                AppCommand::AddMediaItem | AppCommand::SourceProperties | AppCommand::OpenMediaFolder | AppCommand::ToggleMediaFavorite
+            )
         }
     })
 }
@@ -375,7 +394,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const ALL: [AppCommand; 47] = [
+    const ALL: [AppCommand; 48] = [
         AppCommand::AddMedia,
         AppCommand::AddMediaItem,
         AppCommand::OpenMediaFolder,
@@ -385,6 +404,7 @@ mod tests {
         AppCommand::RevealSource,
         AppCommand::CopySourcePath,
         AppCommand::ExportSettings,
+        AppCommand::SourceProperties,
         AppCommand::AddStitched,
         AppCommand::AddWatchFolder,
         AppCommand::ShowLog,
@@ -479,6 +499,7 @@ mod tests {
                 AppCommand::RevealSource,
                 AppCommand::CopySourcePath,
                 AppCommand::ExportSettings,
+                AppCommand::SourceProperties,
                 AppCommand::ResetSelected,
                 AppCommand::DuplicateSelected,
                 AppCommand::RemoveSelected,
@@ -494,7 +515,7 @@ mod tests {
         );
         assert_eq!(
             context_menu_commands(CommandContextMenu::MediaItem).map(|info| info.command).collect::<Vec<_>>(),
-            vec![AppCommand::AddMediaItem, AppCommand::OpenMediaFolder, AppCommand::ToggleMediaFavorite]
+            vec![AppCommand::AddMediaItem, AppCommand::OpenMediaFolder, AppCommand::ToggleMediaFavorite, AppCommand::SourceProperties]
         );
         assert!(!menu_commands(Menu::File).any(|info| info.command == AppCommand::AddMediaItem));
     }

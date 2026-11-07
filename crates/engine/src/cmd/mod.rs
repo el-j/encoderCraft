@@ -714,6 +714,17 @@ impl CommandRegistry {
         }));
 
         self.register(CommandSpec::new(
+            "media.source_properties",
+            "Probe Media Source Properties",
+            "Probes and returns essence and format properties for a source media file",
+            |_, params| {
+                let path = required_path(&params, "path")?;
+                let info = encodercraft_source::probe_media_info(&path)?;
+                serde_json::to_value(info).map_err(|error| EncoderError::Internal(format!("failed to serialize probe info: {error}")))
+            },
+        ));
+
+        self.register(CommandSpec::new(
             "watch.add_folder",
             "Add Watch Folder",
             "Persists a watch-folder configuration and returns it",
