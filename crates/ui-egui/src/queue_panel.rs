@@ -414,6 +414,7 @@ pub struct QueuePanelContext<'a> {
     pub auto_shutdown: &'a mut bool,
     pub on_add_media: &'a mut bool,
     pub selected_renderer: &'a mut String,
+    pub on_show_source_properties: &'a mut Option<std::path::PathBuf>,
 }
 
 /// Renders the queue panel with batch toolbar, global progress, and hierarchical job table.
@@ -426,6 +427,7 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
     let auto_shutdown = &mut *ctx.auto_shutdown;
     let on_add_media = &mut *ctx.on_add_media;
     let selected_renderer = &mut *ctx.selected_renderer;
+    let on_show_source_properties = &mut *ctx.on_show_source_properties;
 
     let mut jobs = queue_mgr.list_jobs();
 
@@ -620,8 +622,8 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
             // Table Rows Scroll Area
             egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
                 for (idx, job) in jobs.iter().enumerate() {
-                    let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs, cols };
-                    render_grouped_job_row(ui, item, state, queue_mgr, commands, tokens, on_inspect_job);
+                    let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs, cols, on_inspect_job, on_show_source_properties };
+                    render_grouped_job_row(ui, item, state, queue_mgr, commands, tokens);
                 }
             });
         }
@@ -708,6 +710,8 @@ struct GroupedJobItem<'a> {
     pub job_idx: usize,
     pub all_jobs: &'a [QueuedJob],
     pub cols: QueueColumnWidths,
+    pub on_inspect_job: &'a mut Option<CraftJobSpec>,
+    pub on_show_source_properties: &'a mut Option<std::path::PathBuf>,
 }
 
 fn render_grouped_job_row(
@@ -717,12 +721,13 @@ fn render_grouped_job_row(
     queue_mgr: &Arc<QueueManager>,
     commands: &CommandRegistry,
     tokens: &Tokens,
-    on_inspect_job: &mut Option<CraftJobSpec>,
 ) {
     let job = item.job;
     let job_idx = item.job_idx;
     let all_jobs = item.all_jobs;
     let cols = item.cols;
+    let on_inspect_job = item.on_inspect_job;
+    let on_show_source_properties = item.on_show_source_properties;
     let job_id = job.spec.job_id.clone();
     let is_selected = state.selected_job_ids.contains(&job_id) || state.selected_job_id.as_deref() == Some(&job_id);
     let is_expanded = state.expanded_jobs.contains(&job_id);
@@ -781,29 +786,80 @@ fn render_grouped_job_row(
                 }
 
                 job_select_btn.context_menu(|ui| {
-                    render_job_context_menu(ui, job, all_jobs, state, queue_mgr, commands);
+                    render_job_context_menu(ui, job, all_jobs, state, queue_mgr, commands, on_show_source_properties);
                 });
             });
 
-            // Format Summary Column
+            // Format Summary Column (Inline dropdown selector)
             ui.allocate_ui_with_layout(egui::vec2(cols.format, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
-                        ui.label(RichText::new(format!("{:?}", t.container)).small().color(tokens.text_dim));
+                        let mut current_container = t.container;
+                        let combo_text =
+                            INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
+                        let combo = egui::ComboBox::from_id_salt(format!("summary_fmt_{job_id}"))
+                            .selected_text(RichText::new(combo_text).small())
+                            .width(cols.format - 12.0)
+                            .show_ui(ui, |ui| {
+                                for (c, name, _) in INLINE_CONTAINERS {
+                                    ui.selectable_value(&mut current_container, *c, *name);
+                                }
+                            });
+
+                        if combo.response.changed() && current_container != t.container {
+                            let mut updated = t.clone();
+                            updated.container = current_container;
+                            if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
+                                let mut p = updated.output_path.clone();
+                                p.set_extension(ext);
+                                updated.output_path = p;
+                            }
+                            updated.preset_name = default_preset_for_container(current_container).to_string();
+                            execute_queue_command(
+                                state,
+                                commands,
+                                queue_mgr,
+                                "queue.update_output_target",
+                                serde_json::json!({ "jobId": job_id, "targetIndex": 0, "target": updated }),
+                            );
+                        }
                     }
                 } else {
                     ui.label(RichText::new(format!("({} outputs)", job.spec.targets.len())).small().color(tokens.text_dim));
                 }
             });
 
-            // Preset Summary Column
+            // Preset Summary Column (Inline dropdown selector + Custom Inspector link)
             ui.allocate_ui_with_layout(egui::vec2(cols.preset, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
-                        let link =
-                            ui.link(RichText::new(middle_truncate(&t.preset_name, 24)).color(tokens.accent_primary)).on_hover_text(&t.preset_name);
-                        if link.clicked() {
-                            *on_inspect_job = Some(job.spec.clone());
+                        let display_name = middle_truncate(&t.preset_name, 22);
+                        let mut chosen_preset = t.preset_name.clone();
+                        let candidate_presets = presets_for_container(t.container);
+                        let _combo = egui::ComboBox::from_id_salt(format!("summary_pre_{job_id}"))
+                            .selected_text(RichText::new(display_name).color(tokens.accent_primary).small())
+                            .width(cols.preset - 12.0)
+                            .show_ui(ui, |ui| {
+                                for preset_name in &candidate_presets {
+                                    if ui.selectable_label(t.preset_name == *preset_name, *preset_name).clicked() {
+                                        chosen_preset = (*preset_name).to_string();
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button("Custom Export Settings... (Cmd+E)").clicked() {
+                                    *on_inspect_job = Some(job.spec.clone());
+                                }
+                            });
+                        if chosen_preset != t.preset_name {
+                            let mut updated = t.clone();
+                            updated.preset_name = chosen_preset;
+                            execute_queue_command(
+                                state,
+                                commands,
+                                queue_mgr,
+                                "queue.update_output_target",
+                                serde_json::json!({ "jobId": job_id, "targetIndex": 0, "target": updated }),
+                            );
                         }
                     }
                 } else {
@@ -1035,6 +1091,21 @@ fn render_grouped_job_row(
                 });
             }
         }
+
+        if is_expanded && let SourceDescriptor::StitchedClips { clips } = &job.spec.source {
+            for (c_idx, clip) in clips.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(egui::vec2(cols.src, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add_space(24.0);
+                        let clip_name = clip.path.file_name().and_then(|s| s.to_str()).unwrap_or("Clip");
+                        ui.label(RichText::new(format!("↳ Clip #{}: {}", c_idx + 1, clip_name)).small().color(tokens.text_dim));
+                    });
+                    ui.allocate_ui_with_layout(egui::vec2(cols.format, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.label(RichText::new("Segment").small().color(tokens.text_dim));
+                    });
+                });
+            }
+        }
     });
 
     ui.add_space(1.0);
@@ -1047,6 +1118,7 @@ fn render_job_context_menu(
     state: &mut QueuePanelState,
     queue_mgr: &Arc<QueueManager>,
     commands: &CommandRegistry,
+    on_show_source_properties: &mut Option<std::path::PathBuf>,
 ) {
     let job_id = &job.spec.job_id;
     if !state.selected_job_ids.contains(job_id) {
@@ -1194,6 +1266,11 @@ fn render_job_context_menu(
                 };
                 if let Some(folder) = rfd::FileDialog::new().set_title("Select Output Directory").pick_folder() {
                     execute_queue_command(state, commands, queue_mgr, command_id, serde_json::json!({ "jobIds": selected_ids, "outputDir": folder }));
+                }
+            }
+            crate::commands::AppCommand::SourceProperties => {
+                if let Some(ref path) = src_path {
+                    *on_show_source_properties = Some(path.clone());
                 }
             }
             _ => {}
@@ -1382,6 +1459,7 @@ mod tests {
         let mut auto_shutdown = false;
         let mut on_add_media = false;
         let mut selected_renderer = String::new();
+        let mut on_show_source_properties = None;
 
         egui::__run_test_ui(|ui| {
             render_queue_panel(
@@ -1396,6 +1474,7 @@ mod tests {
                     auto_shutdown: &mut auto_shutdown,
                     on_add_media: &mut on_add_media,
                     selected_renderer: &mut selected_renderer,
+                    on_show_source_properties: &mut on_show_source_properties,
                 },
             );
         });

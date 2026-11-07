@@ -59,6 +59,7 @@ pub struct MediaBrowserState {
     pub view: BrowserView,
     pub thumb_size: f32,
     pub selected: Option<PathBuf>,
+    pub inspect_properties: Option<PathBuf>,
     pub tree_state: MediaBrowserTreeState,
     locations: Vec<(String, PathBuf)>,
     path_input: String,
@@ -83,6 +84,7 @@ impl MediaBrowserState {
             view: BrowserView::List,
             thumb_size: 96.0,
             selected: None,
+            inspect_properties: None,
             tree_state: MediaBrowserTreeState::default(),
             locations,
             thumbs: BoundedCache::new(THUMB_CACHE_CAPACITY),
@@ -435,13 +437,14 @@ fn entry_menu(
 ) {
     for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::MediaItem) {
         let enabled = match info.command {
-            crate::commands::AppCommand::AddMediaItem => e.kind.is_media(),
+            crate::commands::AppCommand::AddMediaItem | crate::commands::AppCommand::SourceProperties => e.kind.is_media(),
             crate::commands::AppCommand::OpenMediaFolder | crate::commands::AppCommand::ToggleMediaFavorite => e.kind == EntryKind::Folder,
             _ => false,
         };
         if ui.add_enabled(enabled, egui::Button::new(info.context_label(crate::commands::CommandContextMenu::MediaItem))).clicked() {
             match info.command {
                 crate::commands::AppCommand::AddMediaItem => to_add.push(e.path.clone()),
+                crate::commands::AppCommand::SourceProperties => state.inspect_properties = Some(e.path.clone()),
                 crate::commands::AppCommand::OpenMediaFolder => {
                     match commands.dispatch(queue_mgr, "media.open_folder", serde_json::json!({ "path": e.path.clone() })) {
                         Ok(value) => match value.get("path").and_then(serde_json::Value::as_str) {

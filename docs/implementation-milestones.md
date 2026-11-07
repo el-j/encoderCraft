@@ -629,6 +629,23 @@ flowchart LR
 
 ---
 
+### Milestone 35: Source Properties, Quick Preset Switcher & Stitch Dialog
+**Objective:** Deliver modal essence viewer dialog (Cmd+I), in-place queue format and preset quick-switch popups, and interactive clip stitching dialog. Tracked under Milestone [M35 - Source Properties, Quick Preset Switcher & Stitch Dialog](https://github.com/el-j/encoderCraft/milestone/13).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Source Properties Essence Inspection Modal Dialog ([#160](https://github.com/el-j/encoderCraft/issues/160)):**
+   - Modal stream essence viewer dialog (`SourcePropertiesDialog`, Cmd+I).
+   - Probes file size, container format, video dimensions, pixel aspect ratio, frame rate, codec, bit depth, color space primaries/transfer/matrix/range, audio sample rate, channels, bit depth, duration, and timecode.
+   - One-click formatted technical metadata clipboard export ("Copy Information") and reveal in default file manager.
+2. [x] **Inline Format and Preset Quick-Switch Popups in Queue Table ([#161](https://github.com/el-j/encoderCraft/issues/161)):**
+   - Table-level interactive dropdown selectors directly on queue summary row.
+   - Format combo with auto-extension sync and default preset matching.
+   - Preset combo with container compatibility filtering and "Custom Export Settings..." link.
+3. [x] **Interactive Stitch Clips Destination and Preset Dialog ([#162](https://github.com/el-j/encoderCraft/issues/162)):**
+   - Interactive sequence assembly modal with Up/Down clip re-ordering.
+   - Destination file path picker and target preset dropdown.
+   - Stitched sequence item expansion in Queue table showing individual sequence clips.
+
 ---
 
 ## 3. Risk Mitigation & Technical Contingencies
