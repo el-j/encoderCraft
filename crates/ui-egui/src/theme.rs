@@ -41,9 +41,18 @@ pub struct Tokens {
     pub hover: Color32,
     pub pressed: Color32,
     pub radius_sm: f32,
+    pub panel_inset: f32,
+    pub toolbar_gap: f32,
+    pub row_height: f32,
+    pub section_gap: f32,
 }
 
 impl Tokens {
+    /// Return the standardized margin for dock panel contents.
+    pub fn panel_margin(&self) -> egui::Margin {
+        egui::Margin::same(self.panel_inset as i8)
+    }
+
     /// Dark theme tokens matching ArtCraft standards.
     pub fn dark() -> Self {
         Self {
@@ -72,6 +81,10 @@ impl Tokens {
             hover: Color32::from_rgb(52, 52, 58),
             pressed: Color32::from_rgb(60, 60, 68),
             radius_sm: 4.0,
+            panel_inset: 8.0,
+            toolbar_gap: 4.0,
+            row_height: 22.0,
+            section_gap: 6.0,
         }
     }
 
@@ -103,6 +116,10 @@ impl Tokens {
             hover: Color32::from_rgb(40, 40, 40),
             pressed: Color32::from_rgb(60, 60, 60),
             radius_sm: 2.0,
+            panel_inset: 8.0,
+            toolbar_gap: 4.0,
+            row_height: 22.0,
+            section_gap: 6.0,
         }
     }
 
@@ -200,5 +217,21 @@ mod tests {
     #[test]
     fn default_brightness_is_dark() {
         assert_eq!(Brightness::default(), Brightness::Dark);
+    }
+
+    #[test]
+    fn tokens_provide_consistent_panel_spacing() {
+        let t = Tokens::dark();
+        assert_eq!(t.panel_inset, 8.0);
+        assert_eq!(t.toolbar_gap, 4.0);
+        assert_eq!(t.row_height, 22.0);
+        assert_eq!(t.section_gap, 6.0);
+        assert_eq!(t.panel_margin(), egui::Margin::same(8));
+
+        let hc = Tokens::high_contrast();
+        assert_eq!(hc.panel_margin(), egui::Margin::same(8));
+
+        let light = Tokens::for_brightness(Brightness::Light);
+        assert_eq!(light.panel_margin(), egui::Margin::same(8));
     }
 }

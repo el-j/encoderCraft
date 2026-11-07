@@ -1481,7 +1481,7 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
     fn body(&mut self, ui: &mut Ui, panel: &crate::workspace::PanelId) {
         use crate::workspace::PanelId;
 
-        match panel {
+        egui::Frame::new().fill(self.app.tokens.bg_panel).inner_margin(self.app.tokens.panel_margin()).show(ui, |ui| match panel {
             PanelId::MediaBrowser => {
                 for path in crate::media_browser::render_media_browser(
                     ui,
@@ -1550,7 +1550,7 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
                     self.app.dispatch_engine_command("queue.stop", serde_json::json!({ "jobId": job_id }));
                 }
             }
-        }
+        });
 
         if self.app.focused_panel == *panel {
             ui.painter().rect_stroke(

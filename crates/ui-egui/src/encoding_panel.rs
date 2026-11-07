@@ -152,11 +152,11 @@ pub fn render_encoding_panel(ui: &mut Ui, state: &mut EncodingPanelState, queue:
     let rows = state.telemetry.observe(now, &jobs);
     let mut stop = None;
 
-    ui.heading(RichText::new("Encoding").size(15.0));
-    ui.add_space(4.0);
     if rows.is_empty() {
         state.thumbs.clear();
-        ui.label(RichText::new("Not currently encoding.").color(tokens.text_dim));
+        ui.centered_and_justified(|ui| {
+            ui.label(RichText::new("Not currently encoding.").color(tokens.text_dim));
+        });
         return None;
     }
     ui.ctx().request_repaint_after(Duration::from_millis(250));
