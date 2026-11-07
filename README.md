@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
 [![Parity Target](https://img.shields.io/badge/parity%20target-Adobe%20Media%20Encoder%202026-purple.svg)](docs/target-app-parity.md)
-[![Tests](https://img.shields.io/badge/tests-139%20passed-brightgreen.svg)](docs/implementation-milestones.md)
+[![Tests](https://img.shields.io/badge/tests->150%20passed-brightgreen.svg)](docs/implementation-milestones.md)
 [![Safety](https://img.shields.io/badge/unsafe_code-forbid-brightgreen.svg)](docs/architecture.md)
 [![ArtCraft Ecosystem](https://img.shields.io/badge/artcraft-storytold-red.svg)](https://github.com/storytold)
 
