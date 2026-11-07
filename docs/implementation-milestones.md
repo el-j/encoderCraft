@@ -554,6 +554,29 @@ flowchart LR
 
 ---
 
+### Milestone 31: UI Density, Spacing & Layout Parity
+**Objective:** Calibrate all egui panels to match the exact density, padding, alignment, and visual hierarchy of Adobe Media Encoder 2026. Tracked under Milestone [M31 - UI Density, Spacing & Layout Parity](https://github.com/el-j/encoderCraft/milestone/10).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Panel Insets & Heading Removal ([#131](https://github.com/el-j/encoderCraft/issues/131), [#132](https://github.com/el-j/encoderCraft/issues/132), PR [#151](https://github.com/el-j/encoderCraft/pull/151)):**
+   - Standardized uniform 8px padding (`tokens.panel_inset`) across all dock panels; removed redundant titles.
+2. [x] **Compact Queue Toolbar & Footer ([#133](https://github.com/el-j/encoderCraft/issues/133), [#134](https://github.com/el-j/encoderCraft/issues/134), PR [#152](https://github.com/el-j/encoderCraft/pull/152)):**
+   - Single-row compact toolbar; pinned footer with Auto Shutdown, renderer selector, and overall progress; `QueueColumnWidths` alignment.
+3. [x] **Preset Browser Tree Hierarchy ([#135](https://github.com/el-j/encoderCraft/issues/135), PR [#153](https://github.com/el-j/encoderCraft/pull/153)):**
+   - Expandable tree hierarchy for System/User presets, full-width search, human-readable format and codec display names.
+4. [x] **Media Browser Sidebar Tree & Zoom ([#136](https://github.com/el-j/encoderCraft/issues/136), PR [#154](https://github.com/el-j/encoderCraft/pull/154)):**
+   - Left collapsible location sidebar, flat column headers (`MediaBrowserColumnWidths`), status bar with item count and zoom slider.
+5. [x] **Hardware Renderer Auto-Detection ([#137](https://github.com/el-j/encoderCraft/issues/137), PR [#155](https://github.com/el-j/encoderCraft/pull/155)):**
+   - Runtime GPU/hardware encoder discovery in `crates/platform` with persistent UI selection in the queue footer.
+6. [x] **Visual Regression Metrics Harness ([#138](https://github.com/el-j/encoderCraft/issues/138)):**
+   - Headless test assertions validating panel insets, row heights, and strict header-to-cell column alignment (`test_layout_metrics.rs`).
+7. [x] **Parity Honesty Audit & Calibration ([#150](https://github.com/el-j/encoderCraft/issues/150)):**
+   - Calibrated `target-app-parity.md` with explicit verified/partial statuses, measured pixel dimensions, and Milestone 31–34 roadmap tracking.
+
+---
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |
