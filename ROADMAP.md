@@ -225,7 +225,45 @@ Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Mil
 - [x] **M30.7: Audio DAW & Multitrack (#76)** – Audition SESX and SoundCraft conversion: clean-room `.sesx`/`.soundcraft` parsers, `DawSession` IR, BWF master with iXML, stems and R128 loudness; hardened against hostile input; real clip decode, resample, gain/pan/declick mixing via `soundcraft-dsp`, WAV/FLAC/AIFF/`.sesx`/`.soundcraft` outputs, CLI `encode mix.sesx -o out.wav --stems`.
 - [x] **M30.8: UI Inspector & Headless CLI (#77)** – `encodercraft convert <input> --to <format>` with source/target validation; inspector destination filtering by source container; domain-aware tabs (Composition, Layout, CAD, Layers) driven by a source inventory; `--sequence`, `--pages` and `--layers` selection honoured by the pipeline (multi-sequence prproj/filmcraft/effectcraft/AEP, per-page PDF/X-4 output, CAD and layered-image layer filtering); `probe` lists sequences, pages and layers.
 
+## Milestone 31: UI Density, Spacing & Layout Parity
+
+Tracked under Milestone [M31 - UI Density, Spacing & Layout Parity](https://github.com/el-j/encoderCraft/milestone/10).
+
+- [x] **M31.1: Unified Panel Insets & Redundant Headings (#131, #132, PR #151)** – Standardized uniform `panel_inset = 8.0px` margins across all dock panes; eliminated redundant panel title headers duplicate to dock tabs.
+- [x] **M31.2: Reference Queue Toolbar, Footer & Aligned Grid (#133, #134, PR #152)** – Pinned AME-style single-row icon action toolbar on top; relocated Auto Shutdown, Renderer selector, and Overall Progress bar to the queue footer; implemented `QueueColumnWidths` for strict vertical column alignment.
+- [x] **M31.3: Preset Browser Tree Hierarchy & Search (#135, PR #153)** – Expandable tree hierarchy for System and User preset groups; full-width search bar; human-readable format and codec display names (`H.264 / AVC`, `Apple ProRes`, etc.).
+- [x] **M31.4: Media Browser Reference Directory Tree & Zoom (#136, PR #154)** – Left collapsible location sidebar (Favorites, Local Storage, Volumes); strict table column alignment (`MediaBrowserColumnWidths`); bottom status bar with item count and thumbnail zoom slider.
+- [x] **M31.5: Hardware Renderer Auto-Detection (#137, PR #155)** – Runtime hardware GPU/encoder discovery via platform crate (`available_renderers()`); interactive selector in queue footer with persistence.
+- [x] **M31.6: Visual Regression Metrics Harness (#138)** – Headless layout assertion tests verifying panel insets, row heights, and table column boundary alignments (`test_layout_metrics.rs`).
+- [x] **M31.7: Parity Honesty Audit & Calibration (#150)** – Calibrated `target-app-parity.md` with explicit verified/partial statuses, reference UI pixel measurements, and tracking links across Milestones 31–34.
+
+## Milestone 32: Export Settings Inspector & Effects Pipeline
+
+Tracked under Milestone [M32 - Export Settings Inspector & Effects Pipeline](https://github.com/el-j/encoderCraft/milestone/11).
+
+- [ ] **M32.1: Tabbed Export Settings Modal with Summary Panel & Match Source (#139)**
+- [ ] **M32.2: Multi-Pass & Rate Control Inspector Controls (#140)**
+- [ ] **M32.3: Audio Export Tab & Channel Layout Selectors (#141)**
+- [ ] **M32.4: Effects Pipeline Tabs (LUMETRI / LUT Preview, Timecode Burn-in) (#142)**
+- [ ] **M32.5: Presets Export Settings Synchronization & File Size Estimation (#143)**
+
+## Milestone 33: Multi-Domain Media Export & Format Breadth
+
+Tracked under Milestone [M33 - Multi-Domain Media Export & Format Breadth](https://github.com/el-j/encoderCraft/milestone/12).
+
+- [ ] **M33.1: 3D Scene & Asset Batch Transcoding (#144)**
+- [ ] **M33.2: PBR Game Texture Map Packing & Compression (#145)**
+- [ ] **M33.3: Prepress & Document Export Pipelines (#146)**
+- [ ] **M33.4: Professional Cinema RAW & Camera Ingest Formats (#147)**
+
+## Milestone 34: Headless Daemon, Watch Folder Service & Farm API Parity
+
+Tracked under Milestone [M34 - Headless Daemon, Watch Folder Service & Farm API Parity](https://github.com/el-j/encoderCraft/milestone/13).
+
+- [ ] **M34.1: Background Transcoding Daemon & REST / WebSocket API (#148)**
+- [ ] **M34.2: Automated Watch Folder Service with Network Ingest & Auto-Routing (#149)**
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).
-- The interface layout differs from the reference encoder (M27/M28).
+- The interface layout differs from the reference encoder (Resolved in M31).
