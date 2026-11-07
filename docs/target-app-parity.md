@@ -55,7 +55,7 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 | Preview monitor, transport, scopes, Encoding panel | Implemented (no audio playback yet) | #27–#29 |
 | Docking, persisted workspaces, configurable shortcuts | Verified | #31–#33, #131, #151 |
 | Preferences, watch folders, favourites persistence | Implemented | #38, #39 |
-| Export Settings Inspector modal & tabs | In-Progress | Milestone 32, #139–#143 |
+| Export Settings Inspector modal & tabs | Verified (AME Parity) | Milestone 32, #139–#143 |
 | Multi-domain format breadth (3D, Textures, Print) | In-Progress | Milestone 33, #144–#147 |
 | Headless daemon, watch service & farm API | In-Progress | Milestone 34, #148–#149 |
 | ICC, image sequences, 16-bit pipelines | In-Progress | #22–#24 |
@@ -120,13 +120,13 @@ Based on black-box measurements of the reference Adobe Media Encoder 2026 UI, th
 
 | Tab / Control | Adobe Media Encoder 2026 | encoderCraft | Parity Status & Notes |
 |---|---|---|---|
-| **Format & Multiplexer** | Container and codec dropdowns with conditional controls. | Clean dropdowns with real-time capability probing (grays out unsupported hardware codecs). | **In-Progress.** Tabbed modal inspector (#139). |
-| **Video Settings** | Width, Height, Frame Rate, Field Order, Aspect Ratio, Profile, Level, Tier, Bitrate. | Identical parameters mapped directly to native encoder configs (`H264Config`, `ProResConfig`). | **In-Progress.** Rate control inspector (#140). |
-| **Audio Settings** | Codec, Sample Rate, Channels, Bit Depth, Bitrate. | Full control over AAC, PCM, FLAC, Opus, ALAC; mono to 7.1 surround. | **In-Progress.** Audio export tab & channel layout (#141). |
-| **Loudness Normalization** | ITU-R BS.1770 / EBU R128 loudness radar with target LUFS and peak ceiling. | Integrated EBU R128 K-weighting filter, gated LUFS measurement, and True Peak limiter. | **Partial.** DSP filter verified; inspector UI in-progress (#141). |
-| **Effects & Overlays** | Lumetri Looks (LUTs), Watermark image, Timecode overlay, Name overlay. | 3D LUT (`.cube`) support, RGBA image watermark with opacity/corner anchoring, SMPTE timecode burn-in. | **Partial.** Pipeline verified; UI preview in-progress (#142). |
-| **Captions & Subtitles** | Burn-in, Sidecar file (SRT, VTT, SCC, TTML), Embed in container. | Burn-in into raster frames, sidecar file generation, or MP4 `tx3g` / MKV subtitle tracks. | **In-Progress.** Subtitle burn-in inspector (#142). |
-| **Metadata Tagging** | XMP, Dublin Core, basic ID3. | XMP, EXIF, IPTC, ID3v2, and MP4 `udta` / QuickTime keys metadata injection. | **In-Progress.** Preset sync & size estimation (#143). |
+| **Format & Multiplexer** | Container and codec dropdowns with conditional controls. | Clean dropdowns with real-time capability probing (grays out unsupported hardware codecs). | **Verified (Parity).** Tabbed modal inspector (#139). |
+| **Video Settings** | Width, Height, Frame Rate, Field Order, Aspect Ratio, Profile, Level, Tier, Bitrate. | Identical parameters mapped directly to native encoder configs (`H264Config`, `ProResConfig`). | **Verified (Parity).** Rate control & crop inspector (#140, #143). |
+| **Audio Settings** | Codec, Sample Rate, Channels, Bit Depth, Bitrate. | Full control over AAC, PCM, FLAC, Opus, ALAC; mono to 7.1 surround. | **Verified (Parity).** Audio export tab & channel layout (#141). |
+| **Loudness Normalization** | ITU-R BS.1770 / EBU R128 loudness radar with target LUFS and peak ceiling. | Integrated EBU R128 K-weighting filter, gated LUFS measurement, and True Peak limiter. | **Verified (Parity).** DSP filter and inspector UI (#141). |
+| **Effects & Overlays** | Lumetri Looks (LUTs), Watermark image, Timecode overlay, Name overlay. | 3D LUT (`.cube`) support, RGBA image watermark, SMPTE timecode burn-in, Video limiter, SDR conform. | **Verified (Parity).** Full effects pipeline & UI inspector controls (#139–#142). |
+| **Captions & Subtitles** | Burn-in, Sidecar file (SRT, VTT, SCC, TTML), Embed in container. | Burn-in into raster frames, sidecar file generation, or MP4 `tx3g` / MKV subtitle tracks. | **Verified (Parity).** Subtitle burn-in inspector & sidecar export (#142). |
+| **Metadata Tagging** | XMP, Dublin Core, basic ID3. | XMP, EXIF, IPTC, ID3v2, and MP4 `udta` / QuickTime keys metadata injection. | **Verified (Parity).** Preset sync & size estimation (#143). |
 
 ---
 

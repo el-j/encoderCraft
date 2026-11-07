@@ -702,6 +702,114 @@ pub struct VideoEncodeSettings {
     pub pixel_format: Option<PixelFormat>,
 }
 
+/// Screen anchoring position for visual overlays (timecode, watermark, name overlay).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayAnchor {
+    TopLeft,
+    TopRight,
+    #[default]
+    BottomLeft,
+    BottomRight,
+    Center,
+}
+
+/// Burn-in SMPTE timecode overlay configuration (AME Parity).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TimecodeOverlayConfig {
+    pub enabled: bool,
+    pub anchor: OverlayAnchor,
+    pub scale: usize,
+    pub text_opacity: f32,
+    pub bg_opacity: f32,
+    pub starting_timecode: Option<String>,
+}
+
+impl Default for TimecodeOverlayConfig {
+    fn default() -> Self {
+        Self { enabled: false, anchor: OverlayAnchor::BottomLeft, scale: 2, text_opacity: 1.0, bg_opacity: 0.65, starting_timecode: None }
+    }
+}
+
+/// Image watermark overlay configuration (AME Parity).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WatermarkOverlayConfig {
+    pub enabled: bool,
+    pub path: Option<PathBuf>,
+    pub anchor: OverlayAnchor,
+    pub scale: f32,
+    pub opacity: f32,
+}
+
+impl Default for WatermarkOverlayConfig {
+    fn default() -> Self {
+        Self { enabled: false, path: None, anchor: OverlayAnchor::BottomRight, scale: 0.2, opacity: 0.85 }
+    }
+}
+
+/// Dailies text and name overlay configuration (AME Parity).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NameOverlayConfig {
+    pub enabled: bool,
+    pub prefix: String,
+    pub suffix: String,
+    pub use_source_name: bool,
+    pub anchor: OverlayAnchor,
+    pub opacity: f32,
+}
+
+impl Default for NameOverlayConfig {
+    fn default() -> Self {
+        Self { enabled: false, prefix: String::new(), suffix: String::new(), use_source_name: true, anchor: OverlayAnchor::TopLeft, opacity: 1.0 }
+    }
+}
+
+/// Broadcast video limiter clipping ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VideoLimiterClipLevel {
+    #[default]
+    Ire100,
+    Ire103,
+}
+
+/// Broadcast video limiter for broadcast compliance (AME Parity).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VideoLimiterConfig {
+    pub enabled: bool,
+    pub clip_level: VideoLimiterClipLevel,
+    pub soft_knee_percent: f32,
+}
+
+impl Default for VideoLimiterConfig {
+    fn default() -> Self {
+        Self { enabled: false, clip_level: VideoLimiterClipLevel::Ire100, soft_knee_percent: 5.0 }
+    }
+}
+
+/// SDR conform tone mapping for HDR sources (HLG/PQ to Rec.709).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SdrConformConfig {
+    pub enabled: bool,
+    pub target_nits: f32,
+}
+
+/// Source cropping margins in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CropConfig {
+    pub enabled: bool,
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AudioEncodeSettings {
@@ -761,6 +869,24 @@ pub struct OutputTarget {
     /// Scale mode, rotation and frame-rate conversion.
     #[serde(default)]
     pub transform: VideoTransform,
+    /// Burn-in SMPTE timecode overlay configuration.
+    #[serde(default)]
+    pub timecode_overlay: Option<TimecodeOverlayConfig>,
+    /// Image watermark overlay configuration.
+    #[serde(default)]
+    pub watermark: Option<WatermarkOverlayConfig>,
+    /// Dailies name & text overlay configuration.
+    #[serde(default)]
+    pub name_overlay: Option<NameOverlayConfig>,
+    /// Broadcast video limiter configuration.
+    #[serde(default)]
+    pub video_limiter: Option<VideoLimiterConfig>,
+    /// SDR conform tone mapping for HDR sources.
+    #[serde(default)]
+    pub sdr_conform: Option<SdrConformConfig>,
+    /// Source frame crop margins.
+    #[serde(default)]
+    pub crop: Option<CropConfig>,
 }
 
 impl Default for OutputTarget {
@@ -789,6 +915,12 @@ impl Default for OutputTarget {
             video: VideoEncodeSettings::default(),
             audio: None,
             transform: VideoTransform::default(),
+            timecode_overlay: None,
+            watermark: None,
+            name_overlay: None,
+            video_limiter: None,
+            sdr_conform: None,
+            crop: None,
         }
     }
 }
@@ -878,6 +1010,57 @@ mod tests {
 
         let json = spec.to_json().unwrap();
         assert!(!json.contains("\"audio\""), "targets without audio settings should preserve the legacy JSON shape");
+        let deserialized = CraftJobSpec::from_json(&json).unwrap();
+        assert_eq!(spec, deserialized);
+    }
+
+    #[test]
+    fn test_effects_and_crop_json_roundtrip() {
+        let target = OutputTarget {
+            target_id: "tgt_effects".into(),
+            output_path: PathBuf::from("/media/out_effects.mp4"),
+            preset_name: "YouTube 1080p Dailies".into(),
+            container: ContainerType::IsoBmffMp4,
+            timecode_overlay: Some(TimecodeOverlayConfig {
+                enabled: true,
+                anchor: OverlayAnchor::BottomRight,
+                scale: 3,
+                text_opacity: 0.9,
+                bg_opacity: 0.5,
+                starting_timecode: Some("01:00:00:00".into()),
+            }),
+            watermark: Some(WatermarkOverlayConfig {
+                enabled: true,
+                path: Some(PathBuf::from("/branding/logo.png")),
+                anchor: OverlayAnchor::TopRight,
+                scale: 0.15,
+                opacity: 0.75,
+            }),
+            name_overlay: Some(NameOverlayConfig {
+                enabled: true,
+                prefix: "SCENE 12 - ".into(),
+                suffix: " - TAKE 1".into(),
+                use_source_name: true,
+                anchor: OverlayAnchor::TopLeft,
+                opacity: 0.95,
+            }),
+            video_limiter: Some(VideoLimiterConfig { enabled: true, clip_level: VideoLimiterClipLevel::Ire103, soft_knee_percent: 4.5 }),
+            sdr_conform: Some(SdrConformConfig { enabled: true, target_nits: 100.0 }),
+            crop: Some(CropConfig { enabled: true, left: 140, top: 0, right: 140, bottom: 0 }),
+            ..Default::default()
+        };
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test_effects_job".into(),
+            client_info: ClientInfo { app_name: "FilmCraft".into(), app_version: "1.0.0".into(), pid: 42, user_notes: None },
+            priority: JobPriority::High,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: PathBuf::from("/media/raw.mov"), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![target],
+        };
+
+        let json = spec.to_json().unwrap();
         let deserialized = CraftJobSpec::from_json(&json).unwrap();
         assert_eq!(spec, deserialized);
     }

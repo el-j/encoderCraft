@@ -15,9 +15,10 @@ pub use audio::{AudioSampleBuffer, ChannelLayout};
 pub use error::EncoderError;
 pub use frame::{MAX_FRAME_BUFFER_BYTES, PlaneDescriptor, VideoFrame};
 pub use job::{
-    AudioEncodeSettings, AudioStemMode, CaptionExportFormat, ClientInfo, ColorTag, ContainerType, CraftJobSpec, FrameRateMode, JobPriority,
-    JobStatus, MediaStreamKind, OutputTarget, RateMode, Rotation, ScalingFilter, SourceDescriptor, SourceSelection, StartPolicy, StitchedClipSource,
-    VideoEncodeSettings, VideoTransform,
+    AudioEncodeSettings, AudioStemMode, CaptionExportFormat, ClientInfo, ColorTag, ContainerType, CraftJobSpec, CropConfig, FrameRateMode,
+    JobPriority, JobStatus, MediaStreamKind, NameOverlayConfig, OutputTarget, OverlayAnchor, RateMode, Rotation, ScalingFilter, SdrConformConfig,
+    SourceDescriptor, SourceSelection, StartPolicy, StitchedClipSource, TimecodeOverlayConfig, VideoEncodeSettings, VideoLimiterClipLevel,
+    VideoLimiterConfig, VideoTransform, WatermarkOverlayConfig,
 };
 pub use metadata::XmpMetadata;
 pub use timecode::{MediaTimecode, Rational64};
