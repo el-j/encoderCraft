@@ -80,6 +80,18 @@ pub struct AppPreferences {
     /// Shut the computer down after the queue has finished, after a cancellable countdown.
     #[serde(default)]
     pub auto_shutdown: bool,
+    /// Start queue automatically when the user is idle for this timeout.
+    #[serde(default)]
+    pub auto_start_on_idle: bool,
+    /// Inactivity minutes before starting the queue automatically.
+    #[serde(default = "default_idle_timeout_minutes")]
+    pub idle_timeout_minutes: u32,
+    /// Automatically increment output file names if a destination file already exists on disk.
+    #[serde(default = "default_true")]
+    pub increment_output_filename: bool,
+    /// Enable watch folder automatic monitoring and transcode triggering.
+    #[serde(default = "default_true")]
+    pub auto_encode_watch_folders: bool,
     /// Selected hardware / software renderer backend name.
     #[serde(default = "default_renderer")]
     pub selected_renderer: String,
@@ -96,6 +108,10 @@ fn default_true() -> bool {
 }
 
 fn default_parallelism() -> usize {
+    2
+}
+
+fn default_idle_timeout_minutes() -> u32 {
     2
 }
 
@@ -136,6 +152,7 @@ impl AppPreferences {
             self.schema_version = PREFERENCES_SCHEMA_VERSION;
         }
         self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 8);
+        self.idle_timeout_minutes = self.idle_timeout_minutes.clamp(1, 60);
         if !matches!(self.theme.as_str(), "Dark" | "Medium Dark" | "Light" | "High Contrast") {
             self.theme = default_theme();
         }
@@ -153,6 +170,10 @@ impl Default for AppPreferences {
             max_parallel_jobs: 2,
             theme: "Dark".into(),
             auto_shutdown: false,
+            auto_start_on_idle: false,
+            idle_timeout_minutes: 2,
+            increment_output_filename: true,
+            auto_encode_watch_folders: true,
             selected_renderer: default_renderer(),
             system_title_bar: false,
             lossy_conversion_decisions: Vec::new(),

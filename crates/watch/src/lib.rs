@@ -10,6 +10,6 @@ pub mod config;
 pub mod service;
 pub mod settle;
 
-pub use config::{PostProcessAction, WatchFolderConfig};
+pub use config::{PostProcessAction, WatchFolderConfig, WatchTargetConfig};
 pub use service::WatchFolderService;
 pub use settle::probe_file_settled;

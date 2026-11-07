@@ -166,6 +166,7 @@ pub fn render_watch_panel(
                             PostProcessAction::MoveToProcessed(_) => "Move to _processed",
                             PostProcessAction::DeleteSource => "Delete source",
                             PostProcessAction::MoveToErrors(_) => "Move to _errors",
+                            PostProcessAction::MoveToArchive(_) => "Archive (timestamped)",
                         };
                         ui.label(RichText::new(post_label).small().color(tokens.text_dim));
 
@@ -190,6 +191,83 @@ pub fn render_watch_panel(
             {
                 state.configs.remove(r_idx);
                 state.selected_config_idx = None;
+            }
+
+            // --- 3. Selected Watch Folder Details & Multi-Target Routing ---
+            if let Some(idx) = state.selected_config_idx
+                && idx < state.configs.len()
+            {
+                let cfg = &mut state.configs[idx];
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(8.0).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Watch Folder Details:").strong().color(tokens.text_primary));
+                        ui.label(RichText::new(cfg.watch_dir.display().to_string()).color(tokens.accent_primary));
+                    });
+
+                    ui.add_space(4.0);
+
+                    // Post-processing action selector
+                    ui.horizontal(|ui| {
+                        ui.label("Source Archiving / Post-Action:");
+                        let is_leave = matches!(cfg.post_action, PostProcessAction::LeaveInPlace);
+                        let is_proc = matches!(cfg.post_action, PostProcessAction::MoveToProcessed(_));
+                        let is_arch = matches!(cfg.post_action, PostProcessAction::MoveToArchive(_));
+                        let is_del = matches!(cfg.post_action, PostProcessAction::DeleteSource);
+
+                        if ui.selectable_label(is_leave, "Leave in place").clicked() {
+                            cfg.post_action = PostProcessAction::LeaveInPlace;
+                        }
+                        if ui.selectable_label(is_proc, "Move to /Source/").clicked() {
+                            cfg.post_action = PostProcessAction::MoveToProcessed(cfg.watch_dir.join("Source"));
+                        }
+                        if ui.selectable_label(is_arch, "Archive (Timestamped)").clicked() {
+                            cfg.post_action = PostProcessAction::MoveToArchive(cfg.watch_dir.join("Archive"));
+                        }
+                        if ui.selectable_label(is_del, "Delete Source").clicked() {
+                            cfg.post_action = PostProcessAction::DeleteSource;
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Output Target Presets (1-to-N Routing):").strong().color(tokens.text_primary));
+
+                    let mut target_to_remove = None;
+                    let targets_count = cfg.targets.len();
+                    for (t_idx, target) in cfg.targets.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("#{}:", t_idx + 1)).color(tokens.text_dim));
+                            ui.label(RichText::new(&target.preset_name).strong().color(tokens.accent_primary));
+
+                            let out_path = target.output_dir.as_ref().unwrap_or(&cfg.output_dir);
+                            ui.label(RichText::new(format!("-> {}", out_path.display())).small().color(tokens.text_secondary));
+
+                            if icons::button_with_label(ui, icons::Icon::Folder, "Subfolder...", false, tokens, "Custom target directory").clicked()
+                                && let Some(picked) = rfd::FileDialog::new().set_title("Select Target Output Subdirectory").pick_folder()
+                            {
+                                target.output_dir = Some(picked);
+                            }
+
+                            if targets_count > 1 && icons::button(ui, icons::Icon::Trash, 14.0, false, tokens, "Remove target").clicked() {
+                                target_to_remove = Some(t_idx);
+                            }
+                        });
+                    }
+
+                    if let Some(del_t) = target_to_remove
+                        && del_t < cfg.targets.len()
+                    {
+                        cfg.targets.remove(del_t);
+                    }
+
+                    ui.add_space(4.0);
+                    if ui.button("+ Add Output Preset Target...").clicked() {
+                        cfg.targets.push(encodercraft_watch::WatchTargetConfig::new("Match Source - High Bitrate", None));
+                    }
+                });
             }
         });
     });

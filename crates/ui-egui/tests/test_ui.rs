@@ -135,3 +135,30 @@ fn app_renders_with_every_title_bar_style() {
         output.textures_delta.clear();
     }
 }
+
+#[test]
+fn app_on_exit_removes_finished_jobs_when_preference_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal_path = dir.path().join("journal.json");
+    let mut journal = encodercraft_engine::QueueJournal::default();
+    let mut job = encodercraft_engine::QueuedJob::new(encodercraft_core::CraftJobSpec {
+        version: "1.0".into(),
+        job_id: "done-1".into(),
+        client_info: encodercraft_core::ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1, user_notes: None },
+        priority: encodercraft_core::JobPriority::Normal,
+        start_policy: encodercraft_core::StartPolicy::AutoStart,
+        source: encodercraft_core::SourceDescriptor::File { path: "in.wav".into(), start_tick: None, duration_ticks: None, timebase: None },
+        targets: vec![],
+    });
+    job.status = encodercraft_core::JobStatus::Completed;
+    journal.jobs.push(job);
+    encodercraft_engine::save_journal_atomic(&journal_path, &journal).unwrap();
+
+    let queue = Arc::new(QueueManager::new_persisted(journal_path).unwrap());
+    assert_eq!(queue.list_jobs().len(), 1);
+
+    let mut app = EncoderCraftApp::new(queue.clone(), Arc::new(Mutex::new(PresetRegistry::default())));
+    app.prefs_state.prefs.remove_finished_on_exit = true;
+    app.on_exit();
+    assert!(queue.list_jobs().is_empty());
+}
