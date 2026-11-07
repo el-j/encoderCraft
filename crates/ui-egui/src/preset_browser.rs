@@ -35,9 +35,6 @@ pub fn render_preset_browser(
 ) -> Option<crate::commands::AppCommand> {
     let mut chosen_command = None;
     ui.vertical(|ui| {
-        ui.heading(RichText::new("Preset Browser").size(15.0));
-        ui.add_space(4.0);
-
         // Search input & New Preset action
         ui.horizontal(|ui| {
             icons::icon_label(ui, icons::Icon::Search, 14.0, tokens.text_dim);
