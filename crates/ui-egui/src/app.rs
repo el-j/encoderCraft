@@ -595,11 +595,12 @@ impl EncoderCraftApp {
     }
 
     fn brightness_from_theme(theme: &str) -> Brightness {
-        match theme {
-            "Medium Dark" => Brightness::MediumDark,
-            "Light" => Brightness::Light,
-            "High Contrast" => Brightness::HighContrast,
-            _ => Brightness::Dark,
+        match theme.to_lowercase().replace(['-', '_', ' '], "").as_str() {
+            "dark" => Brightness::Dark,
+            "mediumdark" => Brightness::MediumDark,
+            "light" => Brightness::Light,
+            "highcontrast" => Brightness::HighContrast,
+            _ => Brightness::MediumDark,
         }
     }
 

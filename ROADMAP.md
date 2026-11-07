@@ -271,6 +271,15 @@ Tracked under Milestone [M35 - Source Properties, Quick Preset Switcher & Stitch
 - [x] **M35.2: Inline Format and Preset Quick-Switch Popups in Queue Table (#161)** – Interactive in-place dropdown selectors directly in the queue table summary row for instant format and preset switching without entering the inspector modal, featuring container auto-extension sync and "Custom Export Settings..." link.
 - [x] **M35.3: Interactive Stitch Clips Destination and Preset Dialog (#162)** – Dedicated sequence assembly dialog with clip order re-ordering (Up/Down), output path picker, preset selector, and expandable queue child clips display.
 
+## Milestone 36: UI Table Column Locking, Spacing Precision & Theme Neutrality
+
+Tracked under Milestone [M36 - UI Table Column Locking, Spacing Precision & Theme Neutrality](https://github.com/el-j/encoderCraft/milestone/14).
+
+- [x] **M36.1: Strict Table Column Locking & Bounded Clipping (#164)** – Implemented `render_column_cell` with exact size allocation and clipping bounds, preventing long source file names or sibling chips from shifting downstream columns; added `test_render_column_cell_strict_bounds`.
+- [x] **M36.2: Media Browser Standard Timestamps & Label Truncation (#165)** – Replaced relative date strings with formatted ISO timestamps (`YYYY-MM-DD HH:MM`) using `chrono`, added `.truncate()` across list view columns, and calibrated column widths.
+- [x] **M36.3: Preset Browser Adaptive Column Widths & Tree Alignment (#166)** – Adaptive column width computation (`PresetColumnWidths`), internalized tree indentations inside the Name column, and aligned Format/Frame Size/Frame Rate/Target Rate columns across all rows.
+- [x] **M36.4: Adobe Reference Neutral Greys & Test Config Isolation (#167)** – Authentic `Tokens::medium_dark()` palette matching Adobe reference screenshots with neutral grey chrome and safe fallback parsing.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).

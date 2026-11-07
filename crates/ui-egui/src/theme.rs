@@ -123,22 +123,61 @@ impl Tokens {
         }
     }
 
+    /// Medium Dark theme tokens matching Adobe Media Encoder 2026 default layout.
+    pub fn medium_dark() -> Self {
+        Self {
+            dark: true,
+            bg_app: Color32::from_rgb(33, 33, 33),
+            bg_panel: Color32::from_rgb(45, 45, 45),
+            bg_panel_darker: Color32::from_rgb(36, 36, 36),
+            bg_surface: Color32::from_rgb(54, 54, 54),
+            bg_surface_hover: Color32::from_rgb(66, 66, 66),
+            bg_surface_active: Color32::from_rgb(76, 76, 76),
+            border_subtle: Color32::from_rgb(36, 36, 36),
+            border_strong: Color32::from_rgb(72, 72, 72),
+            text_primary: Color32::from_rgb(235, 235, 235),
+            text_secondary: Color32::from_rgb(180, 180, 180),
+            text_dim: Color32::from_rgb(132, 132, 132),
+            accent_primary: Color32::from_rgb(14, 134, 255),
+            accent_hover: Color32::from_rgb(45, 155, 255),
+            status_queued: Color32::from_rgb(140, 140, 150),
+            status_processing: Color32::from_rgb(255, 179, 0),
+            status_completed: Color32::from_rgb(52, 199, 89),
+            status_failed: Color32::from_rgb(255, 69, 58),
+            status_paused: Color32::from_rgb(175, 82, 222),
+            status_cancelled: Color32::from_rgb(100, 100, 110),
+            icon: Color32::from_rgb(190, 190, 200),
+            icon_active: Color32::from_rgb(14, 134, 255),
+            hover: Color32::from_rgb(58, 58, 64),
+            pressed: Color32::from_rgb(68, 68, 76),
+            radius_sm: 4.0,
+            panel_inset: 8.0,
+            toolbar_gap: 4.0,
+            row_height: 22.0,
+            section_gap: 6.0,
+        }
+    }
+
+    /// Light theme tokens.
+    pub fn light() -> Self {
+        let mut d = Self::dark();
+        d.dark = false;
+        d.bg_app = Color32::from_rgb(240, 240, 245);
+        d.bg_panel = Color32::from_rgb(255, 255, 255);
+        d.bg_panel_darker = Color32::from_rgb(230, 230, 235);
+        d.bg_surface = Color32::from_rgb(245, 245, 250);
+        d.border_subtle = Color32::from_rgb(210, 210, 220);
+        d.text_primary = Color32::from_rgb(20, 20, 25);
+        d.text_secondary = Color32::from_rgb(80, 80, 90);
+        d.text_dim = Color32::from_rgb(130, 130, 140);
+        d
+    }
+
     pub fn for_brightness(b: Brightness) -> Self {
         match b {
-            Brightness::Dark | Brightness::MediumDark => Self::dark(),
-            Brightness::Light => {
-                let mut d = Self::dark();
-                d.dark = false;
-                d.bg_app = Color32::from_rgb(240, 240, 245);
-                d.bg_panel = Color32::from_rgb(255, 255, 255);
-                d.bg_panel_darker = Color32::from_rgb(230, 230, 235);
-                d.bg_surface = Color32::from_rgb(245, 245, 250);
-                d.border_subtle = Color32::from_rgb(210, 210, 220);
-                d.text_primary = Color32::from_rgb(20, 20, 25);
-                d.text_secondary = Color32::from_rgb(80, 80, 90);
-                d.text_dim = Color32::from_rgb(130, 130, 140);
-                d
-            }
+            Brightness::Dark => Self::dark(),
+            Brightness::MediumDark => Self::medium_dark(),
+            Brightness::Light => Self::light(),
             Brightness::HighContrast => Self::high_contrast(),
         }
     }
@@ -206,12 +245,13 @@ mod tests {
 
     #[test]
     fn dark_theme_is_neutral_grey_without_accent_fills() {
-        let t = Tokens::dark();
-        for c in [t.bg_app, t.bg_panel, t.bg_panel_darker, t.bg_surface, t.border_subtle] {
-            assert!(c.r() == c.g() && c.g() == c.b(), "{c:?} must be neutral grey");
+        for t in [Tokens::dark(), Tokens::medium_dark()] {
+            for c in [t.bg_app, t.bg_panel, t.bg_panel_darker, t.bg_surface, t.border_subtle] {
+                assert!(c.r() == c.g() && c.g() == c.b(), "{c:?} must be neutral grey");
+            }
+            assert!(t.bg_panel_darker.r() > 16 && t.bg_panel.r() < 60);
+            assert_ne!(t.accent_primary, Color32::YELLOW);
         }
-        assert!(t.bg_panel_darker.r() > 16 && t.bg_panel.r() < 60);
-        assert_ne!(t.accent_primary, Color32::YELLOW);
     }
 
     #[test]

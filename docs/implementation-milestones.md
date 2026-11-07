@@ -648,6 +648,30 @@ flowchart LR
 
 ---
 
+### Milestone 36: UI Table Column Locking, Spacing Precision & Theme Neutrality
+**Objective:** Deliver strict column boundary locking for Queue, Media Browser, and Preset Browser, standard ISO timestamps, adaptive column sizing, and Adobe reference neutral grey Medium Dark theme. Tracked under Milestone [M36 - UI Table Column Locking, Spacing Precision & Theme Neutrality](https://github.com/el-j/encoderCraft/milestone/14).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Strict Table Column Locking & Bounded Clipping in Queue Panel ([#164](https://github.com/el-j/encoderCraft/issues/164)):**
+   - Implemented `render_column_cell` with fixed allocation width and strict clipping rect, preventing any cell widget or long source text from expanding parent row layout bounds.
+   - Dynamic source name truncation proportional to remaining source column pixel width.
+   - Pixel-perfect vertical alignment across table header, summary parent rows, multi-target child rows, and stitched sequence segments.
+   - Synthetic regression test `test_render_column_cell_strict_bounds` verifying layout invariance against arbitrarily long child content.
+2. [x] **Media Browser Standard Timestamps (YYYY-MM-DD HH:MM) & Label Truncation ([#165](https://github.com/el-j/encoderCraft/issues/165)):**
+   - Formatted Date Modified column using standard ISO date/time format (`YYYY-MM-DD HH:MM`) via `chrono`.
+   - Added `.truncate()` to Name, Type, Size, and Date labels preventing horizontal overflow.
+   - Calibrated column width allocations (`name: flex`, `kind: 70px`, `size: 65px`, `date: 115px`).
+3. [x] **Preset Browser Adaptive Column Widths & Tree Alignment ([#166](https://github.com/el-j/encoderCraft/issues/166)):**
+   - Implemented `PresetColumnWidths::compute` dynamically allocating column widths to prevent horizontal blowout when sidebar is docked at compact widths (~300 px).
+   - Embedded tree hierarchy indentations inside the Name column cell, guaranteeing that all downstream columns (Format, Frame Size, Frame Rate, Target Rate) align vertically across root, category, and preset rows.
+   - Text truncation on all preset table cells.
+4. [x] **Adobe Reference Neutral Greys for Medium Dark Theme & Test Config Isolation ([#167](https://github.com/el-j/encoderCraft/issues/167)):**
+   - Calibrated `Tokens::medium_dark()` with authentic Adobe Media Encoder measured neutral grey panels (`#2d2d2d` / `#282828` / `#242424`).
+   - Bulletproof theme string parser falling back safely to `MediumDark` on unknown or legacy config values.
+   - Validated test suite configuration isolation ensuring zero mutation of real user preferences.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

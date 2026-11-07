@@ -1303,6 +1303,7 @@ dependencies = [
 name = "encodercraft-ui-egui"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "chrono",
  "craft-keymap",
  "craft-menu",
  "craft-ui",
