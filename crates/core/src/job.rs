@@ -887,6 +887,9 @@ pub struct OutputTarget {
     /// Source frame crop margins.
     #[serde(default)]
     pub crop: Option<CropConfig>,
+    /// Multichannel matrix audio routing and track mapping.
+    #[serde(default)]
+    pub audio_mapping: Option<crate::audio::AudioChannelMapping>,
 }
 
 impl Default for OutputTarget {
@@ -921,6 +924,7 @@ impl Default for OutputTarget {
             video_limiter: None,
             sdr_conform: None,
             crop: None,
+            audio_mapping: None,
         }
     }
 }

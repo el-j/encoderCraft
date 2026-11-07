@@ -260,8 +260,8 @@ Tracked under Milestone [M33 - Queue Automation, Watch Folder Depth & Preference
 
 Tracked under Milestone [M34 - Audio Channel Mapping & Broadcast MXF Profiles](https://github.com/el-j/encoderCraft/milestone/12).
 
-- [ ] **M34.1: Multichannel Audio Matrix Router & Channel Mapping (#148)** – Custom mono, stereo, 5.1 surround stem routing and assignment in export settings and pipeline.
-- [ ] **M34.2: Broadcast Delivery MXF Profiles (#149)** – Sony XDCAM HD422, Panasonic AVC-Intra, and DPP AS-11 OP-1a MXF broadcast presets.
+- [x] **M34.1: Multichannel Audio Matrix Router & Channel Mapping (#148)** – Multichannel matrix router (`AudioChannelMapping`), track layouts (`AudioTrackLayout::DiscreteMono`, `StereoPairs`, `Surround51`, `Surround71`), interactive GUI routing grid in Audio tab, and pipeline routing execution (`apply_audio_matrix`).
+- [x] **M34.2: Broadcast Delivery MXF Profiles (#149)** – Factory broadcast compliance presets for Sony XDCAM HD422 1080 (50 Mbps), Panasonic AVC-Intra 100 1080, DPP AS-11 UK HD Delivery (25p / EBU R128), and AMWA AS-10 Broadcast Shim in MXF OP-1a with 8-channel 24-bit 48 kHz PCM audio.
 
 ## Known Issues (alpha.1, tracked above)
 

@@ -927,12 +927,14 @@ fn render_audio_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
             .selected_text(match state.audio_channels_idx {
                 0 => "Mono (1.0)",
                 2 => "5.1 Surround",
+                3 => "8 Channels (7.1 / Broadcast)",
                 _ => "Stereo (2.0)",
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut state.audio_channels_idx, 0, "Mono (1.0)");
                 ui.selectable_value(&mut state.audio_channels_idx, 1, "Stereo (2.0)");
                 ui.selectable_value(&mut state.audio_channels_idx, 2, "5.1 Surround");
+                ui.selectable_value(&mut state.audio_channels_idx, 3, "8 Channels (7.1 Surround / Broadcast 8-Track)");
             });
     });
 
@@ -959,6 +961,88 @@ fn render_audio_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
             });
     });
     target.audio_stems = if current_stems == encodercraft_core::AudioStemMode::None { None } else { Some(current_stems) };
+
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(4.0);
+
+    let default_ch_count = match state.audio_channels_idx {
+        0 => 1,
+        2 => 6,
+        3 => 8,
+        _ => 2,
+    };
+    let mut mapping = target.audio_mapping.clone().unwrap_or_else(|| encodercraft_core::AudioChannelMapping::new_pass_through(default_ch_count));
+
+    let mut custom_matrix_enabled = target.audio_mapping.is_some();
+    if ui.checkbox(&mut custom_matrix_enabled, "Multichannel Matrix Routing Grid").changed() {
+        if custom_matrix_enabled {
+            target.audio_mapping = Some(mapping.clone());
+        } else {
+            target.audio_mapping = None;
+        }
+    }
+
+    if custom_matrix_enabled {
+        ui.indent("audio_matrix_indent", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Track Layout:");
+                egui::ComboBox::from_id_salt("matrix_track_layout")
+                    .selected_text(match mapping.track_layout {
+                        encodercraft_core::AudioTrackLayout::Standard => "Standard",
+                        encodercraft_core::AudioTrackLayout::DiscreteMono => "Discrete Mono Tracks",
+                        encodercraft_core::AudioTrackLayout::StereoPairs => "Stereo Pairs",
+                        encodercraft_core::AudioTrackLayout::Surround51 => "5.1 Surround",
+                        encodercraft_core::AudioTrackLayout::Surround71 => "7.1 / 8-Ch Broadcast",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut mapping.track_layout, encodercraft_core::AudioTrackLayout::Standard, "Standard");
+                        ui.selectable_value(&mut mapping.track_layout, encodercraft_core::AudioTrackLayout::DiscreteMono, "Discrete Mono Tracks");
+                        ui.selectable_value(&mut mapping.track_layout, encodercraft_core::AudioTrackLayout::StereoPairs, "Stereo Pairs");
+                        ui.selectable_value(&mut mapping.track_layout, encodercraft_core::AudioTrackLayout::Surround51, "5.1 Surround");
+                        ui.selectable_value(&mut mapping.track_layout, encodercraft_core::AudioTrackLayout::Surround71, "7.1 / 8-Ch Broadcast");
+                    });
+
+                ui.separator();
+                if ui.button("1:1 Passthrough").clicked() {
+                    mapping = encodercraft_core::AudioChannelMapping::new_pass_through(mapping.output_channels);
+                }
+                if ui.button("Discrete 8-Ch").clicked() {
+                    mapping = encodercraft_core::AudioChannelMapping::new_discrete_mono(8);
+                }
+            });
+
+            ui.add_space(4.0);
+            ui.label(RichText::new("Matrix Cross-Routing (Output Channels x Input Channels):").small().color(ui.visuals().weak_text_color()));
+
+            let out_count = mapping.output_channels.min(8);
+            let in_count = 8.min(mapping.matrix.first().map(|r| r.len()).unwrap_or(2).max(2));
+
+            egui::Grid::new("audio_matrix_grid").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
+                ui.label("");
+                for in_idx in 0..in_count {
+                    ui.label(RichText::new(format!("In {}", in_idx + 1)).strong());
+                }
+                ui.end_row();
+
+                for out_idx in 0..out_count {
+                    ui.label(RichText::new(format!("Out {}", out_idx + 1)).strong());
+                    for in_idx in 0..in_count {
+                        let gain = mapping.get_gain(out_idx, in_idx);
+                        let is_active = gain > 0.0;
+                        let label = if is_active { format!("{:.1}", gain) } else { "—".into() };
+                        if ui.selectable_label(is_active, label).clicked() {
+                            let new_gain = if is_active { 0.0 } else { 1.0 };
+                            mapping.set_gain(out_idx, in_idx, new_gain);
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+
+            target.audio_mapping = Some(mapping);
+        });
+    }
 }
 
 fn render_effects_tab(ui: &mut Ui, target: &mut OutputTarget) {
@@ -1486,5 +1570,23 @@ mod tests {
         });
 
         assert!(target.crop.as_ref().is_some_and(|c| c.enabled && c.left == 50));
+    }
+
+    #[test]
+    fn test_audio_tab_matrix_router() {
+        let mut target = OutputTarget::default();
+        let mut state = InspectorState { audio_channels_idx: 3, ..Default::default() };
+
+        let mapping = encodercraft_core::AudioChannelMapping::new_discrete_mono(8);
+        target.audio_mapping = Some(mapping);
+
+        egui::__run_test_ui(|ui| {
+            render_audio_tab(ui, &mut target, &mut state);
+        });
+
+        assert!(target.audio_mapping.is_some());
+        let m = target.audio_mapping.as_ref().unwrap();
+        assert_eq!(m.output_channels, 8);
+        assert_eq!(m.track_layout, encodercraft_core::AudioTrackLayout::DiscreteMono);
     }
 }
