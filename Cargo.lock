@@ -1113,11 +1113,13 @@ dependencies = [
 name = "encodercraft-engine"
 version = "0.1.0-alpha.2"
 dependencies = [
+ "encodercraft-audio-dsp",
  "encodercraft-color",
  "encodercraft-core",
  "encodercraft-demux",
  "encodercraft-dispatch",
  "encodercraft-geom",
+ "encodercraft-image-codecs",
  "encodercraft-ipc",
  "encodercraft-pipeline",
  "encodercraft-presets",

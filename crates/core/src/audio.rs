@@ -114,6 +114,11 @@ impl AudioSampleBuffer {
     pub fn channels(&self) -> &[Vec<f32>] {
         &self.channels
     }
+
+    /// Mutable slice access to planar channel data vectors.
+    pub fn channels_mut(&mut self) -> &mut [Vec<f32>] {
+        &mut self.channels
+    }
     /// Creates an empty buffer with pre-allocated zero samples for all channels.
     pub fn new_silent(sample_rate: u32, layout: ChannelLayout, samples_per_channel: usize, start_sample_index: i64) -> Result<Self, EncoderError> {
         if sample_rate == 0 {

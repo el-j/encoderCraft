@@ -650,6 +650,43 @@ impl Rotation {
     }
 }
 
+/// Flip (mirroring) applied to the video frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FlipMode {
+    #[default]
+    None,
+    Horizontal,
+    Vertical,
+    Both,
+}
+
+/// Deinterlacing method applied to interlaced video frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeinterlaceMode {
+    #[default]
+    None,
+    /// Discard lower field and linearly interpolate missing scanlines.
+    TopFieldFirst,
+    /// Discard upper field and linearly interpolate missing scanlines.
+    BottomFieldFirst,
+    /// Bob deinterlacing: duplicate lines to preserve vertical resolution.
+    Bob,
+}
+
+/// Pixel Aspect Ratio (PAR) conform behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PixelAspectRatioConform {
+    #[default]
+    Source,
+    /// Rescale horizontally so pixels become 1.0 square.
+    Square,
+    /// Custom PAR numerator and denominator.
+    Custom(u32, u32),
+}
+
 /// How frames are chosen when the output frame rate differs from the source's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum FrameRateMode {
@@ -680,6 +717,9 @@ pub struct VideoTransform {
     pub scale_mode: encodercraft_geom::ScaleMode,
     pub scaling_filter: ScalingFilter,
     pub rotation: Rotation,
+    pub flip: FlipMode,
+    pub deinterlace: DeinterlaceMode,
+    pub par_conform: PixelAspectRatioConform,
     pub frame_rate_mode: FrameRateMode,
 }
 
@@ -817,6 +857,9 @@ pub struct AudioEncodeSettings {
     pub sample_rate: Option<u32>,
     pub layout: Option<ChannelLayout>,
     pub bitrate_kbps: Option<u32>,
+    /// Delay or advance applied to the audio stream in milliseconds (lip-sync compensation).
+    #[serde(default)]
+    pub delay_ms: i32,
 }
 
 /// Output target specifications.

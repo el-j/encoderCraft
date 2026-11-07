@@ -70,6 +70,9 @@ fn prepare_audio_for_target(mut audio: AudioSampleBuffer, target: &OutputTarget)
     {
         audio = SincResampler::default().resample(&audio, rate)?;
     }
+    if let Some(delay_ms) = settings.map(|s| s.delay_ms).filter(|d| *d != 0) {
+        encodercraft_audio_dsp::apply_audio_delay(&mut audio, delay_ms)?;
+    }
     if let Some(target_lufs) = target.target_lufs {
         normalize_loudness(&mut audio, f64::from(target_lufs), -1.0)?;
     }

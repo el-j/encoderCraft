@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod aac;
+pub mod delay;
 pub mod io;
 pub mod limiter;
 pub mod loudness;
@@ -16,6 +17,7 @@ pub mod resample;
 pub mod session;
 
 pub use aac::AacEncoderWrapper;
+pub use delay::apply_audio_delay;
 pub use io::{decode_audio, encode_audio_aiff, encode_audio_flac};
 pub use limiter::PeakLimiter;
 pub use loudness::{LoudnessStats, measure_loudness, normalize_loudness};

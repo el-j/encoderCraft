@@ -3,7 +3,7 @@
 use std::sync::OnceLock;
 
 use encodercraft_color::{ColorPrimaries, ColorRange, ColorSpaceTag, MatrixCoefficients, PixelFormat, TransferFunction};
-use encodercraft_core::{ColorTag, EncoderError, Rotation, VideoFrame};
+use encodercraft_core::{ColorTag, DeinterlaceMode, EncoderError, FlipMode, Rotation, VideoFrame};
 use encodercraft_geom::Dimensions;
 use filmcraft_color::{ColorPipeline, ColorSpace, InputTransform, OutputTransform, Range};
 
@@ -123,7 +123,7 @@ fn bytes_per_pixel(format: PixelFormat) -> Result<usize, EncoderError> {
 }
 
 /// Rotates a packed RGB frame clockwise by `rotation`.
-pub(crate) fn rotate(src: &VideoFrame, rotation: Rotation) -> Result<VideoFrame, EncoderError> {
+pub fn rotate(src: &VideoFrame, rotation: Rotation) -> Result<VideoFrame, EncoderError> {
     if rotation == Rotation::None {
         return Ok(src.clone());
     }
@@ -152,6 +152,106 @@ pub(crate) fn rotate(src: &VideoFrame, rotation: Rotation) -> Result<VideoFrame,
             let off = sy * src_stride + sx * bpp;
             let from = src_data.get(off..off + bpp).ok_or_else(|| EncoderError::Internal("rotate: source pixel out of range".into()))?;
             px.copy_from_slice(from);
+        }
+    }
+    Ok(dest)
+}
+
+/// Flips a packed frame horizontally, vertically, or both.
+pub fn flip(src: &VideoFrame, mode: FlipMode) -> Result<VideoFrame, EncoderError> {
+    if mode == FlipMode::None {
+        return Ok(src.clone());
+    }
+    let bpp = bytes_per_pixel(src.format)?;
+    let w = src.dimensions.width as usize;
+    let h = src.dimensions.height as usize;
+    let mut dest = VideoFrame::new_allocated(src.dimensions, src.format, src.color_space, src.pts, src.duration, src.timebase)?;
+    dest.keyframe = src.keyframe;
+    let (src_data, src_stride) = src.plane(0)?;
+    let (dest_data, dest_stride) = dest.plane_mut(0)?;
+
+    let flip_h = matches!(mode, FlipMode::Horizontal | FlipMode::Both);
+    let flip_v = matches!(mode, FlipMode::Vertical | FlipMode::Both);
+
+    for y in 0..h {
+        let sy = if flip_v { h - 1 - y } else { y };
+        let dest_row = dest_data
+            .get_mut(y * dest_stride..y * dest_stride + w * bpp)
+            .ok_or_else(|| EncoderError::Internal("flip: destination row out of range".into()))?;
+        for (x, px) in dest_row.chunks_exact_mut(bpp).enumerate() {
+            let sx = if flip_h { w - 1 - x } else { x };
+            let off = sy * src_stride + sx * bpp;
+            let from = src_data.get(off..off + bpp).ok_or_else(|| EncoderError::Internal("flip: source pixel out of range".into()))?;
+            px.copy_from_slice(from);
+        }
+    }
+    Ok(dest)
+}
+
+/// Deinterlaces a packed frame according to the requested mode.
+pub fn deinterlace(src: &VideoFrame, mode: DeinterlaceMode) -> Result<VideoFrame, EncoderError> {
+    if mode == DeinterlaceMode::None {
+        return Ok(src.clone());
+    }
+    let bpp = bytes_per_pixel(src.format)?;
+    let w = src.dimensions.width as usize;
+    let h = src.dimensions.height as usize;
+    if h < 2 {
+        return Ok(src.clone());
+    }
+    let mut dest = VideoFrame::new_allocated(src.dimensions, src.format, src.color_space, src.pts, src.duration, src.timebase)?;
+    dest.keyframe = src.keyframe;
+    let (src_data, src_stride) = src.plane(0)?;
+    let (dest_data, dest_stride) = dest.plane_mut(0)?;
+
+    let row_bytes = w * bpp;
+
+    let keep_even = match mode {
+        DeinterlaceMode::TopFieldFirst => true,
+        DeinterlaceMode::BottomFieldFirst => false,
+        DeinterlaceMode::Bob => true,
+        DeinterlaceMode::None => true,
+    };
+
+    for y in 0..h {
+        let is_dominant = (y % 2 == 0) == keep_even;
+        let dest_row = dest_data
+            .get_mut(y * dest_stride..y * dest_stride + row_bytes)
+            .ok_or_else(|| EncoderError::Internal("deinterlace: destination row out of range".into()))?;
+
+        if is_dominant {
+            let src_row = src_data
+                .get(y * src_stride..y * src_stride + row_bytes)
+                .ok_or_else(|| EncoderError::Internal("deinterlace: dominant source row out of range".into()))?;
+            dest_row.copy_from_slice(src_row);
+        } else if mode == DeinterlaceMode::Bob {
+            let ref_y = if y > 0 { y - 1 } else { y + 1 };
+            let src_row = src_data
+                .get(ref_y * src_stride..ref_y * src_stride + row_bytes)
+                .ok_or_else(|| EncoderError::Internal("deinterlace: bob reference row out of range".into()))?;
+            dest_row.copy_from_slice(src_row);
+        } else {
+            let prev_y = y.saturating_sub(1);
+            let next_y = (y + 1).min(h - 1);
+            let prev_row = src_data
+                .get(prev_y * src_stride..prev_y * src_stride + row_bytes)
+                .ok_or_else(|| EncoderError::Internal("deinterlace: prev source row out of range".into()))?;
+            let next_row = src_data
+                .get(next_y * src_stride..next_y * src_stride + row_bytes)
+                .ok_or_else(|| EncoderError::Internal("deinterlace: next source row out of range".into()))?;
+
+            if src.format == PixelFormat::RgbaF32 {
+                for ((d, p), n) in dest_row.as_chunks_mut::<4>().0.iter_mut().zip(prev_row.as_chunks::<4>().0).zip(next_row.as_chunks::<4>().0) {
+                    let pv = f32::from_ne_bytes(*p);
+                    let nv = f32::from_ne_bytes(*n);
+                    let avg = (pv + nv) * 0.5;
+                    d.copy_from_slice(&avg.to_ne_bytes());
+                }
+            } else {
+                for ((d, &p), &n) in dest_row.iter_mut().zip(prev_row).zip(next_row) {
+                    *d = ((u32::from(p) + u32::from(n) + 1) >> 1) as u8;
+                }
+            }
         }
     }
     Ok(dest)
@@ -286,5 +386,50 @@ mod tests {
         assert_eq!(alpha, 0.5);
         assert!(red.is_finite() && (0.0..=1.0).contains(&red), "tone-mapped encoded signal must remain finite and in gamut: {red}");
         assert_eq!(frame.color_space, ColorSpaceTag { range: ColorRange::Full, ..ColorSpaceTag::REC709 });
+    }
+
+    #[test]
+    fn flip_horizontal_reverses_columns() {
+        let src = coordinate_frame();
+        let flipped = flip(&src, FlipMode::Horizontal).unwrap();
+        assert_eq!(px(&flipped, 0, 0), [2, 0, 7]);
+        assert_eq!(px(&flipped, 1, 0), [1, 0, 7]);
+        assert_eq!(px(&flipped, 2, 0), [0, 0, 7]);
+    }
+
+    #[test]
+    fn flip_vertical_reverses_rows() {
+        let src = coordinate_frame();
+        let flipped = flip(&src, FlipMode::Vertical).unwrap();
+        assert_eq!(px(&flipped, 0, 0), [0, 1, 7]);
+        assert_eq!(px(&flipped, 0, 1), [0, 0, 7]);
+    }
+
+    #[test]
+    fn flip_both_reverses_both_axes() {
+        let src = coordinate_frame();
+        let flipped = flip(&src, FlipMode::Both).unwrap();
+        assert_eq!(px(&flipped, 0, 0), [2, 1, 7]);
+        assert_eq!(px(&flipped, 2, 1), [0, 0, 7]);
+    }
+
+    #[test]
+    fn deinterlace_top_field_first_interpolates_odd_lines() {
+        let dims = Dimensions::new(2, 4).unwrap();
+        let mut frame = VideoFrame::new_allocated(dims, PixelFormat::Rgb8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        let (data, stride) = frame.plane_mut(0).unwrap();
+        // Row 0: 10, Row 1: 99 (interlaced artifact), Row 2: 30, Row 3: 99
+        data[..6].copy_from_slice(&[10, 10, 10, 10, 10, 10]);
+        data[stride..stride + 6].copy_from_slice(&[99, 99, 99, 99, 99, 99]);
+        data[2 * stride..2 * stride + 6].copy_from_slice(&[30, 30, 30, 30, 30, 30]);
+        data[3 * stride..3 * stride + 6].copy_from_slice(&[99, 99, 99, 99, 99, 99]);
+
+        let deint = deinterlace(&frame, DeinterlaceMode::TopFieldFirst).unwrap();
+        // Row 0 unchanged
+        assert_eq!(px(&deint, 0, 0), [10, 10, 10]);
+        // Row 1 interpolated between Row 0 (10) and Row 2 (30) => 20
+        assert_eq!(px(&deint, 0, 1), [20, 20, 20]);
+        // Row 2 unchanged
+        assert_eq!(px(&deint, 0, 2), [30, 30, 30]);
     }
 }

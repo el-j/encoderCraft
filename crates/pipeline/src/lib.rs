@@ -20,7 +20,7 @@ pub mod project;
 pub mod scale;
 pub mod stitch;
 pub mod stream;
-pub(crate) mod transform;
+pub mod transform;
 
 pub use captions::{CaptionBurner, CaptionTrack, NativeCaptionFormat};
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
@@ -35,3 +35,4 @@ pub use project::{MotionComp, MotionLayer, MotionProject, TimelineProject, Timel
 pub use scale::FrameScaler;
 pub use stitch::{ClipStitcher, StitchOptions, stitch_audio_buffers};
 pub use stream::{PipelineLimits, StreamStats};
+pub use transform::{deinterlace, flip, rotate};

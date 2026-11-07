@@ -155,6 +155,11 @@ impl IpcServer {
         Ok(Self { is_running, worker_thread: Some(handle), socket_path: Some(sock_path), socket_identity: Some(socket_identity) })
     }
 
+    /// Returns whether the server is currently running.
+    pub fn is_running(&self) -> bool {
+        self.is_running.load(Ordering::SeqCst)
+    }
+
     /// Stops the server and joins the listener thread.
     pub fn stop(&mut self) {
         self.is_running.store(false, Ordering::SeqCst);

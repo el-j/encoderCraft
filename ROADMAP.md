@@ -280,6 +280,15 @@ Tracked under Milestone [M36 - UI Table Column Locking, Spacing Precision & Them
 - [x] **M36.3: Preset Browser Adaptive Column Widths & Tree Alignment (#166)** – Adaptive column width computation (`PresetColumnWidths`), internalized tree indentations inside the Name column, and aligned Format/Frame Size/Frame Rate/Target Rate columns across all rows.
 - [x] **M36.4: Adobe Reference Neutral Greys & Test Config Isolation (#167)** – Authentic `Tokens::medium_dark()` palette matching Adobe reference screenshots with neutral grey chrome and safe fallback parsing.
 
+## Milestone 37: Advanced Transforms, craft-libs Integration & Industry-Grade E2E Suite
+
+Tracked under Milestone [M37 - Advanced Transforms, craft-libs Integration & Industry-Grade E2E Suite](https://github.com/el-j/encoderCraft/milestone/15).
+
+- [x] **M37.1: Advanced Video Transforms: Flip, Deinterlace & Pixel Aspect Ratio Conform (#171)** – Added `FlipMode` (`Horizontal`, `Vertical`, `Both`), `DeinterlaceMode` (`TopFieldFirst`, `BottomFieldFirst`, `Bob`), and `PixelAspectRatioConform` (`Source`, `Square`, `Custom`) to `VideoTransform`; implemented SIMD-friendly packed pixel field interpolation and line-reversing operations; exposed controls in Video Tab.
+- [x] **M37.2: Audio Lip-Sync Delay Offset Compensation (#172)** – Added `delay_ms: i32` to `AudioEncodeSettings` and implemented `apply_audio_delay` in `encodercraft-audio-dsp` with millisecond-exact zero-sample prepending on positive delays and head-trimming on negative advances; added interactive offset drag value (-5000ms to +5000ms) in Audio Tab.
+- [x] **M37.3: Full Architecture, UI Design & craft-libs Integration Review (#173)** – Authored `docs/architecture-and-parity-audit.md` comparing encoderCraft against Adobe Media Encoder 2026, mapping out upstream extraction for `craft-media`, `craft-ui`, `craft-window`, `craft-menu`, `craft-cms`, and `craft-text`, and formalizing the transform pipeline execution sequence.
+- [x] **M37.4: Exhaustive Industry-Grade End-to-End Integration Test Suite (#174)** – Created `crates/engine/tests/industry_e2e.rs` covering video transforms matrix, audio lip-sync delay offset and surround matrix routing, batch queue multi-target lifecycle and journal persistence, watch folder automation with settle-delay quiescence probing, and TCP IPC daemon dispatch.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).
