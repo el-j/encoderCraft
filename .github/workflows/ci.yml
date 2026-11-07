@@ -46,14 +46,14 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install FFmpeg tools
+      - name: Install FFmpeg tools (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg
-      - name: Install FFmpeg tools
+        run: which ffmpeg || (sudo apt-get update && sudo apt-get install --yes ffmpeg)
+      - name: Install FFmpeg tools (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress
+        run: |
+          choco install ffmpeg --no-progress
+          echo "C:\ProgramData\chocolatey\bin" >> $env:GITHUB_PATH
       - name: Verify independent media tools
         run: |
           ffmpeg -version
