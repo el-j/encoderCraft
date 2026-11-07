@@ -55,11 +55,16 @@ impl Drop for PipeStreamGuard {
 }
 
 fn prepare_audio_for_target(mut audio: AudioSampleBuffer, target: &OutputTarget) -> Result<AudioSampleBuffer, EncoderError> {
-    let settings = target.audio.as_ref();
-    let layout = settings.and_then(|settings| settings.layout).unwrap_or(encodercraft_core::ChannelLayout::Stereo);
-    if audio.layout != layout {
-        audio = remix_channels(&audio, layout)?;
+    if let Some(ref mapping) = target.audio_mapping {
+        audio = encodercraft_audio_dsp::apply_audio_matrix(mapping, &audio)?;
+    } else {
+        let settings = target.audio.as_ref();
+        let layout = settings.and_then(|settings| settings.layout).unwrap_or(encodercraft_core::ChannelLayout::Stereo);
+        if audio.layout != layout {
+            audio = remix_channels(&audio, layout)?;
+        }
     }
+    let settings = target.audio.as_ref();
     if let Some(rate) = settings.and_then(|settings| settings.sample_rate)
         && rate != audio.sample_rate
     {
@@ -2314,6 +2319,39 @@ mod tests {
         assert!(stem_r.exists());
         assert!(stem_l.metadata().unwrap().len() > 100);
         assert!(stem_r.metadata().unwrap().len() > 100);
+    }
+
+    #[test]
+    fn test_execute_audio_matrix_routing() {
+        let dir = tempdir().unwrap();
+        let target_audio = dir.path().join("routed.wav");
+
+        let mut mapping = encodercraft_core::AudioChannelMapping::new_pass_through(2);
+        // Swap left and right channels
+        mapping.matrix = vec![vec![0.0, 1.0], vec![1.0, 0.0]];
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-matrix-audio-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: write_test_wav(dir.path()), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: target_audio.clone(),
+                preset_name: "Broadcast WAV".into(),
+                container: ContainerType::Wave,
+                audio_mapping: Some(mapping),
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(target_audio.exists());
+        assert!(target_audio.metadata().unwrap().len() > 100);
     }
 
     #[test]

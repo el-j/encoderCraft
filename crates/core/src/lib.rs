@@ -11,7 +11,7 @@ pub mod job;
 pub mod metadata;
 pub mod timecode;
 
-pub use audio::{AudioSampleBuffer, ChannelLayout};
+pub use audio::{AudioChannelMapping, AudioSampleBuffer, AudioTrackLayout, ChannelLayout};
 pub use error::EncoderError;
 pub use frame::{MAX_FRAME_BUFFER_BYTES, PlaneDescriptor, VideoFrame};
 pub use job::{

@@ -613,6 +613,22 @@ flowchart LR
 
 ---
 
+### Milestone 34: Audio Channel Mapping & Broadcast MXF Profiles
+**Objective:** Deliver full multichannel audio matrix routing and broadcast compliance profiles (Sony XDCAM HD422, Panasonic AVC-Intra, DPP AS-11, AMWA AS-10) in MXF OP-1a with 8-channel uncompressed 24-bit 48 kHz PCM audio. Tracked under Milestone [M34 - Audio Channel Mapping & Broadcast MXF Profiles](https://github.com/el-j/encoderCraft/milestone/12).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Multichannel Matrix Router & Channel Mapping ([#148](https://github.com/el-j/encoderCraft/issues/148)):**
+   - Multichannel matrix router data model (`AudioChannelMapping`) and track layouts (`AudioTrackLayout::DiscreteMono`, `StereoPairs`, `Surround51`, `Surround71`).
+   - Interactive matrix cross-routing grid in Inspector UI Audio tab.
+   - Pipeline routing execution (`apply_audio_matrix`) supporting arbitrary M x N cross-routing and gain trimming.
+2. [x] **Broadcast Delivery MXF Profiles ([#149](https://github.com/el-j/encoderCraft/issues/149)):**
+   - Sony XDCAM HD422 1080 (50 Mbps) in MXF OP-1a with 8-channel 24-bit PCM.
+   - Panasonic AVC-Intra 100 1080 in MXF OP-1a with 8-channel 24-bit PCM.
+   - DPP AS-11 UK HD Delivery (1080/25p with EBU R128 -23 LUFS audio).
+   - AMWA AS-10 Broadcast Shim (50 Mbps 1080 with ATSC A/85 -24 LUFS audio).
+
+---
+
 ---
 
 ## 3. Risk Mitigation & Technical Contingencies
