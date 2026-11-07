@@ -1520,6 +1520,7 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
                         on_open_log: &mut self.app.log_state.is_open,
                         auto_shutdown: &mut self.app.prefs_state.prefs.auto_shutdown,
                         on_add_media: &mut add_media,
+                        selected_renderer: &mut self.app.prefs_state.prefs.selected_renderer,
                     },
                 );
                 if add_media {

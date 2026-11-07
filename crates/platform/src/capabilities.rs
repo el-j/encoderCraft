@@ -146,6 +146,20 @@ fn detect_windows_mf() -> HardwareCapabilities {
     }
 }
 
+/// Returns the list of available renderer display names for the current host system.
+///
+/// If a hardware acceleration backend is detected, it is returned first as the recommended
+/// engine, followed by the software CPU renderer fallback.
+pub fn available_renderers() -> Vec<String> {
+    let caps = detect_hardware();
+    let mut renderers = Vec::new();
+    if caps.backend.is_hardware() {
+        renderers.push(caps.backend.display_name().to_string());
+    }
+    renderers.push(HardwareBackend::SoftwareOnly.display_name().to_string());
+    renderers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +170,12 @@ mod tests {
         assert!(!caps.device_name.is_empty());
         assert!(caps.max_width > 0);
         assert!(caps.max_height > 0);
+    }
+
+    #[test]
+    fn test_available_renderers_lists_at_least_software() {
+        let renderers = available_renderers();
+        assert!(!renderers.is_empty());
+        assert!(renderers.iter().any(|r| r.contains("Software")));
     }
 }

@@ -1315,6 +1315,7 @@ dependencies = [
  "encodercraft-geom",
  "encodercraft-image-codecs",
  "encodercraft-pipeline",
+ "encodercraft-platform",
  "encodercraft-presets",
  "encodercraft-source",
  "encodercraft-video-codecs",
