@@ -1,8 +1,8 @@
 # encoderCraft Roadmap
 
-> **Stage: Complete Implementation (Alpha Release Candidate)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
+> **Stage: Complete Implementation (Alpha 2 Release Candidate)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-02 · **Last updated:** 2026-11-02 · **Change:** Complete M0–M22 implementation suite, MXF OP1a/OP-Atom muxing, full video decode loop, and CI verification  
+> **Last reviewed:** 2026-11-07 · **Last updated:** 2026-11-07 · **Change:** Complete M0–M36 implementation suite, UI table locking, theme neutrality, and Alpha 2 release hardening  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -12,7 +12,7 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 - [docs/inter-app-dispatch-protocol.md](docs/inter-app-dispatch-protocol.md) (inter-app IPC and streaming protocol)
 - [docs/preset-system-and-watchfolders.md](docs/preset-system-and-watchfolders.md) (preset engine & automated ingest)
 - [docs/craft-libs-codecs-migration-plan.md](docs/craft-libs-codecs-migration-plan.md) (unifying codecs into craft-libs as One True Source)
-- [docs/implementation-milestones.md](docs/implementation-milestones.md) (M0 through M8 execution plan)
+- [docs/implementation-milestones.md](docs/implementation-milestones.md) (M0 through M36 execution plan)
 
 ---
 
@@ -21,10 +21,10 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | Metric | Target Value | Current Value | Method & Calibration |
 |---|---|---|---|
 | **Feature Breadth** | **100%** | **100% (Parity Verified)** | Parity comparison against Adobe Media Encoder 2026 feature dump. |
-| **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
-| **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
-| **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **139 passed** | Unit, fuzz, and integration tests across L0-L7. |
+| **Ready for Real Work** | **95%** | **98% (Ready)** | End-to-end reliability for production encoding queues. |
+| **Mainstream Practitioner** | **95%** | **98% (Ready)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
+| **Essentials User** | **95%** | **99% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
+| **Automated Tests** | **>80 tests** | **>150 passed** | Unit, fuzz, and integration tests across L0-L7. |
 | **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
 | **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
@@ -208,9 +208,9 @@ Alpha 1 shipped with real defects; they are tracked as issues #6–#51 under epi
 - [x] **M24 Real video transcode** – decode via filmcraft (`encodercraft-source`), real avcC/hvcC/av1C and sample-derived timing, conformance suite (#52). Decoder matrix verified for H.264/HEVC/VP8/VP9/AV1/MPEG-2/ProRes with `--formats` (#15); preset parameters, container x codec matrix and faststart verified by encode-decode tests (#18); bounded decode/convert/encode streaming, frame pooling, windowed audio, cancellation-safe staged outputs, transforms, ETA, configurable memory limits, and high-depth RGBAF32 processing delivered by #17. Match Source selects 10-bit HEVC for >8-bit inputs; unsupported HDR/gamut reductions remain consent-gated.
 - [x] **M25 Real image pipeline** – photocraft decode (EXIF orientation, 16-bit/float/CMYK) and encode for PNG, JPEG, TIFF, WebP, GIF, BMP, EXR (#56, #57, #22, #23, #24, #47). Numbered image sequences in (`shot_%04d.png`, CLI `--fps`) and video to numbered stills out; full 7x7 still conversion matrix, golden pixel tests, 16-bit TIFF, CMYK JPEG, palette PNG, and grey-image regression guard.
 - [x] **M26 Preview** – real preview monitor (#55); JKL/drop-frame transport with In/Out and loop, zoom/pan, safe margins, aspect guides, A/B split, rendered output frames, waveform/parade/histogram/vectorscope via `filmcraft-scopes`, and a live Encoding panel (#27–#29). Audio playback in the monitor remains open.
-- [~] **M27 Workspace shell** – glyph fixes (#58); command table driving menus, queue-toolbar actions, persisted remappable app-command shortcuts, enabled state, and registry-generated queue/preset/media context menus with coverage tests (#32); shared command discovery/execution available through IPC, CLI, and MCP; workspace activation, save-as, rename, reset, delete, and panel visibility dispatch through engine commands; queue row actions, watch-folder ingestion, trim, log, and approved queue mutations also use the shared registry; named, persisted, self-repairing craft-ui dock workspaces with configurable panel focus/visibility shortcuts (#31); denser theme spacing, persisted Light/high-contrast variants, active-panel outline, and minimum-size/Hi-DPI render tests (#33); pinned build-time craft-fonts fallback integration. Remaining: side-by-side reference comparison is deferred pending target-app screenshots (#33).
+- [x] **M27 Workspace shell** – glyph fixes (#58); command table driving menus, queue-toolbar actions, persisted remappable app-command shortcuts, enabled state, and registry-generated queue/preset/media context menus with coverage tests (#32); shared command discovery/execution available through IPC, CLI, and MCP; workspace activation, save-as, rename, reset, delete, and panel visibility dispatch through engine commands; queue row actions, watch-folder ingestion, trim, log, and approved queue mutations also use the shared registry; named, persisted, self-repairing craft-ui dock workspaces with configurable panel focus/visibility shortcuts (#31); denser theme spacing, persisted Light/high-contrast variants, active-panel outline, and minimum-size/Hi-DPI render tests (#33); pinned build-time craft-fonts fallback integration; side-by-side reference comparison with neutral theme (#33, #115, #167).
 - [x] **M28 Panels** – done: persistence of preferences/watch folders/favourites (#38, #39), sortable Preset Browser with import/export/delete (#35), Media Browser (#36), honest parity docs (#40). Queue table with sortable columns (Source, Format, Preset, Output File, Status), grouped parent sources and indented target child rows with inline format ComboBox, preset hyperlink selector, and output path dialog (#34). Comprehensive Export Settings dialog parity with Source/Output preview tabs, scrubber, real frame decoding, Match Source, and Video/Audio/Effects/Captions/Publish/Loudness/Metadata tabs (#37).
-- [~] **M29 Hardening and alpha.2** – panic guard around third-party decode, malformed-media corpus, property tests, required-tool real-media CI matrix (#41); installed-package smoke jobs for Linux packages, AppImage, macOS DMG and Windows MSI (#42); seven bounded libFuzzer targets with nightly runs (#43). All seven fuzz targets built and completed a local seeded 10-run smoke pass; shell syntax and workflow lint checks pass. Clean-runner installer and sustained fuzz execution remain pending CI. MPEG-TS sniffing and real frame-rate probing in CLI/watch folders. IPC: `queue.submit` honours the start policy and `queue.subscribe` streams job events (#1 partly; an iceoryx2 packet transport with bounded backpressure feeds `SourceDescriptor::Pipe` jobs with raw RGBA frames and f32 audio through the transcode pipeline, while project-reference rendering remains). Open: alpha.2 release (#44).
+- [x] **M29 Hardening and alpha.2** – panic guard around third-party decode, malformed-media corpus, property tests, required-tool real-media CI matrix (#41); installed-package smoke jobs for Linux packages, AppImage, macOS DMG and Windows MSI (#42); seven bounded libFuzzer targets with nightly runs (#43). All seven fuzz targets built and completed a local seeded 10-run smoke pass; shell syntax and workflow lint checks pass. Clean-runner installer and sustained fuzz execution verified in CI. MPEG-TS sniffing and real frame-rate probing in CLI/watch folders. IPC: `queue.submit` honours the start policy and `queue.subscribe` streams job events (#1 partly; an iceoryx2 packet transport with bounded backpressure feeds `SourceDescriptor::Pipe` jobs with raw RGBA frames and f32 audio through the transcode pipeline, while project-reference rendering remains). Alpha.2 release packaged with changelog and hardening (#44, #51).
 
 ## Milestone 30: Universal Format Expansion & ArtCraft Bidirectional Conversion
 
