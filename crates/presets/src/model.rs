@@ -30,6 +30,31 @@ pub enum PresetCategory {
     Custom,
 }
 
+impl PresetCategory {
+    pub const ALL_SYSTEM: &'static [PresetCategory] =
+        &[Self::Broadcast, Self::Web, Self::SocialMedia, Self::Audio, Self::StillImage, Self::Spatial3D, Self::Vector, Self::Document];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Custom => "User Presets & Groups",
+            Self::Broadcast => "Broadcast & Production",
+            Self::Web => "Web Video & Streaming",
+            Self::SocialMedia => "Social Media",
+            Self::Audio => "Audio Formats",
+            Self::StillImage => "Still Image & Sequences",
+            Self::Spatial3D => "3D & Spatial Media",
+            Self::Vector => "Vector & Drafting",
+            Self::Document => "Document & Publishing",
+        }
+    }
+}
+
+impl std::fmt::Display for PresetCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
 /// Video configuration settings inside a preset recipe.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
