@@ -1,11 +1,12 @@
-//! Media Browser panel: sidebar of locations and favourites, list and thumbnail views.
+//! Media Browser panel: directory tree sidebar, flat-column table view, and bottom zoom/status toolbar.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use egui::{RichText, Ui, Vec2};
 
+use crate::icons::{self, Icon};
 use crate::media_model::{BoundedCache, BrowserModel, Entry, EntryKind, SortBy, THUMB_CACHE_CAPACITY, standard_locations};
 use crate::preview_decoder::{PreviewDecoder, PreviewEvent};
 use crate::theme::Tokens;
@@ -19,11 +20,46 @@ pub enum BrowserView {
     Thumbnails,
 }
 
+/// Collapsible tree expansion states for Media Browser sidebar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaBrowserTreeState {
+    pub favorites_expanded: bool,
+    pub user_folders_expanded: bool,
+    pub drives_expanded: bool,
+}
+
+impl Default for MediaBrowserTreeState {
+    fn default() -> Self {
+        Self { favorites_expanded: true, user_folders_expanded: true, drives_expanded: true }
+    }
+}
+
+/// Fixed column widths for pixel-aligned table layout in List mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MediaBrowserColumnWidths {
+    pub name: f32,
+    pub kind: f32,
+    pub size: f32,
+    pub date: f32,
+}
+
+impl MediaBrowserColumnWidths {
+    pub fn compute(total_width: f32) -> Self {
+        let kind = 70.0;
+        let size = 70.0;
+        let date = 90.0;
+        let padding = 24.0;
+        let name = (total_width - kind - size - date - padding).max(120.0);
+        Self { name, kind, size, date }
+    }
+}
+
 pub struct MediaBrowserState {
     pub model: BrowserModel,
     pub view: BrowserView,
     pub thumb_size: f32,
     pub selected: Option<PathBuf>,
+    pub tree_state: MediaBrowserTreeState,
     locations: Vec<(String, PathBuf)>,
     path_input: String,
     thumbs: BoundedCache<egui::TextureHandle>,
@@ -47,6 +83,7 @@ impl MediaBrowserState {
             view: BrowserView::List,
             thumb_size: 96.0,
             selected: None,
+            tree_state: MediaBrowserTreeState::default(),
             locations,
             thumbs: BoundedCache::new(THUMB_CACHE_CAPACITY),
             failed: BoundedCache::new(THUMB_CACHE_CAPACITY),
@@ -133,6 +170,134 @@ pub fn format_age(modified: Option<SystemTime>, now: SystemTime) -> String {
     }
 }
 
+fn is_drive_or_volume(label: &str, path: &Path) -> bool {
+    label.starts_with("Drive ")
+        || path.starts_with("/Volumes")
+        || path.starts_with("/media")
+        || path.starts_with("/mnt")
+        || path == Path::new("/")
+        || path.parent().is_none()
+}
+
+fn collapsible_tree_header(ui: &mut Ui, label: &str, expanded: &mut bool, tokens: &Tokens) {
+    let icon = if *expanded { Icon::ChevronDown } else { Icon::ChevronRight };
+    let resp = ui.horizontal(|ui| {
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), egui::Sense::click());
+        icons::paint(ui.painter(), rect, icon, tokens.text_dim);
+        let text_resp = ui.add(egui::Label::new(RichText::new(label).small().strong().color(tokens.text_dim)).sense(egui::Sense::click()));
+        resp.union(text_resp)
+    });
+    if resp.inner.clicked() {
+        *expanded = !*expanded;
+    }
+}
+
+fn tree_item(ui: &mut Ui, label: &str, path: &Path, is_active: bool, tokens: &Tokens) -> bool {
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.add_space(14.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), egui::Sense::hover());
+        icons::paint(ui.painter(), rect, Icon::Folder, if is_active { tokens.accent_primary } else { tokens.text_dim });
+        let text_color = if is_active { tokens.accent_primary } else { tokens.text_primary };
+        let resp = ui.add(egui::Label::new(RichText::new(label).small().color(text_color)).sense(egui::Sense::click()));
+        if resp.on_hover_text(path.display().to_string()).clicked() {
+            clicked = true;
+        }
+    });
+    clicked
+}
+
+fn render_sidebar(ui: &mut Ui, state: &mut MediaBrowserState, tokens: &Tokens) {
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        // 1. Favorites Group
+        collapsible_tree_header(ui, "Favorites", &mut state.tree_state.favorites_expanded, tokens);
+        if state.tree_state.favorites_expanded {
+            let favs = state.model.favorites.clone();
+            if favs.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.add_space(14.0);
+                    ui.label(RichText::new("None yet").small().color(tokens.text_dim));
+                });
+            } else {
+                for f in favs {
+                    let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string());
+                    let is_active = state.model.location() == f;
+                    let mut navigate_to = None;
+                    let mut remove_fav = false;
+                    ui.horizontal(|ui| {
+                        ui.add_space(14.0);
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), egui::Sense::hover());
+                        icons::paint(ui.painter(), rect, Icon::Folder, if is_active { tokens.accent_primary } else { tokens.text_dim });
+                        let resp = ui
+                            .add(
+                                egui::Label::new(RichText::new(&name).small().color(if is_active {
+                                    tokens.accent_primary
+                                } else {
+                                    tokens.text_primary
+                                }))
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_text(f.display().to_string());
+                        if resp.clicked() {
+                            navigate_to = Some(f.clone());
+                        }
+                        resp.context_menu(|ui| {
+                            if ui.button("Remove from Favorites").clicked() {
+                                remove_fav = true;
+                                ui.close();
+                            }
+                        });
+                    });
+                    if remove_fav {
+                        state.model.favorites.retain(|p| p != &f);
+                    }
+                    if let Some(target) = navigate_to {
+                        state.go(target);
+                    }
+                }
+            }
+        }
+
+        ui.add_space(6.0);
+
+        // 2. Local Storage / User Folders Group
+        collapsible_tree_header(ui, "Local Storage", &mut state.tree_state.user_folders_expanded, tokens);
+        if state.tree_state.user_folders_expanded {
+            let mut navigate_to = None;
+            for (label, p) in state.locations.clone() {
+                if !is_drive_or_volume(&label, &p) {
+                    let is_active = state.model.location() == p;
+                    if tree_item(ui, &label, &p, is_active, tokens) {
+                        navigate_to = Some(p);
+                    }
+                }
+            }
+            if let Some(target) = navigate_to {
+                state.go(target);
+            }
+        }
+
+        ui.add_space(6.0);
+
+        // 3. Drives & Volumes Group
+        collapsible_tree_header(ui, "Drives & Volumes", &mut state.tree_state.drives_expanded, tokens);
+        if state.tree_state.drives_expanded {
+            let mut navigate_to = None;
+            for (label, p) in state.locations.clone() {
+                if is_drive_or_volume(&label, &p) {
+                    let is_active = state.model.location() == p;
+                    if tree_item(ui, &label, &p, is_active, tokens) {
+                        navigate_to = Some(p);
+                    }
+                }
+            }
+            if let Some(target) = navigate_to {
+                state.go(target);
+            }
+        }
+    });
+}
+
 /// Renders the browser. Returns media files the user asked to add to the queue.
 pub fn render_media_browser(
     ui: &mut Ui,
@@ -149,30 +314,37 @@ pub fn render_media_browser(
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
 
+    // 1. Top Navigation & Filter Bar
     ui.horizontal(|ui| {
-        if ui.add_enabled(state.model.can_back(), egui::Button::new("<")).on_hover_text("Back").clicked() {
-            state.model.back();
-            state.path_input = state.model.location().display().to_string();
-        }
-        if ui.add_enabled(state.model.can_forward(), egui::Button::new(">")).on_hover_text("Forward").clicked() {
-            state.model.forward();
-            state.path_input = state.model.location().display().to_string();
-        }
-        if ui.button("Up").on_hover_text("Parent folder").clicked() {
+        ui.add_enabled_ui(state.model.can_back(), |ui| {
+            if ui.button("<").on_hover_text("Back").clicked() {
+                state.model.back();
+                state.path_input = state.model.location().display().to_string();
+            }
+        });
+        ui.add_enabled_ui(state.model.can_forward(), |ui| {
+            if ui.button(">").on_hover_text("Forward").clicked() {
+                state.model.forward();
+                state.path_input = state.model.location().display().to_string();
+            }
+        });
+        if ui.button("^").on_hover_text("Parent folder").clicked() {
             state.model.up();
             state.path_input = state.model.location().display().to_string();
         }
-        let loc = ui.add(egui::TextEdit::singleline(&mut state.path_input).desired_width(260.0).hint_text("Location"));
+
+        let loc = ui.add(egui::TextEdit::singleline(&mut state.path_input).desired_width(180.0).hint_text("Location"));
         if loc.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             let p = PathBuf::from(state.path_input.trim());
             state.go(p);
         }
-        if ui.button("Refresh").clicked() {
+        if icons::small_button(ui, Icon::Reset, tokens, "Refresh").clicked() {
             state.model.refresh();
         }
-    });
-    ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut state.model.search).hint_text("Search").desired_width(140.0));
+
+        ui.separator();
+
+        ui.add(egui::TextEdit::singleline(&mut state.model.search).hint_text("Search").desired_width(110.0));
         egui::ComboBox::from_id_salt("media-kind").selected_text(state.model.kind_filter.map(EntryKind::label).unwrap_or("All types")).show_ui(
             ui,
             |ui| {
@@ -183,52 +355,73 @@ pub fn render_media_browser(
             },
         );
         ui.checkbox(&mut state.model.show_hidden, "Hidden");
-        ui.separator();
-        ui.selectable_value(&mut state.view, BrowserView::List, "List");
-        ui.selectable_value(&mut state.view, BrowserView::Thumbnails, "Thumbnails");
-        if state.view == BrowserView::Thumbnails {
-            ui.add(egui::Slider::new(&mut state.thumb_size, 48.0..=200.0).show_value(false));
-        }
     });
+
     ui.separator();
 
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(130.0);
-            ui.label(RichText::new("Favorites").small().color(tokens.text_dim));
-            let favs = state.model.favorites.clone();
-            if favs.is_empty() {
-                ui.label(RichText::new("None yet").small().color(tokens.text_dim));
-            }
-            for f in favs {
-                let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string());
-                if ui.link(name).on_hover_text(f.display().to_string()).clicked() {
-                    state.go(f);
-                }
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new("Locations").small().color(tokens.text_dim));
-            for (label, p) in state.locations.clone() {
-                if ui.link(label).on_hover_text(p.display().to_string()).clicked() {
-                    state.go(p);
-                }
-            }
+    let entries: Vec<Entry> = state.model.visible().into_iter().cloned().collect();
+
+    // 2. Middle Content Area (Sidebar + File List/Grid)
+    let footer_h = 28.0;
+    let available_h = (ui.available_height() - footer_h).max(60.0);
+
+    ui.horizontal(|ui| {
+        // Left sidebar
+        let sidebar_w = 160.0;
+        ui.allocate_ui_with_layout(Vec2::new(sidebar_w, available_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            render_sidebar(ui, state, tokens);
         });
+
         ui.separator();
-        ui.vertical(|ui| {
+
+        // Right content pane
+        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), available_h), egui::Layout::top_down(egui::Align::Min), |ui| {
             if let Some(err) = &state.model.error {
                 ui.label(RichText::new(err).color(tokens.status_failed));
             }
             if state.model.truncated() {
                 ui.label(RichText::new("Showing the first 20000 items of this folder").small().color(tokens.text_dim));
             }
-            let entries: Vec<Entry> = state.model.visible().into_iter().cloned().collect();
+
             match state.view {
                 BrowserView::List => list_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
                 BrowserView::Thumbnails => thumbnail_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
             }
         });
     });
+
+    // 3. Bottom Status & View Toolbar
+    ui.separator();
+    ui.horizontal(|ui| {
+        let count_text = if entries.is_empty() {
+            "0 items".to_string()
+        } else if state.selected.is_some() {
+            format!("{} item{} (1 selected)", entries.len(), if entries.len() == 1 { "" } else { "s" })
+        } else {
+            format!("{} item{}", entries.len(), if entries.len() == 1 { "" } else { "s" })
+        };
+        ui.label(RichText::new(count_text).small().color(tokens.text_dim));
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if state.view == BrowserView::Thumbnails {
+                ui.add(egui::Slider::new(&mut state.thumb_size, 48.0..=220.0).show_value(false));
+                ui.label(RichText::new("Zoom").small().color(tokens.text_dim));
+            }
+
+            ui.separator();
+
+            let grid_active = state.view == BrowserView::Thumbnails;
+            if icons::button(ui, Icon::GridView, 14.0, grid_active, tokens, "Thumbnail View").clicked() {
+                state.view = BrowserView::Thumbnails;
+            }
+
+            let list_active = state.view == BrowserView::List;
+            if icons::button(ui, Icon::ListView, 14.0, list_active, tokens, "List View").clicked() {
+                state.view = BrowserView::List;
+            }
+        });
+    });
+
     to_add
 }
 
@@ -292,26 +485,85 @@ fn list_view(
     queue_mgr: &std::sync::Arc<encodercraft_engine::QueueManager>,
 ) {
     let now = SystemTime::now();
+    let total_w = ui.available_width();
+    let cols = MediaBrowserColumnWidths::compute(total_w);
+
+    let current_sort = state.model.sort;
+    let is_desc = state.model.descending;
+    let sort_arrow = move |by: SortBy| {
+        if current_sort == by { if is_desc { " \u{25be}" } else { " \u{25b4}" } } else { "" }
+    };
+
+    // Header bar
     ui.horizontal(|ui| {
-        for (label, by) in [("Name", SortBy::Name), ("Type", SortBy::Kind), ("Size", SortBy::Size), ("Modified", SortBy::Modified)] {
-            let arrow = if state.model.sort == by { if state.model.descending { " v" } else { " ^" } } else { "" };
-            if ui.button(RichText::new(format!("{label}{arrow}")).small().strong()).clicked() {
-                state.model.descending = state.model.sort == by && !state.model.descending;
-                state.model.sort = by;
-            }
+        let name_resp = ui.add_sized(
+            [cols.name, 18.0],
+            egui::Button::new(RichText::new(format!("Name{}", sort_arrow(SortBy::Name))).small().strong()).frame(false),
+        );
+        if name_resp.clicked() {
+            state.model.descending = state.model.sort == SortBy::Name && !state.model.descending;
+            state.model.sort = SortBy::Name;
+        }
+
+        let type_resp = ui.add_sized(
+            [cols.kind, 18.0],
+            egui::Button::new(RichText::new(format!("Type{}", sort_arrow(SortBy::Kind))).small().strong()).frame(false),
+        );
+        if type_resp.clicked() {
+            state.model.descending = state.model.sort == SortBy::Kind && !state.model.descending;
+            state.model.sort = SortBy::Kind;
+        }
+
+        let size_resp = ui.add_sized(
+            [cols.size, 18.0],
+            egui::Button::new(RichText::new(format!("Size{}", sort_arrow(SortBy::Size))).small().strong()).frame(false),
+        );
+        if size_resp.clicked() {
+            state.model.descending = state.model.sort == SortBy::Size && !state.model.descending;
+            state.model.sort = SortBy::Size;
+        }
+
+        let date_resp = ui.add_sized(
+            [cols.date, 18.0],
+            egui::Button::new(RichText::new(format!("Modified{}", sort_arrow(SortBy::Modified))).small().strong()).frame(false),
+        );
+        if date_resp.clicked() {
+            state.model.descending = state.model.sort == SortBy::Modified && !state.model.descending;
+            state.model.sort = SortBy::Modified;
         }
     });
-    let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+
+    let row_h = 20.0;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_h, entries.len(), |ui, range| {
         for e in entries.iter().skip(range.start).take(range.len()) {
             let selected = state.selected.as_ref() == Some(&e.path);
+            let row_start_y = ui.cursor().min.y;
+
             ui.horizontal(|ui| {
-                let resp = ui.selectable_label(selected, &e.name);
-                ui.label(RichText::new(e.kind.label()).small().color(tokens.text_dim));
-                if e.kind != EntryKind::Folder {
-                    ui.label(RichText::new(format_size(e.size)).small().color(tokens.text_dim));
+                if selected {
+                    let hl_rect = egui::Rect::from_min_size(egui::pos2(ui.cursor().min.x, row_start_y), Vec2::new(total_w, row_h));
+                    ui.painter().rect_filled(hl_rect, 2.0, tokens.accent_primary.gamma_multiply(0.20));
                 }
-                ui.label(RichText::new(format_age(e.modified, now)).small().color(tokens.text_dim));
+
+                // Icon + Name
+                let icon = if e.kind == EntryKind::Folder { Icon::Folder } else { Icon::Preset };
+                let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());
+                icons::paint(ui.painter(), icon_rect, icon, if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary });
+
+                let name_label = RichText::new(&e.name).small().color(tokens.text_primary);
+                let resp = ui.add_sized([cols.name - 18.0, 18.0], egui::Label::new(name_label).sense(egui::Sense::click()));
+
+                // Type
+                ui.add_sized([cols.kind, 18.0], egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)));
+
+                // Size
+                let size_str = if e.kind == EntryKind::Folder { "--".to_string() } else { format_size(e.size) };
+                ui.add_sized([cols.size, 18.0], egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)));
+
+                // Modified
+                let date_str = format_age(e.modified, now);
+                ui.add_sized([cols.date, 18.0], egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)));
+
                 if resp.clicked() {
                     state.selected = Some(e.path.clone());
                 }
@@ -322,6 +574,7 @@ fn list_view(
             });
         }
     });
+
     if ui.input(|i| i.key_pressed(egui::Key::Enter))
         && !ui.ctx().egui_wants_keyboard_input()
         && let Some(sel) = entries.iter().find(|e| state.selected.as_ref() == Some(&e.path))
@@ -433,5 +686,22 @@ mod tests {
         let mut added = Vec::new();
         activate(&mut state, &entry[0], &mut added);
         assert_eq!(added, vec![dir.path().join("a.mov")]);
+    }
+
+    #[test]
+    fn column_widths_computation() {
+        let cols = MediaBrowserColumnWidths::compute(600.0);
+        assert_eq!(cols.kind, 70.0);
+        assert_eq!(cols.size, 70.0);
+        assert_eq!(cols.date, 90.0);
+        assert!(cols.name >= 300.0);
+    }
+
+    #[test]
+    fn tree_state_defaults() {
+        let ts = MediaBrowserTreeState::default();
+        assert!(ts.favorites_expanded);
+        assert!(ts.user_folders_expanded);
+        assert!(ts.drives_expanded);
     }
 }

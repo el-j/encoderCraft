@@ -318,6 +318,7 @@ pub fn standard_locations() -> Vec<(String, PathBuf)> {
             ("Home", ""),
             ("Desktop", "Desktop"),
             ("Documents", "Documents"),
+            ("Downloads", "Downloads"),
             ("Movies", "Movies"),
             ("Videos", "Videos"),
             ("Music", "Music"),
