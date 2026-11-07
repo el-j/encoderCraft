@@ -664,43 +664,60 @@ fn sort_indicator(state: &QueuePanelState, col: QueueSortColumn) -> &'static str
     }
 }
 
+fn render_column_cell<R>(ui: &mut Ui, width: f32, height: f32, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    cell_ui.set_clip_rect(rect);
+    add_contents(&mut cell_ui)
+}
+
 fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens, cols: QueueColumnWidths) {
     egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
         ui.horizontal(|ui| {
             // Source Column (expands)
-            let src_label = format!("Source Name{}", sort_indicator(state, QueueSortColumn::Source));
-            let src_resp = ui.add_sized([cols.src, 18.0], egui::Button::new(RichText::new(src_label).strong().small()).frame(false));
-            if src_resp.clicked() {
-                state.toggle_sort(QueueSortColumn::Source);
-            }
+            render_column_cell(ui, cols.src, 18.0, |ui| {
+                let src_label = format!("Source Name{}", sort_indicator(state, QueueSortColumn::Source));
+                let src_resp = ui.add_sized([cols.src, 18.0], egui::Button::new(RichText::new(src_label).strong().small()).frame(false));
+                if src_resp.clicked() {
+                    state.toggle_sort(QueueSortColumn::Source);
+                }
+            });
 
             // Format Column
-            let fmt_label = format!("Format{}", sort_indicator(state, QueueSortColumn::Format));
-            let fmt_resp = ui.add_sized([cols.format, 18.0], egui::Button::new(RichText::new(fmt_label).strong().small()).frame(false));
-            if fmt_resp.clicked() {
-                state.toggle_sort(QueueSortColumn::Format);
-            }
+            render_column_cell(ui, cols.format, 18.0, |ui| {
+                let fmt_label = format!("Format{}", sort_indicator(state, QueueSortColumn::Format));
+                let fmt_resp = ui.add_sized([cols.format, 18.0], egui::Button::new(RichText::new(fmt_label).strong().small()).frame(false));
+                if fmt_resp.clicked() {
+                    state.toggle_sort(QueueSortColumn::Format);
+                }
+            });
 
             // Preset Column
-            let pre_label = format!("Preset{}", sort_indicator(state, QueueSortColumn::Preset));
-            let pre_resp = ui.add_sized([cols.preset, 18.0], egui::Button::new(RichText::new(pre_label).strong().small()).frame(false));
-            if pre_resp.clicked() {
-                state.toggle_sort(QueueSortColumn::Preset);
-            }
+            render_column_cell(ui, cols.preset, 18.0, |ui| {
+                let pre_label = format!("Preset{}", sort_indicator(state, QueueSortColumn::Preset));
+                let pre_resp = ui.add_sized([cols.preset, 18.0], egui::Button::new(RichText::new(pre_label).strong().small()).frame(false));
+                if pre_resp.clicked() {
+                    state.toggle_sort(QueueSortColumn::Preset);
+                }
+            });
 
             // Output File Column
-            let out_label = format!("Output File{}", sort_indicator(state, QueueSortColumn::Output));
-            let out_resp = ui.add_sized([cols.output, 18.0], egui::Button::new(RichText::new(out_label).strong().small()).frame(false));
-            if out_resp.clicked() {
-                state.toggle_sort(QueueSortColumn::Output);
-            }
+            render_column_cell(ui, cols.output, 18.0, |ui| {
+                let out_label = format!("Output File{}", sort_indicator(state, QueueSortColumn::Output));
+                let out_resp = ui.add_sized([cols.output, 18.0], egui::Button::new(RichText::new(out_label).strong().small()).frame(false));
+                if out_resp.clicked() {
+                    state.toggle_sort(QueueSortColumn::Output);
+                }
+            });
 
             // Status Column
-            let st_label = format!("Status{}", sort_indicator(state, QueueSortColumn::Status));
-            let st_resp = ui.add_sized([cols.status, 18.0], egui::Button::new(RichText::new(st_label).strong().small()).frame(false));
-            if st_resp.clicked() {
-                state.toggle_sort(QueueSortColumn::Status);
-            }
+            render_column_cell(ui, cols.status, 18.0, |ui| {
+                let st_label = format!("Status{}", sort_indicator(state, QueueSortColumn::Status));
+                let st_resp = ui.add_sized([cols.status, 18.0], egui::Button::new(RichText::new(st_label).strong().small()).frame(false));
+                if st_resp.clicked() {
+                    state.toggle_sort(QueueSortColumn::Status);
+                }
+            });
         });
     });
 }
@@ -743,7 +760,7 @@ fn render_grouped_job_row(
     egui::Frame::new().fill(row_bg).inner_margin(egui::vec2(tokens.panel_inset, 1.0)).show(ui, |ui| {
         // --- 1. Parent Source Row ---
         ui.horizontal(|ui| {
-            ui.allocate_ui_with_layout(egui::vec2(cols.src, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            render_column_cell(ui, cols.src, tokens.row_height, |ui| {
                 // Expand / Collapse Chevron
                 let arrow_icon = if is_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
                 if icons::button(ui, arrow_icon, 16.0, false, tokens, "Toggle output targets").clicked() {
@@ -765,9 +782,12 @@ fn render_grouped_job_row(
 
                 // Source Name
                 let source_name = job_source_name(job);
-                let display_source_name = middle_truncate(&source_name, 36);
+                let approx_chars = ((ui.available_width() - 8.0) / 7.2).clamp(8.0, 48.0) as usize;
+                let display_source_name = middle_truncate(&source_name, approx_chars);
 
-                let job_select_btn = ui.selectable_label(is_selected, RichText::new(display_source_name).strong()).on_hover_text(&source_name);
+                let job_select_btn = ui
+                    .add(egui::Button::new(RichText::new(display_source_name).strong()).selected(is_selected).truncate())
+                    .on_hover_text(&source_name);
                 if job_select_btn.clicked() {
                     let cmd_held = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                     let shift_held = ui.input(|i| i.modifiers.shift);
@@ -791,7 +811,7 @@ fn render_grouped_job_row(
             });
 
             // Format Summary Column (Inline dropdown selector)
-            ui.allocate_ui_with_layout(egui::vec2(cols.format, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            render_column_cell(ui, cols.format, tokens.row_height, |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
                         let mut current_container = t.container;
@@ -830,7 +850,7 @@ fn render_grouped_job_row(
             });
 
             // Preset Summary Column (Inline dropdown selector + Custom Inspector link)
-            ui.allocate_ui_with_layout(egui::vec2(cols.preset, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            render_column_cell(ui, cols.preset, tokens.row_height, |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
                         let display_name = middle_truncate(&t.preset_name, 22);
@@ -868,7 +888,7 @@ fn render_grouped_job_row(
             });
 
             // Output File Summary Column
-            ui.allocate_ui_with_layout(egui::vec2(cols.output, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            render_column_cell(ui, cols.output, tokens.row_height, |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
                         let path_str = t.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
@@ -895,7 +915,7 @@ fn render_grouped_job_row(
             });
 
             // Status Column
-            ui.allocate_ui_with_layout(egui::vec2(cols.status, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            render_column_cell(ui, cols.status, tokens.row_height, |ui| {
                 render_status_chip(ui, &job.status, tokens);
                 if job.status == JobStatus::Processing {
                     let progress = (job.progress_percent / 100.0).clamp(0.0, 1.0) as f32;
@@ -910,7 +930,7 @@ fn render_grouped_job_row(
             for (idx, target) in job.spec.targets.iter().enumerate() {
                 ui.horizontal(|ui| {
                     // Child Indent / Bullet Column
-                    ui.allocate_ui_with_layout(egui::vec2(cols.src, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    render_column_cell(ui, cols.src, tokens.row_height, |ui| {
                         ui.add_space(20.0);
                         ui.label(RichText::new(format!("↳ Target #{}", idx + 1)).small().color(tokens.text_dim));
 
@@ -936,7 +956,7 @@ fn render_grouped_job_row(
                     });
 
                     // Format Dropdown Column
-                    ui.allocate_ui_with_layout(egui::vec2(cols.format, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    render_column_cell(ui, cols.format, tokens.row_height, |ui| {
                         let mut current_container = target.container;
                         let combo_text =
                             INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
@@ -969,7 +989,7 @@ fn render_grouped_job_row(
                     });
 
                     // Preset Selector Column (Blue Link style)
-                    ui.allocate_ui_with_layout(egui::vec2(cols.preset, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    render_column_cell(ui, cols.preset, tokens.row_height, |ui| {
                         let is_menu_open = state.active_preset_menu == Some((job_id.clone(), idx));
                         let pre_btn = ui
                             .link(RichText::new(middle_truncate(&target.preset_name, 22)).color(tokens.accent_primary))
@@ -1023,7 +1043,7 @@ fn render_grouped_job_row(
                     });
 
                     // Output File Path Column (Blue Link style)
-                    ui.allocate_ui_with_layout(egui::vec2(cols.output, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    render_column_cell(ui, cols.output, tokens.row_height, |ui| {
                         let path_str = target.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
                         let out_link = ui
                             .link(RichText::new(middle_truncate(path_str, 26)).color(tokens.accent_primary))
@@ -1085,8 +1105,8 @@ fn render_grouped_job_row(
                     });
 
                     // Status Column
-                    ui.allocate_ui_with_layout(egui::vec2(cols.status, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{:?}", target.container)).small().color(tokens.text_dim));
+                    render_column_cell(ui, cols.status, tokens.row_height, |ui| {
+                        ui.label(RichText::new(target.container.display_name()).small().color(tokens.text_dim));
                     });
                 });
             }
@@ -1095,14 +1115,17 @@ fn render_grouped_job_row(
         if is_expanded && let SourceDescriptor::StitchedClips { clips } = &job.spec.source {
             for (c_idx, clip) in clips.iter().enumerate() {
                 ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(egui::vec2(cols.src, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    render_column_cell(ui, cols.src, tokens.row_height, |ui| {
                         ui.add_space(24.0);
                         let clip_name = clip.path.file_name().and_then(|s| s.to_str()).unwrap_or("Clip");
                         ui.label(RichText::new(format!("↳ Clip #{}: {}", c_idx + 1, clip_name)).small().color(tokens.text_dim));
                     });
-                    ui.allocate_ui_with_layout(egui::vec2(cols.format, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    render_column_cell(ui, cols.format, tokens.row_height, |ui| {
                         ui.label(RichText::new("Segment").small().color(tokens.text_dim));
                     });
+                    render_column_cell(ui, cols.preset, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.output, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.status, tokens.row_height, |_| {});
                 });
             }
         }
@@ -1429,6 +1452,24 @@ mod tests {
             let p = default_preset_for_container(*c);
             assert!(!p.is_empty());
         }
+    }
+
+    #[test]
+    fn test_render_column_cell_strict_bounds() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.horizontal(|ui| {
+                let width = 120.0;
+                let height = 22.0;
+                let start_x = ui.cursor().min.x;
+                render_column_cell(ui, width, height, |cell_ui| {
+                    cell_ui.add_sized([300.0, height], egui::Label::new("Ultra long text that exceeds cell bounds"));
+                });
+                let advanced_x = ui.cursor().min.x - start_x;
+                assert!((advanced_x - (width + ui.spacing().item_spacing.x)).abs() < 1.0);
+            });
+        });
+        output.textures_delta.clear();
     }
 
     #[test]

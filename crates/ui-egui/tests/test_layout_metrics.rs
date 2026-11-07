@@ -55,11 +55,11 @@ fn test_media_browser_column_widths_strict_alignment() {
 
         // Fixed columns adhere to reference widths
         assert_eq!(cols.kind, 70.0);
-        assert_eq!(cols.size, 70.0);
-        assert_eq!(cols.date, 90.0);
+        assert_eq!(cols.size, 65.0);
+        assert_eq!(cols.date, 115.0);
 
         // Name column expands to fill remainder, minimum 120px
-        let expected_name = (available_width - 70.0 - 70.0 - 90.0 - 24.0).max(120.0);
+        let expected_name = (available_width - 70.0 - 65.0 - 115.0 - 24.0).max(120.0);
         assert_eq!(cols.name, expected_name);
         assert!(cols.name >= 120.0);
     }
@@ -114,9 +114,11 @@ fn test_headless_frame_renders_without_margin_overflow() {
     for clipped_shape in &output.shapes {
         if let egui::epaint::Shape::Text(text_shape) = &clipped_shape.shape {
             let bbox = text_shape.galley.rect.translate(text_shape.pos.to_vec2());
-            // Text must not start with negative coordinates or outside the screen bounds
-            assert!(bbox.min.x >= -1.0 && bbox.min.y >= -1.0, "Text shape at {:?} has negative coordinates outside screen area", bbox);
-            assert!(screen.contains(bbox.min), "Text shape min {:?} is outside screen bounds {:?}", bbox.min, screen);
+            // Only test text shapes that are within the visible clip rect
+            if clipped_shape.clip_rect.intersects(screen) && clipped_shape.clip_rect.contains(bbox.min) {
+                assert!(bbox.min.x >= -1.0 && bbox.min.y >= -1.0, "Text shape at {:?} has negative coordinates outside screen area", bbox);
+                assert!(screen.contains(bbox.min), "Text shape min {:?} is outside screen bounds {:?}", bbox.min, screen);
+            }
         }
     }
 

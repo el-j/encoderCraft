@@ -145,7 +145,8 @@ pub fn render_preset_browser(
             }
         };
 
-        render_preset_table_header(ui, state, tokens);
+        let cols = PresetColumnWidths::compute(ui.available_width());
+        render_preset_table_header(ui, state, tokens, cols);
         ui.separator();
 
         // --- 4. Hierarchical Tree Scroll Area ---
@@ -165,7 +166,8 @@ pub fn render_preset_browser(
                 } else {
                     for row in &table {
                         let Some(preset) = presets.iter().find(|p| p.name == row.name) else { continue };
-                        if let Some(cmd) = render_preset_row(ui, row, preset, state, selected_job_ids, queue_mgr, tokens) {
+                        let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 0.0 };
+                        if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
                             chosen_command = Some(cmd);
                         }
                     }
@@ -199,9 +201,9 @@ pub fn render_preset_browser(
                         let user_rows = catalog::rows(&user_presets);
                         for row in &user_rows {
                             let Some(preset) = user_presets.iter().find(|p| p.name == row.name) else { continue };
+                            let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 16.0 };
                             ui.horizontal(|ui| {
-                                ui.add_space(18.0);
-                                if let Some(cmd) = render_preset_row(ui, row, preset, state, selected_job_ids, queue_mgr, tokens) {
+                                if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
                                     chosen_command = Some(cmd);
                                 }
                             });
@@ -256,9 +258,9 @@ pub fn render_preset_browser(
                             let cat_rows = catalog::rows(&cat_presets);
                             for row in &cat_rows {
                                 let Some(preset) = cat_presets.iter().find(|p| p.name == row.name) else { continue };
+                                let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 28.0 };
                                 ui.horizontal(|ui| {
-                                    ui.add_space(36.0);
-                                    if let Some(cmd) = render_preset_row(ui, row, preset, state, selected_job_ids, queue_mgr, tokens) {
+                                    if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
                                         chosen_command = Some(cmd);
                                     }
                                 });
@@ -373,15 +375,38 @@ pub fn render_preset_browser(
     chosen_command
 }
 
-fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, tokens: &Tokens) {
+/// Calculated column widths for Preset Browser table.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PresetColumnWidths {
+    pub name: f32,
+    pub format: f32,
+    pub frame_size: f32,
+    pub frame_rate: f32,
+    pub target_rate: f32,
+}
+
+impl PresetColumnWidths {
+    pub const FORMAT: f32 = 90.0;
+    pub const FRAME_SIZE: f32 = 75.0;
+    pub const FRAME_RATE: f32 = 65.0;
+    pub const TARGET_RATE: f32 = 65.0;
+
+    pub fn compute(available_width: f32) -> Self {
+        let fixed = Self::FORMAT + Self::FRAME_SIZE + Self::FRAME_RATE + Self::TARGET_RATE + 24.0;
+        let name = (available_width - fixed).max(110.0);
+        Self { name, format: Self::FORMAT, frame_size: Self::FRAME_SIZE, frame_rate: Self::FRAME_RATE, target_rate: Self::TARGET_RATE }
+    }
+}
+
+fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, tokens: &Tokens, cols: PresetColumnWidths) {
     egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
         ui.horizontal(|ui| {
             for (label, col, width) in [
-                ("Preset Name", SortColumn::Name, 170.0),
-                ("Format", SortColumn::Format, 110.0),
-                ("Frame Size", SortColumn::FrameSize, 90.0),
-                ("Frame Rate", SortColumn::FrameRate, 85.0),
-                ("Target Rate", SortColumn::TargetRate, 85.0),
+                ("Preset Name", SortColumn::Name, cols.name),
+                ("Format", SortColumn::Format, cols.format),
+                ("Frame Size", SortColumn::FrameSize, cols.frame_size),
+                ("Frame Rate", SortColumn::FrameRate, cols.frame_rate),
+                ("Target Rate", SortColumn::TargetRate, cols.target_rate),
             ] {
                 let arrow = match (state.sort_column == Some(col), state.sort_descending) {
                     (true, true) => " ▼",
@@ -398,31 +423,42 @@ fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, token
     });
 }
 
-fn render_preset_row(
-    ui: &mut Ui,
-    row: &PresetRow,
-    preset: &EncodingPreset,
-    state: &mut PresetBrowserState,
-    selected_job_ids: &[String],
-    queue_mgr: &Arc<QueueManager>,
-    tokens: &Tokens,
-) -> Option<crate::commands::AppCommand> {
+struct PresetRowContext<'a> {
+    state: &'a mut PresetBrowserState,
+    selected_job_ids: &'a [String],
+    queue_mgr: &'a Arc<QueueManager>,
+    tokens: &'a Tokens,
+    cols: PresetColumnWidths,
+    indent: f32,
+}
+
+fn render_preset_row(ui: &mut Ui, row: &PresetRow, preset: &EncodingPreset, ctx: &mut PresetRowContext<'_>) -> Option<crate::commands::AppCommand> {
     let mut chosen = None;
-    let is_sel = state.selected_preset.as_ref().map(|p| &p.name) == Some(&row.name);
+    let is_sel = ctx.state.selected_preset.as_ref().map(|p| &p.name) == Some(&row.name);
 
     ui.horizontal(|ui| {
-        let name_resp = ui.add_sized([170.0, tokens.row_height], egui::Button::new(&row.name).selected(is_sel));
+        // Preset Name column (with internal tree indent)
+        let name_w = (ctx.cols.name - ctx.indent).max(40.0);
+        let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.name, ctx.tokens.row_height), egui::Sense::hover());
+        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(cell_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        cell_ui.set_clip_rect(cell_rect);
+
+        if ctx.indent > 0.0 {
+            cell_ui.add_space(ctx.indent);
+        }
+        let name_btn = egui::Button::new(RichText::new(&row.name).small()).truncate().selected(is_sel);
+        let name_resp = cell_ui.add_sized([name_w, ctx.tokens.row_height], name_btn);
         if name_resp.clicked() {
-            state.selected_preset = Some(preset.clone());
+            ctx.state.selected_preset = Some(preset.clone());
         }
         if name_resp.double_clicked() {
-            state.selected_preset = Some(preset.clone());
+            ctx.state.selected_preset = Some(preset.clone());
             chosen = Some(crate::commands::AppCommand::ApplyPreset);
         }
         name_resp.context_menu(|ui| {
-            state.selected_preset = Some(preset.clone());
+            ctx.state.selected_preset = Some(preset.clone());
             let preset_deletable = preset.category == PresetCategory::Custom;
-            let applicable = !selected_job_ids.is_empty() && !preset_incompatible_with_jobs(preset, selected_job_ids, queue_mgr);
+            let applicable = !ctx.selected_job_ids.is_empty() && !preset_incompatible_with_jobs(preset, ctx.selected_job_ids, ctx.queue_mgr);
             for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::Preset) {
                 let enabled = if info.command == crate::commands::AppCommand::DeletePreset { preset_deletable } else { applicable };
                 if ui.add_enabled(enabled, egui::Button::new(info.context_label(crate::commands::CommandContextMenu::Preset))).clicked() {
@@ -432,10 +468,21 @@ fn render_preset_row(
             }
         });
 
-        ui.add_sized([110.0, tokens.row_height], egui::Label::new(RichText::new(&row.format).small().color(tokens.text_secondary)));
-        ui.add_sized([90.0, tokens.row_height], egui::Label::new(RichText::new(&row.frame_size).small().color(tokens.text_secondary)));
-        ui.add_sized([85.0, tokens.row_height], egui::Label::new(RichText::new(&row.frame_rate).small().color(tokens.text_secondary)));
-        ui.add_sized([85.0, tokens.row_height], egui::Label::new(RichText::new(&row.target_rate).small().color(tokens.text_secondary)));
+        // Format column
+        let format_label = RichText::new(&row.format).small().color(ctx.tokens.text_secondary);
+        ui.add_sized([ctx.cols.format, ctx.tokens.row_height], egui::Label::new(format_label).truncate());
+
+        // Frame Size column
+        let size_label = RichText::new(&row.frame_size).small().color(ctx.tokens.text_secondary);
+        ui.add_sized([ctx.cols.frame_size, ctx.tokens.row_height], egui::Label::new(size_label).truncate());
+
+        // Frame Rate column
+        let rate_label = RichText::new(&row.frame_rate).small().color(ctx.tokens.text_secondary);
+        ui.add_sized([ctx.cols.frame_rate, ctx.tokens.row_height], egui::Label::new(rate_label).truncate());
+
+        // Target Rate column
+        let target_label = RichText::new(&row.target_rate).small().color(ctx.tokens.text_secondary);
+        ui.add_sized([ctx.cols.target_rate, ctx.tokens.row_height], egui::Label::new(target_label).truncate());
     });
 
     chosen
@@ -481,5 +528,18 @@ mod tests {
         let state = PresetBrowserState::default();
         assert!(state.expanded_groups.contains("User Presets & Groups"));
         assert!(state.expanded_groups.contains("System Presets"));
+    }
+
+    #[test]
+    fn test_preset_column_widths_adaptive() {
+        let narrow = PresetColumnWidths::compute(300.0);
+        assert_eq!(narrow.format, PresetColumnWidths::FORMAT);
+        assert_eq!(narrow.frame_size, PresetColumnWidths::FRAME_SIZE);
+        assert_eq!(narrow.frame_rate, PresetColumnWidths::FRAME_RATE);
+        assert_eq!(narrow.target_rate, PresetColumnWidths::TARGET_RATE);
+        assert_eq!(narrow.name, 110.0);
+
+        let wide = PresetColumnWidths::compute(800.0);
+        assert!(wide.name > narrow.name);
     }
 }

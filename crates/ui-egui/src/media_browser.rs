@@ -46,8 +46,8 @@ pub struct MediaBrowserColumnWidths {
 impl MediaBrowserColumnWidths {
     pub fn compute(total_width: f32) -> Self {
         let kind = 70.0;
-        let size = 70.0;
-        let date = 90.0;
+        let size = 65.0;
+        let date = 115.0;
         let padding = 24.0;
         let name = (total_width - kind - size - date - padding).max(120.0);
         Self { name, kind, size, date }
@@ -162,14 +162,10 @@ pub fn format_size(bytes: u64) -> String {
     format!("{v:.1} {}", UNITS.get(unit).copied().unwrap_or("TB"))
 }
 
-pub fn format_age(modified: Option<SystemTime>, now: SystemTime) -> String {
-    let Some(secs) = modified.and_then(|m| now.duration_since(m).ok()).map(|d| d.as_secs()) else { return "-".into() };
-    match secs {
-        0..=59 => "just now".into(),
-        60..=3599 => format!("{} min ago", secs / 60),
-        3600..=86_399 => format!("{} h ago", secs / 3600),
-        _ => format!("{} d ago", secs / 86_400),
-    }
+pub fn format_age(modified: Option<SystemTime>, _now: SystemTime) -> String {
+    let Some(m) = modified else { return "-".into() };
+    let dt: chrono::DateTime<chrono::Local> = m.into();
+    dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
 fn is_drive_or_volume(label: &str, path: &Path) -> bool {
@@ -554,18 +550,18 @@ fn list_view(
                 icons::paint(ui.painter(), icon_rect, icon, if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary });
 
                 let name_label = RichText::new(&e.name).small().color(tokens.text_primary);
-                let resp = ui.add_sized([cols.name - 18.0, 18.0], egui::Label::new(name_label).sense(egui::Sense::click()));
+                let resp = ui.add_sized([cols.name - 18.0, 18.0], egui::Label::new(name_label).sense(egui::Sense::click()).truncate());
 
                 // Type
-                ui.add_sized([cols.kind, 18.0], egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)));
+                ui.add_sized([cols.kind, 18.0], egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)).truncate());
 
                 // Size
                 let size_str = if e.kind == EntryKind::Folder { "--".to_string() } else { format_size(e.size) };
-                ui.add_sized([cols.size, 18.0], egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)));
+                ui.add_sized([cols.size, 18.0], egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)).truncate());
 
                 // Modified
                 let date_str = format_age(e.modified, now);
-                ui.add_sized([cols.date, 18.0], egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)));
+                ui.add_sized([cols.date, 18.0], egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
 
                 if resp.clicked() {
                     state.selected = Some(e.path.clone());
@@ -660,9 +656,10 @@ mod tests {
         assert_eq!(format_size(5 * 1024 * 1024 * 1024), "5.0 GB");
         let now = SystemTime::now();
         assert_eq!(format_age(None, now), "-");
-        assert_eq!(format_age(Some(now - Duration::from_secs(120)), now), "2 min ago");
-        assert_eq!(format_age(Some(now + Duration::from_secs(120)), now), "-");
-        assert_eq!(format_age(Some(now - Duration::from_secs(3 * 86_400)), now), "3 d ago");
+        let formatted = format_age(Some(now), now);
+        assert_eq!(formatted.len(), 16);
+        assert!(formatted.contains('-'));
+        assert!(formatted.contains(':'));
     }
 
     #[test]
@@ -695,8 +692,8 @@ mod tests {
     fn column_widths_computation() {
         let cols = MediaBrowserColumnWidths::compute(600.0);
         assert_eq!(cols.kind, 70.0);
-        assert_eq!(cols.size, 70.0);
-        assert_eq!(cols.date, 90.0);
+        assert_eq!(cols.size, 65.0);
+        assert_eq!(cols.date, 115.0);
         assert!(cols.name >= 300.0);
     }
 
