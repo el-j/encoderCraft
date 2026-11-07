@@ -453,7 +453,15 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         }
 
         target.selection = selection.clone();
-        target.transform = encodercraft_core::VideoTransform { scale_mode, scaling_filter, rotation, frame_rate_mode };
+        target.transform = encodercraft_core::VideoTransform {
+            scale_mode,
+            scaling_filter,
+            rotation,
+            flip: encodercraft_core::FlipMode::None,
+            deinterlace: encodercraft_core::DeinterlaceMode::None,
+            par_conform: encodercraft_core::PixelAspectRatioConform::Source,
+            frame_rate_mode,
+        };
         if let Some(rate) = fps {
             target.custom_frame_rate = Some(rate);
         }

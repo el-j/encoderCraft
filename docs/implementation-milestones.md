@@ -672,6 +672,27 @@ flowchart LR
 
 ---
 
+### Milestone 37: Advanced Transforms, craft-libs Integration & Industry-Grade E2E Suite
+**Objective:** Extend video/audio transform pipeline (flip, deinterlace, par conform, lip-sync delay offset), author comprehensive architecture & craft-libs audit, and deploy exhaustive industry-grade E2E integration test suite. Tracked under Milestone [M37 - Advanced Transforms, craft-libs Integration & Industry-Grade E2E Suite](https://github.com/el-j/encoderCraft/milestone/15).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Advanced Video Transforms: Flip, Deinterlace & Pixel Aspect Ratio Conform ([#171](https://github.com/el-j/encoderCraft/issues/171)):**
+   - Added `FlipMode` (`None`, `Horizontal`, `Vertical`, `Both`), `DeinterlaceMode` (`None`, `TopFieldFirst`, `BottomFieldFirst`, `Bob`), and `PixelAspectRatioConform` (`Source`, `Square`, `Custom`) to `encodercraft-core`.
+   - Implemented `flip` and `deinterlace` in `encodercraft-pipeline` with packed pixel field interpolation and row/column reversal.
+   - Added interactive dropdown controls in the Video tab of `InspectorDialog`.
+2. [x] **Audio Lip-Sync Delay Offset Compensation ([#172](https://github.com/el-j/encoderCraft/issues/172)):**
+   - Added `delay_ms: i32` to `AudioEncodeSettings`.
+   - Implemented `apply_audio_delay` in `encodercraft-audio-dsp` with sample-exact silence prepending for positive delays and sample-draining for negative advances.
+   - Added interactive audio delay drag value selector in the Audio tab of `InspectorDialog`.
+3. [x] **Full Architecture, UI Design & craft-libs Integration Review ([#173](https://github.com/el-j/encoderCraft/issues/173)):**
+   - Authored `docs/architecture-and-parity-audit.md` comparing encoderCraft against Adobe Media Encoder 2026.
+   - Evaluated upstream `craft-libs` crates (`craft-media`, `craft-ui`, `craft-window`, `craft-menu`, `craft-keymap`, `craft-cms`, `craft-text`, `craft-crw`, `craft-jpeg`, `craft-pdf`) for unified integration.
+   - Documented transform execution order and numeric precision requirements.
+4. [x] **Exhaustive Industry-Grade End-to-End Integration Test Suite ([#174](https://github.com/el-j/encoderCraft/issues/174)):**
+   - Created `crates/engine/tests/industry_e2e.rs` covering video transforms matrix, audio lip-sync delay offset and surround matrix routing, batch queue multi-target lifecycle and journal persistence, watch folder automation with settle-delay quiescence probing, and TCP IPC daemon dispatch.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

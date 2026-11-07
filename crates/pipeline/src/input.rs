@@ -4,7 +4,8 @@
 
 use encodercraft_audio_dsp::{SincResampler, normalize_loudness, remix_channels};
 use encodercraft_core::{
-    AudioSampleBuffer, ChannelLayout, EncoderError, FrameRateMode, OutputTarget, Rational64, Rotation, SourceDescriptor, VideoFrame,
+    AudioSampleBuffer, ChannelLayout, DeinterlaceMode, EncoderError, FlipMode, FrameRateMode, OutputTarget, Rational64, Rotation, SourceDescriptor,
+    VideoFrame,
 };
 use encodercraft_geom::Dimensions;
 use encodercraft_source::{MediaReader, SourceKind};
@@ -25,6 +26,8 @@ pub(crate) struct VideoInput {
     count: u64,
     still: bool,
     rotation: Rotation,
+    flip: FlipMode,
+    deinterlace: DeinterlaceMode,
     frame_rate_mode: FrameRateMode,
 }
 
@@ -95,6 +98,8 @@ impl VideoInput {
         }
 
         let rotation = target.transform.rotation;
+        let flip = target.transform.flip;
+        let deinterlace = target.transform.deinterlace;
         let (picture_w, picture_h) = if rotation.swaps_axes() { (video.height, video.width) } else { (video.width, video.height) };
         let width = even(target.custom_width.unwrap_or(picture_w));
         let height = even(target.custom_height.unwrap_or(picture_h));
@@ -117,7 +122,20 @@ impl VideoInput {
             ((wanted * out_fps_f).round().max(1.0)) as u64
         };
 
-        Ok(Self { reader, src_fps, out_fps, dims, first_src, src_frames, count, still, rotation, frame_rate_mode: target.transform.frame_rate_mode })
+        Ok(Self {
+            reader,
+            src_fps,
+            out_fps,
+            dims,
+            first_src,
+            src_frames,
+            count,
+            still,
+            rotation,
+            flip,
+            deinterlace,
+            frame_rate_mode: target.transform.frame_rate_mode,
+        })
     }
 
     pub(crate) fn dims(&self) -> Dimensions {
@@ -143,7 +161,7 @@ impl VideoInput {
     }
 
     /// Decodes output frame `i`: the nearest source frame, or a blend of the two around the instant
-    /// when the rates differ and blending is requested; then rotated upright.
+    /// when the rates differ and blending is requested; then deinterlaced, rotated, and flipped.
     pub(crate) fn frame(&self, i: u64) -> Result<VideoFrame, EncoderError> {
         let frame = if self.still {
             self.reader.frame_at_index(0)?
@@ -163,7 +181,9 @@ impl VideoInput {
                 self.reader.frame_at_index(clamp(position.round() as u64))?
             }
         };
-        crate::transform::rotate(&frame, self.rotation)
+        let frame = crate::transform::deinterlace(&frame, self.deinterlace)?;
+        let frame = crate::transform::rotate(&frame, self.rotation)?;
+        crate::transform::flip(&frame, self.flip)
     }
 
     /// Bytes of one decoded source frame.

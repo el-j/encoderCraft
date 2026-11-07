@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use egui::{ColorImage, RichText, TextureHandle, Ui, Window};
 use encodercraft_core::{
-    CaptionExportFormat, ContainerType, CraftJobSpec, FrameRateMode, MediaStreamKind, OutputTarget, OverlayAnchor, Rational64, Rotation,
-    ScalingFilter, SourceDescriptor, SourceSelection, VideoLimiterClipLevel,
+    CaptionExportFormat, ContainerType, CraftJobSpec, DeinterlaceMode, FlipMode, FrameRateMode, MediaStreamKind, OutputTarget, OverlayAnchor,
+    Rational64, Rotation, ScalingFilter, SourceDescriptor, SourceSelection, VideoLimiterClipLevel,
 };
 use encodercraft_geom::ScaleMode;
 use encodercraft_pipeline::SourceInventory;
@@ -792,6 +792,40 @@ fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
     });
 
     ui.horizontal(|ui| {
+        ui.label("Flip:");
+        egui::ComboBox::from_id_salt("inspector_flip_combo")
+            .selected_text(match target.transform.flip {
+                FlipMode::None => "None",
+                FlipMode::Horizontal => "Horizontal (mirror)",
+                FlipMode::Vertical => "Vertical",
+                FlipMode::Both => "Both (H + V)",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut target.transform.flip, FlipMode::None, "None");
+                ui.selectable_value(&mut target.transform.flip, FlipMode::Horizontal, "Horizontal (mirror)");
+                ui.selectable_value(&mut target.transform.flip, FlipMode::Vertical, "Vertical");
+                ui.selectable_value(&mut target.transform.flip, FlipMode::Both, "Both (H + V)");
+            });
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Deinterlace:");
+        egui::ComboBox::from_id_salt("inspector_deinterlace_combo")
+            .selected_text(match target.transform.deinterlace {
+                DeinterlaceMode::None => "Off (progressive)",
+                DeinterlaceMode::TopFieldFirst => "Upper Field First",
+                DeinterlaceMode::BottomFieldFirst => "Lower Field First",
+                DeinterlaceMode::Bob => "Bob (duplicate)",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut target.transform.deinterlace, DeinterlaceMode::None, "Off (progressive)");
+                ui.selectable_value(&mut target.transform.deinterlace, DeinterlaceMode::TopFieldFirst, "Upper Field First");
+                ui.selectable_value(&mut target.transform.deinterlace, DeinterlaceMode::BottomFieldFirst, "Lower Field First");
+                ui.selectable_value(&mut target.transform.deinterlace, DeinterlaceMode::Bob, "Bob (duplicate)");
+            });
+    });
+
+    ui.horizontal(|ui| {
         ui.label("Scale mode:");
         egui::ComboBox::from_id_salt("inspector_scale_mode_combo")
             .selected_text(match target.transform.scale_mode {
@@ -961,6 +995,18 @@ fn render_audio_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
             });
     });
     target.audio_stems = if current_stems == encodercraft_core::AudioStemMode::None { None } else { Some(current_stems) };
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Lip-Sync / Audio Delay:");
+        let mut audio_settings = target.audio.clone().unwrap_or_default();
+        let mut delay = audio_settings.delay_ms;
+        let drag = ui.add(egui::DragValue::new(&mut delay).suffix(" ms").speed(1.0).range(-5000..=5000));
+        if drag.changed() {
+            audio_settings.delay_ms = delay;
+            target.audio = Some(audio_settings);
+        }
+    });
 
     ui.add_space(8.0);
     ui.separator();

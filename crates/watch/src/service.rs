@@ -25,6 +25,11 @@ impl WatchFolderService {
         self.configs.push(config);
     }
 
+    /// Returns a slice of all registered watch folder configurations.
+    pub fn configs(&self) -> &[WatchFolderConfig] {
+        &self.configs
+    }
+
     /// Scans all active watch folders once and returns any new jobs ready for submission.
     pub fn scan_once(&self) -> Result<Vec<(String, CraftJobSpec)>, EncoderError> {
         let mut ready_jobs = Vec::new();

@@ -47,6 +47,7 @@ pub fn evaluate_preset(preset: &EncodingPreset, source: &MediaInfo, output_path:
             MatchSourceOr::Exact(layout) => layout,
         }),
         bitrate_kbps: settings.bitrate_kbps,
+        delay_ms: 0,
     });
 
     let mut video = preset.video_encode_settings();
