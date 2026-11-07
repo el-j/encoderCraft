@@ -52,7 +52,7 @@ impl PresetRow {
         };
         Self {
             name: p.name.clone(),
-            format: format!("{:?}", p.container),
+            format: p.container.display_name().to_string(),
             frame_size,
             frame_rate,
             target_rate,
