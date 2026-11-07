@@ -88,6 +88,11 @@ pub fn shut_down_computer() -> Result<(), String> {
 /// Render back ends that really work. Hardware encoders are listed only once the pipeline can use them.
 pub const RENDERERS: &[&str] = &["Software (CPU)"];
 
+/// Returns the detected hardware and software render backends for the host platform.
+pub fn available_renderers() -> Vec<String> {
+    encodercraft_platform::available_renderers()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

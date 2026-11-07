@@ -80,6 +80,9 @@ pub struct AppPreferences {
     /// Shut the computer down after the queue has finished, after a cancellable countdown.
     #[serde(default)]
     pub auto_shutdown: bool,
+    /// Selected hardware / software renderer backend name.
+    #[serde(default = "default_renderer")]
+    pub selected_renderer: String,
     /// Use the operating system's title bar instead of the app-drawn one (takes effect on restart).
     #[serde(default)]
     pub system_title_bar: bool,
@@ -98,6 +101,10 @@ fn default_parallelism() -> usize {
 
 fn default_theme() -> String {
     "Dark".into()
+}
+
+fn default_renderer() -> String {
+    "Pure-Rust Software (CPU)".into()
 }
 
 /// Current preferences file schema.
@@ -146,6 +153,7 @@ impl Default for AppPreferences {
             max_parallel_jobs: 2,
             theme: "Dark".into(),
             auto_shutdown: false,
+            selected_renderer: default_renderer(),
             system_title_bar: false,
             lossy_conversion_decisions: Vec::new(),
         }

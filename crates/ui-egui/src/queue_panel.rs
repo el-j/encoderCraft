@@ -413,6 +413,7 @@ pub struct QueuePanelContext<'a> {
     pub on_open_log: &'a mut bool,
     pub auto_shutdown: &'a mut bool,
     pub on_add_media: &'a mut bool,
+    pub selected_renderer: &'a mut String,
 }
 
 /// Renders the queue panel with batch toolbar, global progress, and hierarchical job table.
@@ -424,6 +425,7 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
     let on_open_log = &mut *ctx.on_open_log;
     let auto_shutdown = &mut *ctx.auto_shutdown;
     let on_add_media = &mut *ctx.on_add_media;
+    let selected_renderer = &mut *ctx.selected_renderer;
 
     let mut jobs = queue_mgr.list_jobs();
 
@@ -631,13 +633,18 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
             ui.checkbox(auto_shutdown, "Auto Computer Shutdown")
                 .on_hover_text("Shut the computer down 60 seconds after the queue finishes; you can cancel the countdown");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                egui::ComboBox::from_id_salt("queue_footer_renderer")
-                    .selected_text(RichText::new(crate::queue_footer::RENDERERS[0]).small())
-                    .show_ui(ui, |ui| {
-                        for name in crate::queue_footer::RENDERERS {
-                            let _ = ui.selectable_label(true, *name);
+                let renderers = crate::queue_footer::available_renderers();
+                if selected_renderer.is_empty() || !renderers.iter().any(|r| r == selected_renderer) {
+                    *selected_renderer = renderers.first().cloned().unwrap_or_else(|| "Pure-Rust Software (CPU)".into());
+                }
+                egui::ComboBox::from_id_salt("queue_footer_renderer").selected_text(RichText::new(&*selected_renderer).small()).show_ui(ui, |ui| {
+                    for name in &renderers {
+                        let is_selected = *selected_renderer == *name;
+                        if ui.selectable_label(is_selected, name).clicked() {
+                            *selected_renderer = name.clone();
                         }
-                    });
+                    }
+                });
                 ui.label(RichText::new("Renderer:").small().color(tokens.text_dim));
             });
         });
@@ -1362,5 +1369,38 @@ mod tests {
         assert_eq!(cols_wide.output, QueueColumnWidths::OUTPUT);
         assert_eq!(cols_wide.status, QueueColumnWidths::STATUS);
         assert!(cols_wide.src > cols_narrow.src);
+    }
+
+    #[test]
+    fn test_queue_panel_renderer_selection() {
+        let queue_mgr = Arc::new(QueueManager::new_in_memory());
+        let commands = CommandRegistry::new();
+        let tokens = Tokens::dark();
+        let mut queue_state = QueuePanelState::default();
+        let mut on_inspect = None;
+        let mut on_open_log = false;
+        let mut auto_shutdown = false;
+        let mut on_add_media = false;
+        let mut selected_renderer = String::new();
+
+        egui::__run_test_ui(|ui| {
+            render_queue_panel(
+                ui,
+                &mut queue_state,
+                QueuePanelContext {
+                    queue_mgr: &queue_mgr,
+                    commands: &commands,
+                    tokens: &tokens,
+                    on_inspect_job: &mut on_inspect,
+                    on_open_log: &mut on_open_log,
+                    auto_shutdown: &mut auto_shutdown,
+                    on_add_media: &mut on_add_media,
+                    selected_renderer: &mut selected_renderer,
+                },
+            );
+        });
+
+        assert!(!selected_renderer.is_empty());
+        assert!(selected_renderer.contains("Hardware") || selected_renderer.contains("Software"));
     }
 }
