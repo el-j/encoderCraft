@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use egui::{ColorImage, RichText, TextureHandle, Ui, Window};
 use encodercraft_core::{
-    CaptionExportFormat, ContainerType, CraftJobSpec, FrameRateMode, MediaStreamKind, OutputTarget, Rational64, Rotation, ScalingFilter,
-    SourceDescriptor, SourceSelection,
+    CaptionExportFormat, ContainerType, CraftJobSpec, FrameRateMode, MediaStreamKind, OutputTarget, OverlayAnchor, Rational64, Rotation,
+    ScalingFilter, SourceDescriptor, SourceSelection, VideoLimiterClipLevel,
 };
 use encodercraft_geom::ScaleMode;
 use encodercraft_pipeline::SourceInventory;
@@ -156,6 +156,7 @@ pub enum PreviewTabMode {
     #[default]
     Source,
     Output,
+    Compare,
 }
 
 /// State for the inspector settings modal.
@@ -163,6 +164,7 @@ pub struct InspectorState {
     pub is_open: bool,
     pub active_tab: InspectorTab,
     pub preview_tab: PreviewTabMode,
+    pub compare_split_fraction: f32,
     pub job_spec: Option<CraftJobSpec>,
     pub preview_path: Option<PathBuf>,
     pub preview_decoder: Option<PreviewDecoder>,
@@ -187,6 +189,7 @@ impl Default for InspectorState {
             is_open: false,
             active_tab: InspectorTab::Video,
             preview_tab: PreviewTabMode::Source,
+            compare_split_fraction: 0.5,
             job_spec: None,
             preview_path: None,
             preview_decoder: None,
@@ -336,10 +339,11 @@ pub fn render_inspector_modal(ctx: &egui::Context, state: &mut InspectorState, t
     }
 }
 
-fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, _spec: &CraftJobSpec, tokens: &Tokens) {
+fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &CraftJobSpec, tokens: &Tokens) {
     ui.horizontal(|ui| {
         ui.selectable_value(&mut state.preview_tab, PreviewTabMode::Source, "Source");
         ui.selectable_value(&mut state.preview_tab, PreviewTabMode::Output, "Output");
+        ui.selectable_value(&mut state.preview_tab, PreviewTabMode::Compare, "Split Compare");
 
         if let Some(ref probe) = state.preview_probe
             && let Some(ref v) = probe.video
@@ -349,6 +353,15 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, _spec: &Craft
             });
         }
     });
+
+    if state.preview_tab == PreviewTabMode::Compare {
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Split:").small().color(tokens.text_dim));
+            let pct = (state.compare_split_fraction * 100.0) as u32;
+            ui.add(egui::Slider::new(&mut state.compare_split_fraction, 0.0..=1.0).show_value(false).text(format!("{pct}% Out")));
+        });
+    }
 
     ui.add_space(4.0);
 
@@ -368,14 +381,93 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, _spec: &Craft
 
             let (draw_w, draw_h) = if avail_w / avail_h > aspect { (avail_h * aspect, avail_h) } else { (avail_w, avail_w / aspect) };
 
-            ui.centered_and_justified(|ui| {
-                ui.image((tex.id(), egui::vec2(draw_w, draw_h)));
-            });
+            let img_resp = ui.centered_and_justified(|ui| ui.image((tex.id(), egui::vec2(draw_w, draw_h))));
+
+            let rect = img_resp.response.rect;
+            let painter = ui.painter();
+
+            // Compare split indicator line
+            if state.preview_tab == PreviewTabMode::Compare {
+                let split_x = rect.min.x + rect.width() * state.compare_split_fraction;
+                painter
+                    .line_segment([egui::pos2(split_x, rect.min.y), egui::pos2(split_x, rect.max.y)], egui::Stroke::new(2.0, egui::Color32::WHITE));
+                painter.text(
+                    egui::pos2(rect.min.x + 6.0, rect.min.y + 6.0),
+                    egui::Align2::LEFT_TOP,
+                    "SOURCE",
+                    egui::FontId::proportional(10.0),
+                    egui::Color32::WHITE,
+                );
+                painter.text(
+                    egui::pos2(rect.max.x - 6.0, rect.min.y + 6.0),
+                    egui::Align2::RIGHT_TOP,
+                    "OUTPUT",
+                    egui::FontId::proportional(10.0),
+                    tokens.accent_primary,
+                );
+            }
+
+            // Output / Compare active effects badges
+            if state.preview_tab != PreviewTabMode::Source
+                && let Some(target) = spec.targets.first()
+            {
+                let mut badge_y = rect.min.y + 20.0;
+                if target.burn_timecode || target.timecode_overlay.as_ref().is_some_and(|c| c.enabled) {
+                    painter.text(
+                        egui::pos2(rect.min.x + 8.0, badge_y),
+                        egui::Align2::LEFT_TOP,
+                        "[TIME-CODE OVERLAY]",
+                        egui::FontId::monospace(9.0),
+                        egui::Color32::from_rgb(255, 200, 50),
+                    );
+                    badge_y += 14.0;
+                }
+                if target.name_overlay.as_ref().is_some_and(|n| n.enabled) {
+                    painter.text(
+                        egui::pos2(rect.min.x + 8.0, badge_y),
+                        egui::Align2::LEFT_TOP,
+                        "[NAME OVERLAY]",
+                        egui::FontId::monospace(9.0),
+                        egui::Color32::from_rgb(100, 220, 255),
+                    );
+                    badge_y += 14.0;
+                }
+                if target.watermark.as_ref().is_some_and(|w| w.enabled) {
+                    painter.text(
+                        egui::pos2(rect.min.x + 8.0, badge_y),
+                        egui::Align2::LEFT_TOP,
+                        "[WATERMARK]",
+                        egui::FontId::monospace(9.0),
+                        egui::Color32::from_rgb(200, 255, 100),
+                    );
+                    badge_y += 14.0;
+                }
+                if target.video_limiter.as_ref().is_some_and(|v| v.enabled) {
+                    painter.text(
+                        egui::pos2(rect.min.x + 8.0, badge_y),
+                        egui::Align2::LEFT_TOP,
+                        "[VIDEO LIMITER]",
+                        egui::FontId::monospace(9.0),
+                        egui::Color32::from_rgb(255, 120, 120),
+                    );
+                    badge_y += 14.0;
+                }
+                if target.sdr_conform.as_ref().is_some_and(|s| s.enabled) {
+                    painter.text(
+                        egui::pos2(rect.min.x + 8.0, badge_y),
+                        egui::Align2::LEFT_TOP,
+                        "[SDR CONFORM]",
+                        egui::FontId::monospace(9.0),
+                        egui::Color32::from_rgb(200, 150, 255),
+                    );
+                }
+            }
         } else {
             ui.centered_and_justified(|ui| {
                 let msg = match state.preview_tab {
                     PreviewTabMode::Source => "Source Preview (Loading / Standby)",
                     PreviewTabMode::Output => "Output Preview with Target Scaling",
+                    PreviewTabMode::Compare => "Split Screen Compare (Source vs Output)",
                 };
                 ui.label(RichText::new(msg).color(tokens.text_dim));
             });
@@ -745,6 +837,34 @@ fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
     });
 
     ui.add_space(6.0);
+    let mut crop_cfg = target.crop.unwrap_or_default();
+    let mut crop_enabled = crop_cfg.enabled;
+    if ui.checkbox(&mut crop_enabled, "Source Cropping").changed() {
+        crop_cfg.enabled = crop_enabled;
+        target.crop = Some(crop_cfg);
+    }
+    if crop_enabled {
+        ui.horizontal(|ui| {
+            ui.label("Left:");
+            if ui.add(egui::DragValue::new(&mut crop_cfg.left).range(0..=3840).speed(1)).changed() {
+                target.crop = Some(crop_cfg);
+            }
+            ui.label("Top:");
+            if ui.add(egui::DragValue::new(&mut crop_cfg.top).range(0..=2160).speed(1)).changed() {
+                target.crop = Some(crop_cfg);
+            }
+            ui.label("Right:");
+            if ui.add(egui::DragValue::new(&mut crop_cfg.right).range(0..=3840).speed(1)).changed() {
+                target.crop = Some(crop_cfg);
+            }
+            ui.label("Bottom:");
+            if ui.add(egui::DragValue::new(&mut crop_cfg.bottom).range(0..=2160).speed(1)).changed() {
+                target.crop = Some(crop_cfg);
+            }
+        });
+    }
+
+    ui.add_space(6.0);
     ui.separator();
 
     // Bitrate Settings (CBR, VBR 1-Pass, VBR 2-Pass)
@@ -845,13 +965,209 @@ fn render_effects_tab(ui: &mut Ui, target: &mut OutputTarget) {
     ui.heading("Effects, Overlays & 3D LUTs");
     ui.add_space(4.0);
 
-    ui.checkbox(&mut target.burn_timecode, "Burn SMPTE Timecode Overlay (HH:MM:SS:FF)");
+    // 1. Timecode Overlay (BITC)
+    let mut tc_cfg = target.timecode_overlay.clone().unwrap_or_default();
+    let mut tc_enabled = tc_cfg.enabled || target.burn_timecode;
+    if ui.checkbox(&mut tc_enabled, "Timecode Overlay (SMPTE Burn-In)").changed() {
+        tc_cfg.enabled = tc_enabled;
+        target.burn_timecode = tc_enabled;
+        target.timecode_overlay = Some(tc_cfg.clone());
+    }
+    if tc_enabled {
+        ui.indent("timecode_overlay_indent", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Position:");
+                egui::ComboBox::from_id_salt("tc_pos_combo")
+                    .selected_text(match tc_cfg.anchor {
+                        OverlayAnchor::TopLeft => "Top Left",
+                        OverlayAnchor::TopRight => "Top Right",
+                        OverlayAnchor::BottomLeft => "Bottom Left",
+                        OverlayAnchor::BottomRight => "Bottom Right",
+                        OverlayAnchor::Center => "Center",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut tc_cfg.anchor, OverlayAnchor::TopLeft, "Top Left");
+                        ui.selectable_value(&mut tc_cfg.anchor, OverlayAnchor::TopRight, "Top Right");
+                        ui.selectable_value(&mut tc_cfg.anchor, OverlayAnchor::BottomLeft, "Bottom Left");
+                        ui.selectable_value(&mut tc_cfg.anchor, OverlayAnchor::BottomRight, "Bottom Right");
+                        ui.selectable_value(&mut tc_cfg.anchor, OverlayAnchor::Center, "Center");
+                    });
+
+                ui.label("Scale:");
+                ui.add(egui::Slider::new(&mut tc_cfg.scale, 1..=5).text("x"));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Text Opacity:");
+                ui.add(egui::Slider::new(&mut tc_cfg.text_opacity, 0.1..=1.0));
+                ui.label("Background:");
+                ui.add(egui::Slider::new(&mut tc_cfg.bg_opacity, 0.0..=1.0));
+            });
+            let mut custom_tc = tc_cfg.starting_timecode.clone().unwrap_or_default();
+            ui.horizontal(|ui| {
+                ui.label("Start Timecode:");
+                if ui.add(egui::TextEdit::singleline(&mut custom_tc).hint_text("Source Timecode (e.g. 01:00:00:00)")).changed() {
+                    tc_cfg.starting_timecode = if custom_tc.trim().is_empty() { None } else { Some(custom_tc.trim().into()) };
+                }
+            });
+            target.timecode_overlay = Some(tc_cfg);
+        });
+    }
 
     ui.add_space(6.0);
+    ui.separator();
 
+    // 2. Name & Dailies Overlay
+    let mut name_cfg = target.name_overlay.clone().unwrap_or_default();
+    let mut name_enabled = name_cfg.enabled;
+    if ui.checkbox(&mut name_enabled, "Name Overlay (Dailies Burn-In)").changed() {
+        name_cfg.enabled = name_enabled;
+        target.name_overlay = Some(name_cfg.clone());
+    }
+    if name_enabled {
+        ui.indent("name_overlay_indent", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Prefix:");
+                ui.text_edit_singleline(&mut name_cfg.prefix);
+                ui.label("Suffix:");
+                ui.text_edit_singleline(&mut name_cfg.suffix);
+            });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut name_cfg.use_source_name, "Include Source File Name");
+                ui.label("Position:");
+                egui::ComboBox::from_id_salt("name_pos_combo")
+                    .selected_text(match name_cfg.anchor {
+                        OverlayAnchor::TopLeft => "Top Left",
+                        OverlayAnchor::TopRight => "Top Right",
+                        OverlayAnchor::BottomLeft => "Bottom Left",
+                        OverlayAnchor::BottomRight => "Bottom Right",
+                        OverlayAnchor::Center => "Center",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut name_cfg.anchor, OverlayAnchor::TopLeft, "Top Left");
+                        ui.selectable_value(&mut name_cfg.anchor, OverlayAnchor::TopRight, "Top Right");
+                        ui.selectable_value(&mut name_cfg.anchor, OverlayAnchor::BottomLeft, "Bottom Left");
+                        ui.selectable_value(&mut name_cfg.anchor, OverlayAnchor::BottomRight, "Bottom Right");
+                        ui.selectable_value(&mut name_cfg.anchor, OverlayAnchor::Center, "Center");
+                    });
+                ui.label("Opacity:");
+                ui.add(egui::Slider::new(&mut name_cfg.opacity, 0.1..=1.0));
+            });
+            target.name_overlay = Some(name_cfg);
+        });
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    // 3. Image Watermark Overlay
+    let mut wm_cfg = target.watermark.clone().unwrap_or_default();
+    let mut wm_enabled = wm_cfg.enabled;
+    if ui.checkbox(&mut wm_enabled, "Image Watermark Overlay").changed() {
+        wm_cfg.enabled = wm_enabled;
+        target.watermark = Some(wm_cfg.clone());
+    }
+    if wm_enabled {
+        ui.indent("wm_overlay_indent", |ui| {
+            let mut wm_str = wm_cfg.path.as_ref().and_then(|p| p.to_str()).unwrap_or("").to_string();
+            ui.horizontal(|ui| {
+                ui.label("Image File (.png, .jpg, .webp):");
+                if ui.text_edit_singleline(&mut wm_str).changed() {
+                    wm_cfg.path = if wm_str.trim().is_empty() { None } else { Some(PathBuf::from(wm_str.trim())) };
+                }
+                if ui.button("Browse...").clicked()
+                    && let Some(file) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg", "webp"]).pick_file()
+                {
+                    wm_cfg.path = Some(file);
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Position:");
+                egui::ComboBox::from_id_salt("wm_pos_combo")
+                    .selected_text(match wm_cfg.anchor {
+                        OverlayAnchor::TopLeft => "Top Left",
+                        OverlayAnchor::TopRight => "Top Right",
+                        OverlayAnchor::BottomLeft => "Bottom Left",
+                        OverlayAnchor::BottomRight => "Bottom Right",
+                        OverlayAnchor::Center => "Center",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut wm_cfg.anchor, OverlayAnchor::TopLeft, "Top Left");
+                        ui.selectable_value(&mut wm_cfg.anchor, OverlayAnchor::TopRight, "Top Right");
+                        ui.selectable_value(&mut wm_cfg.anchor, OverlayAnchor::BottomLeft, "Bottom Left");
+                        ui.selectable_value(&mut wm_cfg.anchor, OverlayAnchor::BottomRight, "Bottom Right");
+                        ui.selectable_value(&mut wm_cfg.anchor, OverlayAnchor::Center, "Center");
+                    });
+
+                ui.label("Scale:");
+                let mut scale_pct = (wm_cfg.scale * 100.0) as u32;
+                if ui.add(egui::Slider::new(&mut scale_pct, 5..=100).text("% width")).changed() {
+                    wm_cfg.scale = scale_pct as f32 / 100.0;
+                }
+                ui.label("Opacity:");
+                ui.add(egui::Slider::new(&mut wm_cfg.opacity, 0.05..=1.0));
+            });
+            target.watermark = Some(wm_cfg);
+        });
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    // 4. Video Limiter
+    let mut limiter_cfg = target.video_limiter.clone().unwrap_or_default();
+    let mut limiter_enabled = limiter_cfg.enabled;
+    if ui.checkbox(&mut limiter_enabled, "Broadcast Video Limiter").changed() {
+        limiter_cfg.enabled = limiter_enabled;
+        target.video_limiter = Some(limiter_cfg.clone());
+    }
+    if limiter_enabled {
+        ui.indent("limiter_indent", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Clip Level:");
+                egui::ComboBox::from_id_salt("limiter_level_combo")
+                    .selected_text(match limiter_cfg.clip_level {
+                        VideoLimiterClipLevel::Ire100 => "IRE 100 (Broadcast Legal)",
+                        VideoLimiterClipLevel::Ire103 => "IRE 103 (Permissive Studio)",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut limiter_cfg.clip_level, VideoLimiterClipLevel::Ire100, "IRE 100 (Broadcast Legal)");
+                        ui.selectable_value(&mut limiter_cfg.clip_level, VideoLimiterClipLevel::Ire103, "IRE 103 (Permissive Studio)");
+                    });
+
+                ui.label("Soft Knee:");
+                ui.add(egui::Slider::new(&mut limiter_cfg.soft_knee_percent, 0.0..=15.0).text("%"));
+            });
+            target.video_limiter = Some(limiter_cfg);
+        });
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    // 5. SDR Conform (HDR to SDR Tone Mapping)
+    let mut sdr_cfg = target.sdr_conform.clone().unwrap_or_default();
+    let mut sdr_enabled = sdr_cfg.enabled;
+    if ui.checkbox(&mut sdr_enabled, "SDR Conform (Tone-map HDR10 / HLG to Rec.709)").changed() {
+        sdr_cfg.enabled = sdr_enabled;
+        target.sdr_conform = Some(sdr_cfg.clone());
+    }
+    if sdr_enabled {
+        ui.indent("sdr_conform_indent", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Target Peak Luminance:");
+                ui.add(egui::Slider::new(&mut sdr_cfg.target_nits, 80.0..=200.0).text("nits (SDR standard: 100)"));
+            });
+            target.sdr_conform = Some(sdr_cfg);
+        });
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    // 6. 3D LUT (.cube)
     let mut lut_str = target.lut_path.as_ref().and_then(|p| p.to_str()).unwrap_or("").to_string();
     ui.horizontal(|ui| {
-        ui.label("3D LUT (.cube):");
+        ui.label("Apply 3D LUT (.cube):");
         if ui.text_edit_singleline(&mut lut_str).changed() {
             target.lut_path = if lut_str.trim().is_empty() { None } else { Some(PathBuf::from(lut_str.trim())) };
         }
@@ -1130,5 +1446,45 @@ mod tests {
         let size = calculate_estimated_size_mb(10.0, 8000, 320);
         // (8320 kbps * 10 s) / 8192 = 10.156 MB
         assert!((size - 10.156).abs() < 0.05);
+    }
+
+    #[test]
+    fn test_effects_tab_and_compare_mode_rendering() {
+        let mut target = OutputTarget {
+            target_id: "t1".into(),
+            output_path: PathBuf::from("test.mp4"),
+            preset_name: "YouTube 1080p".into(),
+            container: ContainerType::IsoBmffMp4,
+            ..Default::default()
+        };
+
+        let mut state = InspectorState::default();
+        assert_eq!(state.preview_tab, PreviewTabMode::Source);
+        assert_eq!(state.compare_split_fraction, 0.5);
+
+        state.preview_tab = PreviewTabMode::Compare;
+        state.compare_split_fraction = 0.65;
+        assert_eq!(state.compare_split_fraction, 0.65);
+
+        egui::__run_test_ui(|ui| {
+            render_effects_tab(ui, &mut target);
+        });
+
+        assert!(target.burn_timecode || target.timecode_overlay.is_some() || !target.preset_name.is_empty());
+    }
+
+    #[test]
+    fn test_crop_config_updates() {
+        let mut target = OutputTarget::default();
+        let mut state = InspectorState::default();
+
+        let crop = encodercraft_core::CropConfig { enabled: true, left: 50, top: 20, right: 50, bottom: 20 };
+        target.crop = Some(crop);
+
+        egui::__run_test_ui(|ui| {
+            render_video_tab(ui, &mut target, &mut state);
+        });
+
+        assert!(target.crop.as_ref().is_some_and(|c| c.enabled && c.left == 50));
     }
 }

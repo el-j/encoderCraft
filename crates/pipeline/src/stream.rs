@@ -82,6 +82,11 @@ pub(crate) struct FrameProcessor {
     pub color: ColorTransform,
     pub lut: Option<Lut3D>,
     pub timecode: Option<TimecodeOverlay>,
+    pub watermark: Option<crate::overlay::WatermarkOverlay>,
+    pub name_overlay: Option<(encodercraft_core::NameOverlayConfig, String)>,
+    pub video_limiter: Option<encodercraft_core::VideoLimiterConfig>,
+    pub sdr_conform: Option<encodercraft_core::SdrConformConfig>,
+    pub crop: Option<encodercraft_core::CropConfig>,
     pub captions: Option<(CaptionBurner, CaptionTrack)>,
     pub fps: Rational64,
 }
@@ -89,8 +94,31 @@ pub(crate) struct FrameProcessor {
 impl FrameProcessor {
     pub(crate) fn apply(&self, index: u64, src: &VideoFrame, out: &mut VideoFrame) -> Result<(), EncoderError> {
         self.scaler.scale_into(src, out)?;
+        if let Some(sdr) = &self.sdr_conform
+            && sdr.enabled
+        {
+            crate::overlay::apply_sdr_conform(out, sdr.target_nits)?;
+        }
         if let Some(lut) = &self.lut {
             lut.apply_to_frame(out)?;
+        }
+        if let Some(limiter) = &self.video_limiter
+            && limiter.enabled
+        {
+            crate::overlay::apply_video_limiter(out, limiter)?;
+        }
+        if let Some(crop) = &self.crop
+            && crop.enabled
+        {
+            crate::overlay::apply_crop(out, crop)?;
+        }
+        if let Some(wm) = &self.watermark {
+            wm.draw(out)?;
+        }
+        if let Some((cfg, text)) = &self.name_overlay
+            && cfg.enabled
+        {
+            crate::overlay::draw_name_overlay(out, cfg, text)?;
         }
         if let Some(tc) = &self.timecode {
             tc.draw(out, &crate::pipeline::timecode_for_frame(index, self.fps))?;

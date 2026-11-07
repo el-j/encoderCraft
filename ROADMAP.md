@@ -239,13 +239,13 @@ Tracked under Milestone [M31 - UI Density, Spacing & Layout Parity](https://gith
 
 ## Milestone 32: Export Settings Inspector & Effects Pipeline
 
-Tracked under Milestone [M32 - Export Settings Inspector & Effects Pipeline](https://github.com/el-j/encoderCraft/milestone/11).
+Tracked under Milestone [M32 - Export Settings Inspector & Effects Pipeline](https://github.com/el-j/encoderCraft/milestone/10).
 
-- [ ] **M32.1: Tabbed Export Settings Modal with Summary Panel & Match Source (#139)**
-- [ ] **M32.2: Multi-Pass & Rate Control Inspector Controls (#140)**
-- [ ] **M32.3: Audio Export Tab & Channel Layout Selectors (#141)**
-- [ ] **M32.4: Effects Pipeline Tabs (LUMETRI / LUT Preview, Timecode Burn-in) (#142)**
-- [ ] **M32.5: Presets Export Settings Synchronization & File Size Estimation (#143)**
+- [x] **M32.1: Burn-In Timecode Overlay (BITC) with Position, Format & Opacity (#139)** – Timecode overlay configuration (`TimecodeOverlayConfig`), SMPTE burn-in rendering with anchor positions, scale, opacity, and custom start timecodes.
+- [x] **M32.2: Image Watermark Overlay with Position, Scaling & Opacity (#140)** – Watermark configuration (`WatermarkOverlayConfig`), raster image blending, anchor positioning, relative scaling, and opacity controls.
+- [x] **M32.3: Name Overlay & Broadcast Video Limiter (#141)** – Dailies name overlay (`NameOverlayConfig`) with prefix/suffix/source name; broadcast video limiter (`VideoLimiterConfig`) with IRE 100/103 clip levels and soft knee rolloff.
+- [x] **M32.4: SDR Conform HDR Tone-Mapping (HLG/PQ to Rec.709) (#142)** – Extended Reinhard tone-mapping curve in `encodercraft-color` (`apply_sdr_conform`) with highlight preservation and target luminance scaling.
+- [x] **M32.5: Source vs Output Compare View & Interactive Crop (#143)** – Inspector preview canvas supporting Source, Output, and Split Compare mode with interactive split slider; source frame crop margin controls (`CropConfig`).
 
 ## Milestone 33: Multi-Domain Media Export & Format Breadth
 

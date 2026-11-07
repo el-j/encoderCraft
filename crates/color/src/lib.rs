@@ -578,6 +578,41 @@ pub fn convert_pixels_with_options(
     }
 }
 
+/// Tone-maps a high dynamic range linear luminance value to standard dynamic range (Rec.709).
+/// Uses an extended Reinhard tone-mapping curve with highlight compression:
+/// `f(L) = L * (1 + L / L_white^2) / (1 + L)`
+pub fn tonemap_reinhard(val: f32, max_white: f32) -> f32 {
+    if !val.is_finite() || val <= 0.0 {
+        return 0.0;
+    }
+    let white2 = (max_white * max_white).max(1.0);
+    let mapped = (val * (1.0 + val / white2)) / (1.0 + val);
+    mapped.clamp(0.0, 1.0)
+}
+
+/// Applies SDR conform tone mapping to an RGBA8 buffer.
+pub fn apply_sdr_conform_rgba8(data: &mut [u8], target_nits: f32) {
+    let scale = (target_nits / 100.0).clamp(0.25, 4.0);
+    for chunk in data.chunks_exact_mut(4) {
+        let r = tonemap_reinhard((chunk[0] as f32 / 255.0) * scale, 2.0) * 255.0;
+        let g = tonemap_reinhard((chunk[1] as f32 / 255.0) * scale, 2.0) * 255.0;
+        let b = tonemap_reinhard((chunk[2] as f32 / 255.0) * scale, 2.0) * 255.0;
+        chunk[0] = r.round().clamp(0.0, 255.0) as u8;
+        chunk[1] = g.round().clamp(0.0, 255.0) as u8;
+        chunk[2] = b.round().clamp(0.0, 255.0) as u8;
+    }
+}
+
+/// Applies SDR conform tone mapping to an RGBAF32 buffer.
+pub fn apply_sdr_conform_rgbaf32(data: &mut [f32], target_nits: f32) {
+    let scale = (target_nits / 100.0).clamp(0.25, 4.0);
+    for chunk in data.chunks_exact_mut(4) {
+        chunk[0] = tonemap_reinhard(chunk[0] * scale, 2.0);
+        chunk[1] = tonemap_reinhard(chunk[1] * scale, 2.0);
+        chunk[2] = tonemap_reinhard(chunk[2] * scale, 2.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -714,5 +749,19 @@ mod tests {
     fn test_color_space_tags() {
         assert_eq!(ColorSpaceTag::REC709.primaries, ColorPrimaries::Bt709);
         assert_eq!(ColorSpaceTag::HDR10.transfer, TransferFunction::PerceptualQuantizer);
+    }
+
+    #[test]
+    fn test_sdr_conform_tonemapping() {
+        assert_eq!(tonemap_reinhard(0.0, 2.0), 0.0);
+        let mid = tonemap_reinhard(0.5, 2.0);
+        assert!(mid > 0.0 && mid <= 0.5);
+        let peak = tonemap_reinhard(10.0, 2.0);
+        assert!(peak <= 1.0);
+
+        let mut pixels = [255u8, 200u8, 150u8, 255u8];
+        apply_sdr_conform_rgba8(&mut pixels, 100.0);
+        assert!(pixels[0] > 0);
+        assert_eq!(pixels[3], 255); // Alpha preserved
     }
 }

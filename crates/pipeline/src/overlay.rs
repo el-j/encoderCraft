@@ -252,6 +252,139 @@ impl WatermarkOverlay {
     }
 }
 
+impl From<encodercraft_core::OverlayAnchor> for OverlayPosition {
+    fn from(anchor: encodercraft_core::OverlayAnchor) -> Self {
+        match anchor {
+            encodercraft_core::OverlayAnchor::TopLeft => Self::TopLeft,
+            encodercraft_core::OverlayAnchor::TopRight => Self::TopRight,
+            encodercraft_core::OverlayAnchor::BottomLeft => Self::BottomLeft,
+            encodercraft_core::OverlayAnchor::BottomRight => Self::BottomRight,
+            encodercraft_core::OverlayAnchor::Center => Self::Center,
+        }
+    }
+}
+
+/// Applies broadcast video limiter clamping with soft knee to an uncompressed video frame.
+pub fn apply_video_limiter(frame: &mut VideoFrame, config: &encodercraft_core::VideoLimiterConfig) -> Result<(), EncoderError> {
+    if !config.enabled {
+        return Ok(());
+    }
+    let (channels, bytes_per_component) = rgb_layout(frame.format)?;
+    let ceiling = match config.clip_level {
+        encodercraft_core::VideoLimiterClipLevel::Ire100 => 235.0f32,
+        encodercraft_core::VideoLimiterClipLevel::Ire103 => 242.0f32,
+    };
+    let knee = (config.soft_knee_percent.clamp(0.0, 20.0) / 100.0) * ceiling;
+    let threshold = ceiling - knee;
+
+    let w = frame.dimensions.width as usize;
+    let h = frame.dimensions.height as usize;
+    let (data, stride) = frame.plane_mut(0)?;
+    let bpp = channels * bytes_per_component;
+
+    for y in 0..h {
+        let row_start = y * stride;
+        for x in 0..w {
+            let offset = row_start + x * bpp;
+            for c in 0..channels.min(3) {
+                let idx = offset + c * bytes_per_component;
+                if bytes_per_component == 1 {
+                    if let Some(val) = data.get_mut(idx) {
+                        let f = *val as f32;
+                        if f > threshold {
+                            let limited = if knee > 0.001 {
+                                let diff = f - threshold;
+                                (f - (diff * diff) / (4.0 * knee)).min(ceiling)
+                            } else {
+                                ceiling
+                            };
+                            *val = limited.round().clamp(0.0, 255.0) as u8;
+                        }
+                    }
+                } else if bytes_per_component == 4
+                    && let Some(bytes) = data.get_mut(idx..idx + 4)
+                {
+                    let f = f32::from_ne_bytes(bytes.try_into().map_err(|_| EncoderError::Internal("invalid float pixel".into()))?);
+                    let norm_ceiling = ceiling / 255.0;
+                    let norm_threshold = threshold / 255.0;
+                    let norm_knee = knee / 255.0;
+                    if f > norm_threshold {
+                        let limited = if norm_knee > 0.001 {
+                            let diff = f - norm_threshold;
+                            (f - (diff * diff) / (4.0 * norm_knee)).min(norm_ceiling)
+                        } else {
+                            norm_ceiling
+                        };
+                        bytes.copy_from_slice(&limited.to_ne_bytes());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Applies SDR conform tone mapping to an uncompressed video frame.
+pub fn apply_sdr_conform(frame: &mut VideoFrame, target_nits: f32) -> Result<(), EncoderError> {
+    let (data, _) = frame.plane_mut(0)?;
+    encodercraft_color::apply_sdr_conform_rgba8(data, target_nits);
+    Ok(())
+}
+
+/// Draws dailies text & name overlay onto an uncompressed video frame.
+pub fn draw_name_overlay(frame: &mut VideoFrame, config: &encodercraft_core::NameOverlayConfig, text: &str) -> Result<(), EncoderError> {
+    if !config.enabled || text.is_empty() {
+        return Ok(());
+    }
+    let overlay = TimecodeOverlay {
+        position: config.anchor.into(),
+        scale: 2,
+        text_opacity: config.opacity.clamp(0.0, 1.0),
+        bg_opacity: (config.opacity * 0.65).clamp(0.0, 1.0),
+        margin: 20,
+    };
+    overlay.draw_text(frame, text)
+}
+
+/// Applies margin cropping (letterboxing / pillarboxing black out) to an uncompressed video frame.
+pub fn apply_crop(frame: &mut VideoFrame, crop: &encodercraft_core::CropConfig) -> Result<(), EncoderError> {
+    if !crop.enabled {
+        return Ok(());
+    }
+    let (channels, bytes_per_component) = rgb_layout(frame.format)?;
+    let w = frame.dimensions.width as usize;
+    let h = frame.dimensions.height as usize;
+    let bpp = channels * bytes_per_component;
+
+    let left = (crop.left as usize).min(w);
+    let right = (crop.right as usize).min(w);
+    let top = (crop.top as usize).min(h);
+    let bottom = (crop.bottom as usize).min(h);
+
+    let (data, stride) = frame.plane_mut(0)?;
+    for y in 0..h {
+        let row_start = y * stride;
+        for x in 0..w {
+            if x < left || x >= w.saturating_sub(right) || y < top || y >= h.saturating_sub(bottom) {
+                let offset = row_start + x * bpp;
+                for c in 0..channels.min(3) {
+                    let idx = offset + c * bytes_per_component;
+                    if bytes_per_component == 1 {
+                        if let Some(p) = data.get_mut(idx) {
+                            *p = 0;
+                        }
+                    } else if bytes_per_component == 4
+                        && let Some(bytes) = data.get_mut(idx..idx + 4)
+                    {
+                        bytes.copy_from_slice(&0.0f32.to_ne_bytes());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +426,38 @@ mod tests {
 
         let res = watermark.draw(&mut frame);
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_video_limiter_clamps_hot_pixels() {
+        let dims = Dimensions::new(10, 10).unwrap();
+        let mut frame = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        frame.data_mut().fill(255); // hot white
+
+        let config = encodercraft_core::VideoLimiterConfig {
+            enabled: true,
+            clip_level: encodercraft_core::VideoLimiterClipLevel::Ire100,
+            soft_knee_percent: 5.0,
+        };
+
+        apply_video_limiter(&mut frame, &config).unwrap();
+        assert!(frame.data()[0] <= 235);
+        assert_eq!(frame.data()[3], 255); // Alpha preserved
+    }
+
+    #[test]
+    fn test_crop_blacks_out_margins() {
+        let dims = Dimensions::new(100, 100).unwrap();
+        let mut frame = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        frame.data_mut().fill(200);
+
+        let crop = encodercraft_core::CropConfig { enabled: true, left: 20, top: 10, right: 20, bottom: 10 };
+
+        apply_crop(&mut frame, &crop).unwrap();
+        // Margin (0, 0) should be 0
+        assert_eq!(frame.data()[0], 0);
+        // Center (50, 50) should remain 200
+        let center_idx = (50 * 100 + 50) * 4;
+        assert_eq!(frame.data()[center_idx], 200);
     }
 }

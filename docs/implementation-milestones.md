@@ -575,6 +575,23 @@ flowchart LR
 
 ---
 
+### Milestone 32: Export Settings Inspector & Effects Pipeline
+**Objective:** Complete export settings inspector parity with Adobe Media Encoder: Effects pipeline (Timecode overlay, Name overlay, Watermark, Video limiter, SDR conform), source crop, split compare preview, and bitrate controls. Tracked under Milestone [M32 - Export Settings Inspector & Effects Pipeline](https://github.com/el-j/encoderCraft/milestone/10).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Burn-In Timecode Overlay (BITC) ([#139](https://github.com/el-j/encoderCraft/issues/139)):**
+   - SMPTE timecode burn-in overlay with configurable anchor position, scale, opacity, and custom starting timecode.
+2. [x] **Image Watermark Overlay ([#140](https://github.com/el-j/encoderCraft/issues/140)):**
+   - Transparent PNG/raster watermark compositing, relative scale, opacity, and anchor positions.
+3. [x] **Name Overlay & Broadcast Video Limiter ([#141](https://github.com/el-j/encoderCraft/issues/141)):**
+   - Dailies text burn-in with source/output filename tokens; broadcast video limiter clamping IRE 100 / IRE 103 with configurable soft knee rolloff.
+4. [x] **SDR Conform HDR Tone-Mapping ([#142](https://github.com/el-j/encoderCraft/issues/142)):**
+   - Extended Reinhard tone-mapping curve in `encodercraft-color` mapping HLG/PQ HDR to Rec.709 SDR with highlight preservation.
+5. [x] **Source vs Output Compare View & Interactive Crop ([#143](https://github.com/el-j/encoderCraft/issues/143)):**
+   - Inspector preview with Source, Output, and Split Compare modes with interactive slider; letterbox/pillarbox source crop margins.
+
+---
+
 ---
 
 ## 3. Risk Mitigation & Technical Contingencies

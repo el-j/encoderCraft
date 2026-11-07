@@ -183,7 +183,64 @@ impl TranscodePipeline {
             }
             None => None,
         };
-        let timecode = target.burn_timecode.then(crate::overlay::TimecodeOverlay::default);
+        let timecode = if let Some(tc_cfg) = &target.timecode_overlay {
+            if tc_cfg.enabled {
+                Some(crate::overlay::TimecodeOverlay {
+                    position: tc_cfg.anchor.into(),
+                    scale: tc_cfg.scale.clamp(1, 5),
+                    text_opacity: tc_cfg.text_opacity.clamp(0.0, 1.0),
+                    bg_opacity: tc_cfg.bg_opacity.clamp(0.0, 1.0),
+                    margin: 20,
+                })
+            } else if target.burn_timecode {
+                Some(crate::overlay::TimecodeOverlay::default())
+            } else {
+                None
+            }
+        } else if target.burn_timecode {
+            Some(crate::overlay::TimecodeOverlay::default())
+        } else {
+            None
+        };
+
+        let watermark = if let Some(wm_cfg) = &target.watermark
+            && wm_cfg.enabled
+            && let Some(wm_path) = &wm_cfg.path
+        {
+            match encodercraft_source::MediaReader::open(wm_path).and_then(|r| r.frame_at_index(0)) {
+                Ok(frame) => match frame.plane(0) {
+                    Ok((data, _)) => Some(crate::overlay::WatermarkOverlay::new(
+                        data.to_vec(),
+                        frame.dimensions.width as usize,
+                        frame.dimensions.height as usize,
+                        wm_cfg.anchor.into(),
+                        wm_cfg.opacity,
+                    )),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        let name_overlay = if let Some(name_cfg) = &target.name_overlay
+            && name_cfg.enabled
+        {
+            let src_name = match &self.spec.source {
+                SourceDescriptor::File { path, .. } => path.file_stem().and_then(|s| s.to_str()).unwrap_or("source"),
+                _ => "source",
+            };
+            let formatted_text = if name_cfg.use_source_name {
+                format!("{}{}{}", name_cfg.prefix, src_name, name_cfg.suffix)
+            } else {
+                format!("{}{}", name_cfg.prefix, name_cfg.suffix)
+            };
+            Some((name_cfg.clone(), formatted_text))
+        } else {
+            None
+        };
+
         let captions = match (target.burn_captions, &target.caption_path) {
             (true, Some(path)) => Some((crate::captions::CaptionBurner::default(), crate::captions::CaptionTrack::from_file(path)?)),
             _ => None,
@@ -193,6 +250,11 @@ impl TranscodePipeline {
             color: ColorTransform::new(target.video.color),
             lut,
             timecode,
+            watermark,
+            name_overlay,
+            video_limiter: target.video_limiter.clone(),
+            sdr_conform: target.sdr_conform.clone(),
+            crop: target.crop,
             captions,
             fps,
         })
