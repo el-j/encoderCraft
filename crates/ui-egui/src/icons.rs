@@ -302,6 +302,32 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool, t: &Tokens
     if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
 }
 
+/// Draws an icon button with a custom tint color when enabled.
+pub fn button_tinted(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool, color: Color32, t: &Tokens, tooltip: &str) -> egui::Response {
+    let enabled = ui.is_enabled();
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), sense);
+    let bg = if enabled && resp.is_pointer_button_down_on() {
+        Some(t.pressed)
+    } else if enabled && resp.hovered() {
+        Some(t.hover)
+    } else {
+        None
+    };
+    if let Some(bg) = bg {
+        ui.painter().rect_filled(rect, t.radius_sm, bg);
+    }
+    let col = if !enabled {
+        t.text_dim
+    } else if active {
+        t.icon_active
+    } else {
+        color
+    };
+    paint(ui.painter(), rect.shrink(size * 0.18), icon, col);
+    if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
+}
+
 /// Draws a small square icon button (18×18 points).
 pub fn small_button(ui: &mut egui::Ui, icon: Icon, t: &Tokens, tooltip: &str) -> egui::Response {
     button(ui, icon, 18.0, false, t, tooltip)

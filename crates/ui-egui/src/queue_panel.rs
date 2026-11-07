@@ -211,6 +211,29 @@ impl QueuePanelState {
     }
 }
 
+/// Calculated column widths for strict alignment between queue headers and table cells (AME Parity).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct QueueColumnWidths {
+    pub src: f32,
+    pub format: f32,
+    pub preset: f32,
+    pub output: f32,
+    pub status: f32,
+}
+
+impl QueueColumnWidths {
+    pub const FORMAT: f32 = 100.0;
+    pub const PRESET: f32 = 175.0;
+    pub const OUTPUT: f32 = 210.0;
+    pub const STATUS: f32 = 110.0;
+
+    pub fn calculate(available_width: f32, spacing: f32) -> Self {
+        let fixed = Self::FORMAT + Self::PRESET + Self::OUTPUT + Self::STATUS + (spacing * 4.0);
+        let src = (available_width - fixed).max(160.0);
+        Self { src, format: Self::FORMAT, preset: Self::PRESET, output: Self::OUTPUT, status: Self::STATUS }
+    }
+}
+
 /// Truncates a string in the middle with an ellipsis ('…') if it exceeds `max_len` unicode chars.
 pub fn middle_truncate(text: &str, max_len: usize) -> String {
     let char_count = text.chars().count();
@@ -381,16 +404,27 @@ pub fn job_source_name(job: &QueuedJob) -> String {
     }
 }
 
+/// Context and callbacks passed to the queue panel renderer.
+pub struct QueuePanelContext<'a> {
+    pub queue_mgr: &'a Arc<QueueManager>,
+    pub commands: &'a CommandRegistry,
+    pub tokens: &'a Tokens,
+    pub on_inspect_job: &'a mut Option<CraftJobSpec>,
+    pub on_open_log: &'a mut bool,
+    pub auto_shutdown: &'a mut bool,
+    pub on_add_media: &'a mut bool,
+}
+
 /// Renders the queue panel with batch toolbar, global progress, and hierarchical job table.
-pub fn render_queue_panel(
-    ui: &mut Ui,
-    state: &mut QueuePanelState,
-    queue_mgr: &Arc<QueueManager>,
-    commands: &CommandRegistry,
-    tokens: &Tokens,
-    on_inspect_job: &mut Option<CraftJobSpec>,
-    on_open_log: &mut bool,
-) {
+pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePanelContext<'_>) {
+    let queue_mgr = ctx.queue_mgr;
+    let commands = ctx.commands;
+    let tokens = ctx.tokens;
+    let on_inspect_job = &mut *ctx.on_inspect_job;
+    let on_open_log = &mut *ctx.on_open_log;
+    let auto_shutdown = &mut *ctx.auto_shutdown;
+    let on_add_media = &mut *ctx.on_add_media;
+
     let mut jobs = queue_mgr.list_jobs();
 
     // Apply sorting if a sort column is set
@@ -422,6 +456,8 @@ pub fn render_queue_panel(
         });
     }
 
+    let cols = QueueColumnWidths::calculate(ui.available_width(), ui.spacing().item_spacing.x);
+
     ui.vertical(|ui| {
         if let Some(message) = &state.status_message {
             ui.label(RichText::new(message).small().color(tokens.status_failed));
@@ -429,73 +465,35 @@ pub fn render_queue_panel(
         let worker_running = queue_mgr.is_worker_running();
         state.is_running = worker_running && !queue_mgr.is_paused();
 
-        // --- 1. Top Batch Queue Toolbar ---
-        let selected_count = state.selected_job_ids.len().max(if state.selected_job_id.is_some() { 1 } else { 0 });
-        let has_selection = selected_count > 0;
+        // --- 1. Top Batch Queue Toolbar (AME Reference Style) ---
+        let has_selection = !state.selected_job_ids.is_empty() || state.selected_job_id.is_some();
         let command_state = crate::commands::CommandState { jobs: jobs.len(), worker_running, worker_active: state.is_running, ..Default::default() };
+        let can_start = crate::commands::AppCommand::StartQueue.enabled(&command_state);
 
         ui.horizontal(|ui| {
-            let start_btn = icons::button_with_label_color_enabled(
-                ui,
-                icons::Icon::Play,
-                "Start Queue",
-                crate::commands::AppCommand::StartQueue.enabled(&command_state),
-                tokens.status_completed,
-                tokens,
-                "Start processing the batch queue (Enter)",
-            );
-            if start_btn.clicked() {
-                execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StartQueue);
+            // Left icon buttons
+            let add_btn = icons::button(ui, icons::Icon::Plus, 20.0, false, tokens, "Add Media Files... (Cmd+I)");
+            if add_btn.clicked() {
+                *on_add_media = true;
             }
-
-            let pause_btn = icons::button_with_label_enabled(
-                ui,
-                icons::Icon::Pause,
-                "Pause",
-                false,
-                crate::commands::AppCommand::PauseQueue.enabled(&command_state),
-                tokens,
-                "Pause active encode",
-            );
-            if pause_btn.clicked() {
-                execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::PauseQueue);
-            }
-
-            let stop_btn = icons::button_with_label_enabled(
-                ui,
-                icons::Icon::Stop,
-                "Stop",
-                false,
-                crate::commands::AppCommand::StopQueue.enabled(&command_state),
-                tokens,
-                "Stop batch queue (Esc)",
-            );
-            if stop_btn.clicked() {
-                execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StopQueue);
-            }
-
-            ui.separator();
 
             ui.add_enabled_ui(has_selection, |ui| {
-                let add_output_btn =
-                    icons::button_with_label(ui, icons::Icon::Plus, "Add Output", false, tokens, "Add another output target to selected job(s)");
-                if add_output_btn.clicked() {
-                    for id in state.selected_ids_list() {
-                        if let Some(updated_spec) = prepare_app_job_spec(
+                let remove_btn = icons::button(ui, icons::Icon::Trash, 20.0, false, tokens, "Remove selected job(s) (Delete)");
+                if remove_btn.clicked() {
+                    let ids = state.selected_ids_list();
+                    for id in ids {
+                        execute_app_queue_command_with_params(
                             state,
                             commands,
                             queue_mgr,
-                            crate::commands::AppCommand::AddOutputTarget,
+                            crate::commands::AppCommand::RemoveSelected,
                             serde_json::json!({ "jobId": id }),
-                        ) {
-                            state.pending_updates.push((id.clone(), updated_spec));
-                            state.expanded_jobs.insert(id);
-                        }
+                        );
                     }
+                    state.clear_selection();
                 }
 
-                let dup_label = if selected_count > 1 { format!("Duplicate ({selected_count})") } else { "Duplicate".into() };
-                let dup_btn = icons::button_with_label(ui, icons::Icon::Duplicate, &dup_label, false, tokens, "Duplicate selected job(s) (Cmd+D)");
+                let dup_btn = icons::button(ui, icons::Icon::Duplicate, 20.0, false, tokens, "Duplicate selected job(s) (Cmd+D)");
                 if dup_btn.clicked() {
                     let ids = state.selected_ids_list();
                     for id in ids {
@@ -511,36 +509,36 @@ pub fn render_queue_panel(
                     }
                 }
 
-                let move_up_btn = icons::button(ui, icons::Icon::ArrowUp, 20.0, false, tokens, "Move selected up in queue (Alt+Up)");
-                if move_up_btn.clicked() {
+                let settings_btn = icons::button(ui, icons::Icon::Gear, 20.0, false, tokens, "Export Settings... (Cmd+E)");
+                if settings_btn.clicked()
+                    && let Some(ref id) = state.selected_job_id
+                {
+                    *on_inspect_job = prepare_app_job_spec(
+                        state,
+                        commands,
+                        queue_mgr,
+                        crate::commands::AppCommand::InspectSettings,
+                        serde_json::json!({ "jobId": id }),
+                    );
+                }
+
+                let add_target_btn = icons::button(ui, icons::Icon::Sliders, 20.0, false, tokens, "Add output target to selected job(s)");
+                if add_target_btn.clicked() {
                     for id in state.selected_ids_list() {
-                        execute_app_queue_command_with_params(
+                        if let Some(updated_spec) = prepare_app_job_spec(
                             state,
                             commands,
                             queue_mgr,
-                            crate::commands::AppCommand::MoveSelectedUp,
+                            crate::commands::AppCommand::AddOutputTarget,
                             serde_json::json!({ "jobId": id }),
-                        );
+                        ) {
+                            state.pending_updates.push((id.clone(), updated_spec));
+                            state.expanded_jobs.insert(id);
+                        }
                     }
                 }
 
-                let move_down_btn = icons::button(ui, icons::Icon::ArrowDown, 20.0, false, tokens, "Move selected down in queue (Alt+Down)");
-                if move_down_btn.clicked() {
-                    let mut ids = state.selected_ids_list();
-                    ids.reverse();
-                    for id in ids {
-                        execute_app_queue_command_with_params(
-                            state,
-                            commands,
-                            queue_mgr,
-                            crate::commands::AppCommand::MoveSelectedDown,
-                            serde_json::json!({ "jobId": id }),
-                        );
-                    }
-                }
-
-                let reset_label = if selected_count > 1 { format!("Reset ({selected_count})") } else { "Reset".into() };
-                let reset_btn = icons::button_with_label(ui, icons::Icon::Reset, &reset_label, false, tokens, "Reset selected job(s) back to Ready");
+                let reset_btn = icons::button(ui, icons::Icon::Reset, 20.0, false, tokens, "Reset selected job(s) back to Ready");
                 if reset_btn.clicked() {
                     for id in state.selected_ids_list() {
                         execute_app_queue_command_with_params(
@@ -552,38 +550,7 @@ pub fn render_queue_panel(
                         );
                     }
                 }
-
-                let remove_label = if selected_count > 1 { format!("Remove ({selected_count})") } else { "Remove".into() };
-                let remove_btn = icons::button_with_label(ui, icons::Icon::Trash, &remove_label, false, tokens, "Remove selected job(s) (Delete)");
-                if remove_btn.clicked() {
-                    let ids = state.selected_ids_list();
-                    for id in ids {
-                        execute_app_queue_command_with_params(
-                            state,
-                            commands,
-                            queue_mgr,
-                            crate::commands::AppCommand::RemoveSelected,
-                            serde_json::json!({ "jobId": id }),
-                        );
-                    }
-                    state.clear_selection();
-                }
-
-                let inspect_btn = icons::button_with_label(ui, icons::Icon::Gear, "Settings...", false, tokens, "Open Export Settings dialog");
-                if inspect_btn.clicked()
-                    && let Some(ref id) = state.selected_job_id
-                {
-                    *on_inspect_job = prepare_app_job_spec(
-                        state,
-                        commands,
-                        queue_mgr,
-                        crate::commands::AppCommand::InspectSettings,
-                        serde_json::json!({ "jobId": id }),
-                    );
-                }
             });
-
-            ui.separator();
 
             let has_completed = jobs.iter().any(|j| j.status == JobStatus::Completed);
             ui.add_enabled_ui(has_completed, |ui| {
@@ -592,112 +559,48 @@ pub fn render_queue_panel(
                 }
             });
 
-            if selected_count > 1 {
-                let stitch_label = format!("Stitch Selected ({selected_count})");
-                let stitch_btn = icons::button_with_label(
-                    ui,
-                    icons::Icon::Link,
-                    &stitch_label,
-                    false,
-                    tokens,
-                    "Combine selected jobs into one continuous stitched sequence",
-                );
-                if stitch_btn.clicked() {
-                    let ids = state.selected_ids_list();
-                    if let Some(first_job) = jobs.iter().find(|j| ids.contains(&j.spec.job_id))
-                        && let Some(target) = first_job.spec.targets.first()
-                    {
-                        let out_path = target.output_path.with_file_name("stitched_batch.mp4");
-                        if let Some(spec) = prepare_app_job_spec(
-                            state,
-                            commands,
-                            queue_mgr,
-                            crate::commands::AppCommand::StitchSelected,
-                            serde_json::json!({
-                                "jobIds": ids,
-                                "outputPath": out_path,
-                                "presetName": "Match Source - High Bitrate",
-                            }),
-                        ) {
-                            state.pending_specs.push(spec);
-                        }
-                    }
-                }
-            }
-
-            ui.add_enabled_ui(has_selection, |ui| {
-                let set_dir_btn = icons::button_with_label(
-                    ui,
-                    icons::Icon::Folder,
-                    "Destination...",
-                    false,
-                    tokens,
-                    "Batch set output destination directory for selected job(s)",
-                );
-                if set_dir_btn.clicked()
-                    && let Some(folder) = rfd::FileDialog::new().set_title("Select Destination Folder").pick_folder()
-                {
-                    let ids = state.selected_ids_list();
-                    execute_app_queue_command_with_params(
-                        state,
-                        commands,
-                        queue_mgr,
-                        crate::commands::AppCommand::SetDestination,
-                        serde_json::json!({ "jobIds": ids, "outputDir": folder }),
-                    );
-                }
-            });
-
-            let log_btn = icons::button_with_label(ui, icons::Icon::Clock, "Show Log...", false, tokens, "Open Encoding Activity Log (Cmd+L)");
+            let log_btn = icons::button(ui, icons::Icon::Clock, 20.0, false, tokens, "Open Encoding Activity Log (Cmd+L)");
             if log_btn.clicked() && execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::ShowLog).is_some() {
                 *on_open_log = true;
             }
+
+            // Right Toolbar: Processed Counter, Stop, Start Queue (prominent green play glyph)
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(can_start, |ui| {
+                    let start_btn = icons::button_tinted(ui, icons::Icon::Play, 22.0, false, tokens.status_completed, tokens, "Start Queue (Enter)");
+                    if start_btn.clicked() {
+                        execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StartQueue);
+                    }
+                });
+
+                ui.add_enabled_ui(crate::commands::AppCommand::StopQueue.enabled(&command_state), |ui| {
+                    let stop_btn = icons::button(ui, icons::Icon::Stop, 20.0, false, tokens, "Stop batch queue (Esc)");
+                    if stop_btn.clicked() {
+                        execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StopQueue);
+                    }
+                });
+
+                ui.add_enabled_ui(crate::commands::AppCommand::PauseQueue.enabled(&command_state), |ui| {
+                    let pause_btn = icons::button(ui, icons::Icon::Pause, 20.0, false, tokens, "Pause active encode");
+                    if pause_btn.clicked() {
+                        execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::PauseQueue);
+                    }
+                });
+
+                ui.separator();
+
+                ui.label(RichText::new(crate::queue_footer::processed_counter(&jobs)).small().color(tokens.text_dim));
+
+                if !jobs.is_empty() && (worker_running || jobs.iter().any(|j| matches!(j.status, JobStatus::Processing | JobStatus::Completed))) {
+                    let pbar = egui::ProgressBar::new(overall_fraction(&jobs)).desired_width(70.0);
+                    ui.add(pbar);
+                }
+            });
         });
 
-        ui.add_space(4.0);
+        ui.add_space(2.0);
 
-        // --- 2. Batch Progress Summary Bar (AME Parity) ---
-        if !jobs.is_empty() {
-            let total_jobs = jobs.len();
-            let queued_count = jobs.iter().filter(|j| matches!(j.status, JobStatus::Queued)).count();
-            let processing_count = jobs.iter().filter(|j| matches!(j.status, JobStatus::Processing)).count();
-            let completed_count = jobs.iter().filter(|j| matches!(j.status, JobStatus::Completed)).count();
-            let failed_count = jobs.iter().filter(|j| matches!(j.status, JobStatus::Failed(_))).count();
-
-            let overall_progress = overall_fraction(&jobs);
-
-            egui::Frame::new().fill(tokens.bg_panel_darker).corner_radius(4).inner_margin(egui::vec2(8.0, 4.0)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Batch Queue: {total_jobs} total")).strong().small());
-                    if queued_count > 0 {
-                        ui.label(RichText::new(format!("· {queued_count} ready")).small().color(tokens.status_queued));
-                    }
-                    if processing_count > 0 {
-                        ui.label(RichText::new(format!("· {processing_count} encoding")).small().color(tokens.status_processing));
-                    }
-                    if completed_count > 0 {
-                        ui.label(RichText::new(format!("· {completed_count} done")).small().color(tokens.status_completed));
-                    }
-                    if failed_count > 0 {
-                        ui.label(RichText::new(format!("· {failed_count} failed")).small().color(tokens.status_failed));
-                    }
-                    if selected_count > 0 {
-                        ui.label(RichText::new(format!("({selected_count} selected)")).small().color(tokens.accent_primary));
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let pbar = egui::ProgressBar::new(overall_progress).show_percentage().desired_width(140.0);
-                        ui.add(pbar);
-                        ui.label(RichText::new("Overall:").small().color(tokens.text_dim));
-                    });
-                });
-            });
-            ui.add_space(2.0);
-        }
-
-        ui.separator();
-
-        // --- 3. Hierarchical Job Table with Columns ---
+        // --- 2. Hierarchical Job Table with Columns ---
         if jobs.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(32.0);
@@ -706,20 +609,37 @@ pub fn render_queue_panel(
                     RichText::new("Drag and drop media files, use File > Add Media Files..., or pick from Presets to begin.").color(tokens.text_dim),
                 );
             });
-            return;
+        } else {
+            // Table Header
+            render_table_header(ui, state, tokens, cols);
+
+            ui.separator();
+
+            // Table Rows Scroll Area
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+                for (idx, job) in jobs.iter().enumerate() {
+                    let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs, cols };
+                    render_grouped_job_row(ui, item, state, queue_mgr, commands, tokens, on_inspect_job);
+                }
+            });
         }
 
-        // Table Header
-        render_table_header(ui, state, tokens);
-
+        // --- 3. Panel Footer (AME Parity: Auto Computer Shutdown & Renderer) ---
+        ui.add_space(tokens.toolbar_gap);
         ui.separator();
-
-        // Table Rows Scroll Area
-        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-            for (idx, job) in jobs.iter().enumerate() {
-                let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs };
-                render_grouped_job_row(ui, item, state, queue_mgr, commands, tokens, on_inspect_job);
-            }
+        ui.horizontal(|ui| {
+            ui.checkbox(auto_shutdown, "Auto Computer Shutdown")
+                .on_hover_text("Shut the computer down 60 seconds after the queue finishes; you can cancel the countdown");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                egui::ComboBox::from_id_salt("queue_footer_renderer")
+                    .selected_text(RichText::new(crate::queue_footer::RENDERERS[0]).small())
+                    .show_ui(ui, |ui| {
+                        for name in crate::queue_footer::RENDERERS {
+                            let _ = ui.selectable_label(true, *name);
+                        }
+                    });
+                ui.label(RichText::new("Renderer:").small().color(tokens.text_dim));
+            });
         });
     });
 }
@@ -735,43 +655,40 @@ fn sort_indicator(state: &QueuePanelState, col: QueueSortColumn) -> &'static str
     }
 }
 
-fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens) {
-    egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(6.0, 4.0)).show(ui, |ui| {
+fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens, cols: QueueColumnWidths) {
+    egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
         ui.horizontal(|ui| {
             // Source Column (expands)
             let src_label = format!("Source Name{}", sort_indicator(state, QueueSortColumn::Source));
-            let src_resp = ui.add_sized(
-                [ui.available_width() - 650.0_f32.min(ui.available_width() * 0.65), 18.0],
-                egui::Button::new(RichText::new(src_label).strong().small()).frame(false),
-            );
+            let src_resp = ui.add_sized([cols.src, 18.0], egui::Button::new(RichText::new(src_label).strong().small()).frame(false));
             if src_resp.clicked() {
                 state.toggle_sort(QueueSortColumn::Source);
             }
 
             // Format Column
             let fmt_label = format!("Format{}", sort_indicator(state, QueueSortColumn::Format));
-            let fmt_resp = ui.add_sized([110.0, 18.0], egui::Button::new(RichText::new(fmt_label).strong().small()).frame(false));
+            let fmt_resp = ui.add_sized([cols.format, 18.0], egui::Button::new(RichText::new(fmt_label).strong().small()).frame(false));
             if fmt_resp.clicked() {
                 state.toggle_sort(QueueSortColumn::Format);
             }
 
             // Preset Column
             let pre_label = format!("Preset{}", sort_indicator(state, QueueSortColumn::Preset));
-            let pre_resp = ui.add_sized([190.0, 18.0], egui::Button::new(RichText::new(pre_label).strong().small()).frame(false));
+            let pre_resp = ui.add_sized([cols.preset, 18.0], egui::Button::new(RichText::new(pre_label).strong().small()).frame(false));
             if pre_resp.clicked() {
                 state.toggle_sort(QueueSortColumn::Preset);
             }
 
             // Output File Column
             let out_label = format!("Output File{}", sort_indicator(state, QueueSortColumn::Output));
-            let out_resp = ui.add_sized([220.0, 18.0], egui::Button::new(RichText::new(out_label).strong().small()).frame(false));
+            let out_resp = ui.add_sized([cols.output, 18.0], egui::Button::new(RichText::new(out_label).strong().small()).frame(false));
             if out_resp.clicked() {
                 state.toggle_sort(QueueSortColumn::Output);
             }
 
             // Status Column
             let st_label = format!("Status{}", sort_indicator(state, QueueSortColumn::Status));
-            let st_resp = ui.add_sized([120.0, 18.0], egui::Button::new(RichText::new(st_label).strong().small()).frame(false));
+            let st_resp = ui.add_sized([cols.status, 18.0], egui::Button::new(RichText::new(st_label).strong().small()).frame(false));
             if st_resp.clicked() {
                 state.toggle_sort(QueueSortColumn::Status);
             }
@@ -783,6 +700,7 @@ struct GroupedJobItem<'a> {
     pub job: &'a QueuedJob,
     pub job_idx: usize,
     pub all_jobs: &'a [QueuedJob],
+    pub cols: QueueColumnWidths,
 }
 
 fn render_grouped_job_row(
@@ -797,18 +715,23 @@ fn render_grouped_job_row(
     let job = item.job;
     let job_idx = item.job_idx;
     let all_jobs = item.all_jobs;
+    let cols = item.cols;
     let job_id = job.spec.job_id.clone();
     let is_selected = state.selected_job_ids.contains(&job_id) || state.selected_job_id.as_deref() == Some(&job_id);
     let is_expanded = state.expanded_jobs.contains(&job_id);
 
-    let row_bg = if is_selected { tokens.bg_surface_active } else { tokens.bg_surface };
+    let row_bg = if is_selected {
+        tokens.bg_surface_active
+    } else if job_idx % 2 == 1 {
+        tokens.bg_surface
+    } else {
+        tokens.bg_panel
+    };
 
-    egui::Frame::new().fill(row_bg).corner_radius(4).inner_margin(4.0).show(ui, |ui| {
+    egui::Frame::new().fill(row_bg).inner_margin(egui::vec2(tokens.panel_inset, 1.0)).show(ui, |ui| {
         // --- 1. Parent Source Row ---
         ui.horizontal(|ui| {
-            let src_col_width = (ui.available_width() - 650.0_f32.min(ui.available_width() * 0.65)).max(160.0);
-
-            ui.allocate_ui_with_layout(egui::vec2(src_col_width, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.allocate_ui_with_layout(egui::vec2(cols.src, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 // Expand / Collapse Chevron
                 let arrow_icon = if is_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
                 if icons::button(ui, arrow_icon, 16.0, false, tokens, "Toggle output targets").clicked() {
@@ -856,7 +779,7 @@ fn render_grouped_job_row(
             });
 
             // Format Summary Column
-            ui.allocate_ui_with_layout(egui::vec2(110.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.allocate_ui_with_layout(egui::vec2(cols.format, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
                         ui.label(RichText::new(format!("{:?}", t.container)).small().color(tokens.text_dim));
@@ -867,7 +790,7 @@ fn render_grouped_job_row(
             });
 
             // Preset Summary Column
-            ui.allocate_ui_with_layout(egui::vec2(190.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.allocate_ui_with_layout(egui::vec2(cols.preset, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
                         let link =
@@ -882,7 +805,7 @@ fn render_grouped_job_row(
             });
 
             // Output File Summary Column
-            ui.allocate_ui_with_layout(egui::vec2(220.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.allocate_ui_with_layout(egui::vec2(cols.output, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
                         let path_str = t.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
@@ -909,11 +832,11 @@ fn render_grouped_job_row(
             });
 
             // Status Column
-            ui.allocate_ui_with_layout(egui::vec2(120.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.allocate_ui_with_layout(egui::vec2(cols.status, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 render_status_chip(ui, &job.status, tokens);
                 if job.status == JobStatus::Processing {
                     let progress = (job.progress_percent / 100.0).clamp(0.0, 1.0) as f32;
-                    let pbar = egui::ProgressBar::new(progress).desired_width(50.0);
+                    let pbar = egui::ProgressBar::new(progress).desired_width(45.0);
                     ui.add(pbar);
                 }
             });
@@ -923,10 +846,8 @@ fn render_grouped_job_row(
         if is_expanded || job.spec.targets.len() > 1 {
             for (idx, target) in job.spec.targets.iter().enumerate() {
                 ui.horizontal(|ui| {
-                    let src_col_width = (ui.available_width() - 650.0_f32.min(ui.available_width() * 0.65)).max(160.0);
-
                     // Child Indent / Bullet Column
-                    ui.allocate_ui_with_layout(egui::vec2(src_col_width, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(egui::vec2(cols.src, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.add_space(20.0);
                         ui.label(RichText::new(format!("↳ Target #{}", idx + 1)).small().color(tokens.text_dim));
 
@@ -952,13 +873,13 @@ fn render_grouped_job_row(
                     });
 
                     // Format Dropdown Column
-                    ui.allocate_ui_with_layout(egui::vec2(110.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(egui::vec2(cols.format, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         let mut current_container = target.container;
                         let combo_text =
                             INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
                         let combo = egui::ComboBox::from_id_salt(format!("target_fmt_{job_id}_{idx}"))
                             .selected_text(RichText::new(combo_text).small())
-                            .width(95.0)
+                            .width(cols.format - 12.0)
                             .show_ui(ui, |ui| {
                                 for (c, name, _) in INLINE_CONTAINERS {
                                     ui.selectable_value(&mut current_container, *c, *name);
@@ -985,7 +906,7 @@ fn render_grouped_job_row(
                     });
 
                     // Preset Selector Column (Blue Link style)
-                    ui.allocate_ui_with_layout(egui::vec2(190.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(egui::vec2(cols.preset, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         let is_menu_open = state.active_preset_menu == Some((job_id.clone(), idx));
                         let pre_btn = ui
                             .link(RichText::new(middle_truncate(&target.preset_name, 22)).color(tokens.accent_primary))
@@ -1039,7 +960,7 @@ fn render_grouped_job_row(
                     });
 
                     // Output File Path Column (Blue Link style)
-                    ui.allocate_ui_with_layout(egui::vec2(220.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(egui::vec2(cols.output, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         let path_str = target.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
                         let out_link = ui
                             .link(RichText::new(middle_truncate(path_str, 26)).color(tokens.accent_primary))
@@ -1101,7 +1022,7 @@ fn render_grouped_job_row(
                     });
 
                     // Status Column
-                    ui.allocate_ui_with_layout(egui::vec2(120.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(egui::vec2(cols.status, tokens.row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.label(RichText::new(format!("{:?}", target.container)).small().color(tokens.text_dim));
                     });
                 });
@@ -1109,7 +1030,7 @@ fn render_grouped_job_row(
         }
     });
 
-    ui.add_space(2.0);
+    ui.add_space(1.0);
 }
 
 fn render_job_context_menu(
@@ -1424,5 +1345,22 @@ mod tests {
             let p = default_preset_for_container(*c);
             assert!(!p.is_empty());
         }
+    }
+
+    #[test]
+    fn column_widths_maintain_fixed_columns_and_expand_source() {
+        let cols_narrow = QueueColumnWidths::calculate(500.0, 4.0);
+        assert_eq!(cols_narrow.format, QueueColumnWidths::FORMAT);
+        assert_eq!(cols_narrow.preset, QueueColumnWidths::PRESET);
+        assert_eq!(cols_narrow.output, QueueColumnWidths::OUTPUT);
+        assert_eq!(cols_narrow.status, QueueColumnWidths::STATUS);
+        assert!(cols_narrow.src >= 160.0);
+
+        let cols_wide = QueueColumnWidths::calculate(1200.0, 4.0);
+        assert_eq!(cols_wide.format, QueueColumnWidths::FORMAT);
+        assert_eq!(cols_wide.preset, QueueColumnWidths::PRESET);
+        assert_eq!(cols_wide.output, QueueColumnWidths::OUTPUT);
+        assert_eq!(cols_wide.status, QueueColumnWidths::STATUS);
+        assert!(cols_wide.src > cols_narrow.src);
     }
 }
