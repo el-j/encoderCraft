@@ -1508,29 +1508,23 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
                 }
             }
             PanelId::Queue => {
-                let jobs = self.app.queue_mgr.list_jobs();
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(crate::queue_footer::processed_counter(&jobs)).small());
-                    ui.separator();
-                    ui.checkbox(&mut self.app.prefs_state.prefs.auto_shutdown, "Auto Computer Shutdown")
-                        .on_hover_text("Shut the computer down 60 seconds after the queue finishes; you can cancel the countdown");
-                    ui.separator();
-                    ui.label(RichText::new("Renderer:").small());
-                    egui::ComboBox::from_id_salt("queue_renderer").selected_text(crate::queue_footer::RENDERERS[0]).show_ui(ui, |ui| {
-                        for name in crate::queue_footer::RENDERERS {
-                            let _ = ui.selectable_label(true, *name);
-                        }
-                    });
-                });
+                let mut add_media = false;
                 render_queue_panel(
                     ui,
                     &mut self.app.queue_state,
-                    &self.app.queue_mgr,
-                    &self.app.engine_commands,
-                    &self.app.tokens,
-                    self.inspect_job,
-                    &mut self.app.log_state.is_open,
+                    crate::queue_panel::QueuePanelContext {
+                        queue_mgr: &self.app.queue_mgr,
+                        commands: &self.app.engine_commands,
+                        tokens: &self.app.tokens,
+                        on_inspect_job: self.inspect_job,
+                        on_open_log: &mut self.app.log_state.is_open,
+                        auto_shutdown: &mut self.app.prefs_state.prefs.auto_shutdown,
+                        on_add_media: &mut add_media,
+                    },
                 );
+                if add_media {
+                    self.app.pick_media();
+                }
             }
             PanelId::WatchFolders => {
                 render_watch_panel(
