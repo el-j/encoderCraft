@@ -385,3 +385,44 @@ fn test_cli_stream_commands_reject_bad_options() {
         assert!(!output.status.success(), "{args:?}");
     }
 }
+
+#[test]
+fn test_cli_lut_convert() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().unwrap();
+
+    let src_cube = dir.path().join("identity.cube");
+    let cube_content = "\
+TITLE \"Identity 2x2x2\"
+LUT_3D_SIZE 2
+0.0 0.0 0.0
+1.0 0.0 0.0
+0.0 1.0 0.0
+1.0 1.0 0.0
+0.0 0.0 1.0
+1.0 0.0 1.0
+0.0 1.0 1.0
+1.0 1.0 1.0
+";
+    std::fs::write(&src_cube, cube_content).unwrap();
+
+    let out_3dl = dir.path().join("converted.3dl");
+    let run_3dl = Command::new(bin)
+        .args(["lut-convert"])
+        .arg(&src_cube)
+        .arg(&out_3dl)
+        .args(["--size", "4", "--tetrahedral"])
+        .output()
+        .expect("run lut-convert");
+    assert!(run_3dl.status.success(), "{}", String::from_utf8_lossy(&run_3dl.stderr));
+
+    let d3l_text = std::fs::read_to_string(&out_3dl).unwrap();
+    assert!(d3l_text.contains("Autodesk 3DL"));
+
+    let out_look = dir.path().join("converted.look");
+    let run_look = Command::new(bin).args(["lut-convert"]).arg(&out_3dl).arg(&out_look).output().expect("run lut-convert to look");
+    assert!(run_look.status.success(), "{}", String::from_utf8_lossy(&run_look.stderr));
+
+    let look_text = std::fs::read_to_string(&out_look).unwrap();
+    assert!(look_text.contains("<Look version=\"1.0\">"));
+}

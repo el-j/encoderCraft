@@ -47,6 +47,7 @@ fn run() -> Result<(), EncoderError> {
         Some("daemon") => cmd_daemon(&args[2..])?,
         Some("stream-encode") => stream::cmd_stream_encode(&args[2..], &default_preset_registry())?,
         Some("stream-test") => stream::cmd_stream_test(&args[2..])?,
+        Some("lut-convert") => cmd_lut_convert(&args[2..])?,
         Some("mcp") => cmd_mcp()?,
         Some("--version") | Some("-V") => println!("encodercraft-cli {}", env!("CARGO_PKG_VERSION")),
         Some("--help") | Some("-h") | Some("help") => print_usage(),
@@ -71,6 +72,7 @@ fn print_usage() {
     println!("  encode <input> [options]                Transcode an input file directly");
     println!("      -p, --preset <name>                 Encoding preset (default: Match Source - High Bitrate)");
     println!("      -o, --output <file>                 Output file path");
+    println!("      --lut <file>                        Apply 3D Look-Up Table (.cube, .3dl, .look)");
     println!("      --stems                             Export discrete multichannel audio stems (.wav)");
     println!("      --hardware                          Enable hardware acceleration (VideoToolbox / NVENC)");
     println!("      --xmp-title <title>                 Embed XMP Dublin Core title");
@@ -93,6 +95,8 @@ fn print_usage() {
         "  convert <input> --to <format> [-o <file>] Convert to a target format (extension or name, e.g. pdf, flac, soundcraft); invalid pairs are rejected"
     );
     println!("  probe <input>                           Inspect containers, codecs, and stream metadata");
+    println!("  lut-convert <input> <output> [--size N] [--trilinear|--tetrahedral]");
+    println!("                                          Convert, resample, and transcode 1D/3D LUT (.cube, .3dl, .look)");
     println!("  presets                                 List all factory presets");
     println!("  --formats                               Show the codec decode/encode capability table");
     println!("  queue [list|start|pause|clear|cancel <id>|log] Interact with running daemon queue");
@@ -200,27 +204,40 @@ fn parse_memory_mib(option: &str, value: &str) -> Result<usize, EncoderError> {
         .ok_or_else(|| EncoderError::InvalidJobSpec(format!("{option} must be between 1 and 65536 MiB")))
 }
 
-fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
-    let mut inputs: Vec<PathBuf> = Vec::new();
-    let mut preset_name = "Match Source - High Bitrate".to_string();
-    let mut preset_explicit = false;
-    let mut to: Option<encodercraft_core::ContainerType> = None;
-    let mut output = None;
-    let mut export_stems = false;
-    let mut hardware_accel = false;
-    let mut xmp_title = None;
-    let mut xmp_creator = None;
-    let mut sidecar_xmp = false;
-    let mut caption_file = None;
-    let mut burn_captions = false;
-    let mut fps = None;
-    let mut rotation = encodercraft_core::Rotation::None;
-    let mut scale_mode = encodercraft_geom::ScaleMode::Fit;
-    let mut scaling_filter = encodercraft_core::ScalingFilter::Bilinear;
-    let mut frame_rate_mode = encodercraft_core::FrameRateMode::Nearest;
-    let mut frame_memory_bytes = None;
-    let mut normalization_memory_bytes = None;
-    let mut selection = encodercraft_core::SourceSelection::default();
+#[derive(Default)]
+struct CliEncodeOptions {
+    inputs: Vec<PathBuf>,
+    preset_name: String,
+    preset_explicit: bool,
+    to: Option<encodercraft_core::ContainerType>,
+    output: Option<PathBuf>,
+    export_stems: bool,
+    hardware_accel: bool,
+    xmp_title: Option<String>,
+    xmp_creator: Option<String>,
+    sidecar_xmp: bool,
+    caption_file: Option<PathBuf>,
+    lut_file: Option<PathBuf>,
+    burn_captions: bool,
+    fps: Option<encodercraft_core::Rational64>,
+    rotation: encodercraft_core::Rotation,
+    scale_mode: encodercraft_geom::ScaleMode,
+    scaling_filter: encodercraft_core::ScalingFilter,
+    frame_rate_mode: encodercraft_core::FrameRateMode,
+    frame_memory_bytes: Option<usize>,
+    normalization_memory_bytes: Option<usize>,
+    selection: encodercraft_core::SourceSelection,
+}
+
+fn parse_encode_args(args: &[String]) -> Result<CliEncodeOptions, EncoderError> {
+    let mut opts = CliEncodeOptions {
+        preset_name: "Match Source - High Bitrate".to_string(),
+        rotation: encodercraft_core::Rotation::None,
+        scale_mode: encodercraft_geom::ScaleMode::Fit,
+        scaling_filter: encodercraft_core::ScalingFilter::Bilinear,
+        frame_rate_mode: encodercraft_core::FrameRateMode::Nearest,
+        ..Default::default()
+    };
 
     let mut i = 0;
     while i < args.len() {
@@ -228,14 +245,14 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
             match arg.as_str() {
                 "-p" | "--preset" => {
                     if let Some(val) = args.get(i + 1) {
-                        preset_name = val.clone();
-                        preset_explicit = true;
+                        opts.preset_name = val.clone();
+                        opts.preset_explicit = true;
                         i += 1;
                     }
                 }
                 "-o" | "--output" => {
                     if let Some(val) = args.get(i + 1) {
-                        output = Some(PathBuf::from(val));
+                        opts.output = Some(PathBuf::from(val));
                         i += 1;
                     }
                 }
@@ -243,7 +260,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                     let val = args
                         .get(i + 1)
                         .ok_or_else(|| EncoderError::InvalidJobSpec("--to needs a target format such as pdf, flac or soundcraft".into()))?;
-                    to = Some(
+                    opts.to = Some(
                         encodercraft_core::ContainerType::from_extension(val)
                             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown target format '{val}'")))?,
                     );
@@ -251,12 +268,12 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 }
                 "--fps" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--fps needs a value such as 25 or 30000/1001".into()))?;
-                    fps = Some(parse_fps(val)?);
+                    opts.fps = Some(parse_fps(val)?);
                     i += 1;
                 }
                 "--rotate" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--rotate needs 0, 90, 180 or 270".into()))?;
-                    rotation = match val.as_str() {
+                    opts.rotation = match val.as_str() {
                         "0" => encodercraft_core::Rotation::None,
                         "90" => encodercraft_core::Rotation::Cw90,
                         "180" => encodercraft_core::Rotation::Cw180,
@@ -268,7 +285,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 "--scale-mode" => {
                     let val =
                         args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--scale-mode needs fit, fill, stretch or center".into()))?;
-                    scale_mode = match val.to_ascii_lowercase().as_str() {
+                    opts.scale_mode = match val.to_ascii_lowercase().as_str() {
                         "fit" => encodercraft_geom::ScaleMode::Fit,
                         "fill" => encodercraft_geom::ScaleMode::Fill,
                         "stretch" => encodercraft_geom::ScaleMode::Stretch,
@@ -279,7 +296,7 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 }
                 "--frame-rate-mode" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--frame-rate-mode needs nearest or blend".into()))?;
-                    frame_rate_mode = match val.to_ascii_lowercase().as_str() {
+                    opts.frame_rate_mode = match val.to_ascii_lowercase().as_str() {
                         "nearest" => encodercraft_core::FrameRateMode::Nearest,
                         "blend" => encodercraft_core::FrameRateMode::Blend,
                         _ => return Err(EncoderError::InvalidJobSpec(format!("invalid frame-rate mode '{val}'; use nearest or blend"))),
@@ -288,47 +305,47 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 }
                 "--frame-memory-mib" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--frame-memory-mib needs an integer value".into()))?;
-                    frame_memory_bytes = Some(parse_memory_mib("--frame-memory-mib", val)?);
+                    opts.frame_memory_bytes = Some(parse_memory_mib("--frame-memory-mib", val)?);
                     i += 1;
                 }
                 "--normalization-memory-mib" => {
                     let val =
                         args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--normalization-memory-mib needs an integer value".into()))?;
-                    normalization_memory_bytes = Some(parse_memory_mib("--normalization-memory-mib", val)?);
+                    opts.normalization_memory_bytes = Some(parse_memory_mib("--normalization-memory-mib", val)?);
                     i += 1;
                 }
                 "--sequence" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--sequence needs a name or index".into()))?;
-                    selection.sequence = Some(val.clone());
+                    opts.selection.sequence = Some(val.clone());
                     i += 1;
                 }
                 "--pages" => {
                     let val = args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--pages needs a page or range such as 3 or 2-5".into()))?;
-                    selection.pages = Some(encodercraft_core::SourceSelection::parse_pages(val)?);
+                    opts.selection.pages = Some(encodercraft_core::SourceSelection::parse_pages(val)?);
                     i += 1;
                 }
                 "--layers" => {
                     let val =
                         args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--layers needs a comma-separated list of layer names".into()))?;
-                    selection.layers = Some(val.split(',').map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect());
+                    opts.selection.layers = Some(val.split(',').map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect());
                     i += 1;
                 }
                 "--stems" => {
-                    export_stems = true;
+                    opts.export_stems = true;
                 }
                 "--hardware" => {
-                    hardware_accel = true;
+                    opts.hardware_accel = true;
                 }
                 "--xmp-title" => {
                     if let Some(val) = args.get(i + 1) {
-                        xmp_title = Some(val.clone());
+                        opts.xmp_title = Some(val.clone());
                         i += 1;
                     }
                 }
                 "--scale-filter" => {
                     let val =
                         args.get(i + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--scale-filter needs bilinear, bicubic or lanczos3".into()))?;
-                    scaling_filter = match val.to_ascii_lowercase().as_str() {
+                    opts.scaling_filter = match val.to_ascii_lowercase().as_str() {
                         "bilinear" => encodercraft_core::ScalingFilter::Bilinear,
                         "bicubic" => encodercraft_core::ScalingFilter::Bicubic,
                         "lanczos3" | "lanczos" => encodercraft_core::ScalingFilter::Lanczos3,
@@ -339,30 +356,63 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
                 }
                 "--xmp-creator" => {
                     if let Some(val) = args.get(i + 1) {
-                        xmp_creator = Some(val.clone());
+                        opts.xmp_creator = Some(val.clone());
                         i += 1;
                     }
                 }
                 "--sidecar-xmp" => {
-                    sidecar_xmp = true;
+                    opts.sidecar_xmp = true;
                 }
                 "--caption" => {
                     if let Some(val) = args.get(i + 1) {
-                        caption_file = Some(PathBuf::from(val));
+                        opts.caption_file = Some(PathBuf::from(val));
                         i += 1;
                     }
                 }
                 "--burn-captions" => {
-                    burn_captions = true;
+                    opts.burn_captions = true;
+                }
+                "--lut" => {
+                    if let Some(val) = args.get(i + 1) {
+                        opts.lut_file = Some(PathBuf::from(val));
+                        i += 1;
+                    }
                 }
                 other if !other.starts_with('-') => {
-                    inputs.push(PathBuf::from(other));
+                    opts.inputs.push(PathBuf::from(other));
                 }
                 _ => {}
             }
         }
         i += 1;
     }
+
+    Ok(opts)
+}
+
+fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
+    let opts = parse_encode_args(args)?;
+    let inputs = opts.inputs;
+    let mut preset_name = opts.preset_name;
+    let preset_explicit = opts.preset_explicit;
+    let to = opts.to;
+    let output = opts.output;
+    let export_stems = opts.export_stems;
+    let hardware_accel = opts.hardware_accel;
+    let xmp_title = opts.xmp_title;
+    let xmp_creator = opts.xmp_creator;
+    let sidecar_xmp = opts.sidecar_xmp;
+    let caption_file = opts.caption_file;
+    let lut_file = opts.lut_file;
+    let burn_captions = opts.burn_captions;
+    let fps = opts.fps;
+    let rotation = opts.rotation;
+    let scale_mode = opts.scale_mode;
+    let scaling_filter = opts.scaling_filter;
+    let frame_rate_mode = opts.frame_rate_mode;
+    let frame_memory_bytes = opts.frame_memory_bytes;
+    let normalization_memory_bytes = opts.normalization_memory_bytes;
+    let selection = opts.selection;
 
     if inputs.is_empty() {
         return Err(EncoderError::InvalidJobSpec("missing input file(s)".into()));
@@ -484,6 +534,9 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
             target.caption_path = Some(cap.clone());
             target.burn_captions = burn_captions;
         }
+        if let Some(ref lut) = lut_file {
+            target.lut_path = Some(lut.clone());
+        }
 
         let spec = CraftJobSpec {
             version: "1.0".into(),
@@ -514,6 +567,60 @@ fn cmd_convert(args: &[String]) -> Result<(), EncoderError> {
         return Err(EncoderError::InvalidJobSpec("convert requires --to <format> (e.g. --to pdf)".into()));
     }
     cmd_encode(args)
+}
+
+/// `lut-convert <input> <output> [--size N] [--trilinear|--tetrahedral]`: converts and resamples 1D/3D Look-Up Tables.
+fn cmd_lut_convert(args: &[String]) -> Result<(), EncoderError> {
+    if args.is_empty() {
+        eprintln!("Usage: encodercraft lut-convert <input.cube|.3dl|.look> <output.cube|.3dl|.look> [--size N] [--trilinear|--tetrahedral]");
+        return Ok(());
+    }
+    let input_path = Path::new(&args[0]);
+    let output_path = if args.len() > 1 && !args[1].starts_with('-') {
+        Path::new(&args[1])
+    } else {
+        return Err(EncoderError::InvalidJobSpec("output path required for lut-convert".into()));
+    };
+
+    let mut target_size = None;
+    let mut mode = encodercraft_color::InterpolationMode::Tetrahedral;
+
+    let mut i = 2;
+    while i < args.len() {
+        if let Some(arg) = args.get(i) {
+            match arg.as_str() {
+                "--size" => {
+                    if let Some(s) = args.get(i + 1) {
+                        target_size = Some(s.parse::<usize>().map_err(|e| EncoderError::InvalidJobSpec(format!("invalid --size: {e}")))?);
+                        i += 1;
+                    }
+                }
+                "--trilinear" => mode = encodercraft_color::InterpolationMode::Trilinear,
+                "--tetrahedral" => mode = encodercraft_color::InterpolationMode::Tetrahedral,
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+
+    let text =
+        std::fs::read_to_string(input_path).map_err(|e| EncoderError::Io(format!("failed to read input LUT `{}`: {e}", input_path.display())))?;
+    let mut lut = encodercraft_color::Lut3D::parse_auto(&text)?;
+
+    if let Some(new_size) = target_size {
+        lut = lut.resample(new_size, mode)?;
+    }
+
+    let ext = output_path.extension().and_then(|e| e.to_str()).unwrap_or("cube").to_lowercase();
+    let out_str = match ext.as_str() {
+        "3dl" => lut.to_3dl(),
+        "look" => lut.to_look(),
+        _ => lut.to_cube(),
+    };
+
+    std::fs::write(output_path, out_str).map_err(|e| EncoderError::Io(format!("failed to write output LUT `{}`: {e}", output_path.display())))?;
+    println!("Successfully converted LUT to {} (size {}x{}x{})", output_path.display(), lut.size, lut.size, lut.size);
+    Ok(())
 }
 
 fn is_session_path(path: &std::path::Path) -> bool {

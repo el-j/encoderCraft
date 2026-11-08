@@ -26,7 +26,7 @@ pub use captions::{CaptionBurner, CaptionTrack, NativeCaptionFormat};
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
 pub use document::{DocumentCanvas, DocumentItem, DocumentPage};
 pub use inventory::{SequenceInfo, SourceInventory, inspect_bytes, inspect_source};
-pub use lut::Lut3D;
+pub use lut::{InterpolationMode, Lut1D, Lut3D, LutError, LutVideoFrameExt};
 pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output_path};
 pub use overlay::{OverlayPosition, TimecodeOverlay, WatermarkOverlay};
 pub use pipeline::{TranscodePipeline, target_pixel_format};
