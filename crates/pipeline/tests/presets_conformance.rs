@@ -548,3 +548,57 @@ fn spatial_3d_fbx_abc_dae_usdc_splat_pipeline_transcode() {
     let splat_data = std::fs::read(&splat_path).unwrap();
     assert_eq!(splat_data.len() % 32, 0);
 }
+
+#[test]
+fn publications_and_lottie_and_metafile_pipeline_transcode() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // 1. Publication transcode from DesignCraft to EPUB and PPTX
+    let doc_canvas = encodercraft_pipeline::document::DocumentCanvas::new("Test Publication");
+    let src_designcraft = dir.path().join("source.designcraft");
+    let designcraft_bytes = doc_canvas.to_designcraft_binary().unwrap();
+    std::fs::write(&src_designcraft, designcraft_bytes).unwrap();
+
+    let epub_path = dir.path().join("out.epub");
+    let pptx_path = dir.path().join("out.pptx");
+
+    let epub_target = small_target(&epub_path, ContainerType::Epub, "EPUB 3 Reflowable Publication");
+    let pptx_target = small_target(&pptx_path, ContainerType::Pptx, "PowerPoint Presentation Slide Deck");
+
+    run(job(&src_designcraft, epub_target)).unwrap();
+    run(job(&src_designcraft, pptx_target)).unwrap();
+
+    let epub_data = std::fs::read(&epub_path).unwrap();
+    assert!(epub_data.starts_with(b"PK\x03\x04"));
+    assert!(epub_data.windows(20).any(|w| w == b"application/epub+zip"));
+
+    let pptx_data = std::fs::read(&pptx_path).unwrap();
+    assert!(pptx_data.starts_with(b"PK\x03\x04"));
+    assert!(pptx_data.windows(19).any(|w| w == b"[Content_Types].xml"));
+
+    // 2. Vector transcode to Windows Metafile (WMF) and Lottie JSON
+    let mut vec_canvas = encodercraft_image_codecs::VectorCanvas::new(800.0, 600.0);
+    let mut path = encodercraft_image_codecs::VectorPath::new();
+    path.move_to(0.0, 0.0);
+    path.line_to(100.0, 100.0);
+    vec_canvas.add_path(path);
+
+    let src_vector = dir.path().join("source.vectorcraft");
+    let vec_bytes = vec_canvas.to_vectorcraft().unwrap();
+    std::fs::write(&src_vector, vec_bytes).unwrap();
+
+    let wmf_path = dir.path().join("out.wmf");
+    let lottie_path = dir.path().join("out.json");
+
+    let wmf_target = small_target(&wmf_path, ContainerType::WindowsMetafile, "Windows Metafile (WMF)");
+    let lottie_target = small_target(&lottie_path, ContainerType::LottieJson, "Lottie Motion Vector JSON");
+
+    run(job(&src_vector, wmf_target)).unwrap();
+    run(job(&src_vector, lottie_target)).unwrap();
+
+    let wmf_data = std::fs::read(&wmf_path).unwrap();
+    assert_eq!(&wmf_data[0..4], &0x9AC6CDD7u32.to_le_bytes());
+
+    let lottie_data = std::fs::read_to_string(&lottie_path).unwrap();
+    assert!(lottie_data.contains("\"v\": \"5.7.0\""));
+}

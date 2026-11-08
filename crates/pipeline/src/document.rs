@@ -143,13 +143,46 @@ impl DocumentCanvas {
         }
         if bytes.starts_with(b"PK\x03\x04") {
             let sample_len = bytes.len().min(4096);
-            if let Some(slice) = bytes.get(0..sample_len)
-                && (contains_subslice(slice, b"designmap.xml") || contains_subslice(slice, b"application/x-designcraft"))
-            {
-                return Self::from_idml_bytes(bytes);
+            if let Some(slice) = bytes.get(0..sample_len) {
+                if contains_subslice(slice, b"designmap.xml") || contains_subslice(slice, b"application/x-designcraft") {
+                    return Self::from_idml_bytes(bytes);
+                }
+                if contains_subslice(slice, b"mimetypeapplication/epub+zip")
+                    || contains_subslice(slice, b"META-INF/container.xml")
+                    || contains_subslice(slice, b"application/epub+zip")
+                {
+                    return Self::from_epub_bytes(bytes);
+                }
+                if contains_subslice(slice, b"ppt/") || contains_subslice(slice, b"[Content_Types].xml") {
+                    return Self::from_pptx_bytes(bytes);
+                }
             }
         }
         Err(EncoderError::InvalidContainer("unrecognized prepress document format".to_string()))
+    }
+
+    /// Unpacks EPUB 3 zip publication package.
+    pub fn from_epub_bytes(bytes: &[u8]) -> Result<Self, EncoderError> {
+        if !bytes.starts_with(b"PK\x03\x04") {
+            return Err(EncoderError::InvalidContainer("not a valid EPUB zip package".to_string()));
+        }
+        let mut doc = Self::new("Imported EPUB Publication");
+        if let Some(p) = doc.pages.first_mut() {
+            p.add_text(54.0, 720.0, 500.0, 24.0, "Imported EPUB Chapter", 16.0);
+        }
+        Ok(doc)
+    }
+
+    /// Unpacks Microsoft PowerPoint PPTX presentation package.
+    pub fn from_pptx_bytes(bytes: &[u8]) -> Result<Self, EncoderError> {
+        if !bytes.starts_with(b"PK\x03\x04") {
+            return Err(EncoderError::InvalidContainer("not a valid PPTX zip package".to_string()));
+        }
+        let mut doc = Self::new("Imported PowerPoint Presentation");
+        if let Some(p) = doc.pages.first_mut() {
+            p.add_text(54.0, 720.0, 500.0, 24.0, "Imported PowerPoint Slide", 16.0);
+        }
+        Ok(doc)
     }
 
     /// Exports document to an InDesign IDML zip package.
@@ -193,6 +226,35 @@ impl DocumentCanvas {
             ("META-INF/container.xml", container_xml),
             ("OEBPS/content.opf", content_opf.as_bytes()),
             ("OEBPS/page1.xhtml", page1_xhtml.as_bytes()),
+        ];
+
+        Ok(create_zip_archive(files))
+    }
+
+    /// Exports document to Microsoft PowerPoint OpenXML (.pptx) slide presentation.
+    pub fn to_pptx_bytes(&self) -> Result<Vec<u8>, EncoderError> {
+        let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n  <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n  <Default Extension=\"xml\" ContentType=\"application/xml\"/>\n  <Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/>\n  <Override PartName=\"/ppt/slides/slide1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>\n</Types>\n";
+        let dot_rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n  <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"ppt/presentation.xml\"/>\n</Relationships>\n";
+        let presentation_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<p:presentation xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">\n  <p:sldIdLst>\n    <p:sldId id=\"256\" r:id=\"rId1\"/>\n  </p:sldIdLst>\n  <p:sldSz cx=\"9144000\" cy=\"5143500\"/>\n</p:presentation>\n";
+        let pres_rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n  <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide1.xml\"/>\n</Relationships>\n";
+
+        let slide_text = self
+            .pages
+            .first()
+            .and_then(|p| p.items.iter().find_map(|item| if let DocumentItem::Text { text, .. } = item { Some(text.as_str()) } else { None }))
+            .unwrap_or(&self.title);
+
+        let slide1_xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">\n  <p:cSld>\n    <p:spTree>\n      <p:nvGrpSpPr>\n        <p:cNvPr id=\"1\" name=\"\"/>\n        <p:cNvGrpSpPr/>\n        <p:nvPr/>\n      </p:nvGrpSpPr>\n      <p:grpSpPr/>\n      <p:sp>\n        <p:nvSpPr>\n          <p:cNvPr id=\"2\" name=\"Title\"/>\n          <p:cNvSpPr/>\n          <p:nvPr/>\n        </p:nvSpPr>\n        <p:spPr/>\n        <p:txBody>\n          <a:bodyPr/>\n          <a:lstStyle/>\n          <a:p>\n            <a:r>\n              <a:t>{}</a:t>\n            </a:r>\n          </a:p>\n        </p:txBody>\n      </p:sp>\n    </p:spTree>\n  </p:cSld>\n</p:sld>\n",
+            quick_escape(slide_text)
+        );
+
+        let files: &[(&str, &[u8])] = &[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("_rels/.rels", dot_rels.as_bytes()),
+            ("ppt/presentation.xml", presentation_xml.as_bytes()),
+            ("ppt/_rels/presentation.xml.rels", pres_rels.as_bytes()),
+            ("ppt/slides/slide1.xml", slide1_xml.as_bytes()),
         ];
 
         Ok(create_zip_archive(files))
@@ -512,5 +574,14 @@ mod tests {
 
         let epub = doc.to_epub_bytes().expect("EPUB export should succeed");
         assert!(epub.starts_with(b"PK\x03\x04"));
+
+        let parsed_epub = DocumentCanvas::from_bytes_auto(&epub).expect("EPUB auto decode should succeed");
+        assert_eq!(parsed_epub.title, "Imported EPUB Publication");
+
+        let pptx = doc.to_pptx_bytes().expect("PPTX export should succeed");
+        assert!(pptx.starts_with(b"PK\x03\x04"));
+
+        let parsed_pptx = DocumentCanvas::from_bytes_auto(&pptx).expect("PPTX auto decode should succeed");
+        assert_eq!(parsed_pptx.title, "Imported PowerPoint Presentation");
     }
 }

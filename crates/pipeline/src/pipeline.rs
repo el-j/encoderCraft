@@ -378,13 +378,17 @@ impl TranscodePipeline {
                     self.execute_animated_gif(target, start_time)?
                 }
             }
-            ContainerType::Svg | ContainerType::PostScriptEps | ContainerType::AdobeIllustratorAi | ContainerType::ArtcraftVectorcraft => {
-                self.execute_vector_transcode(target, start_time)?
-            }
+            ContainerType::Svg
+            | ContainerType::PostScriptEps
+            | ContainerType::AdobeIllustratorAi
+            | ContainerType::ArtcraftVectorcraft
+            | ContainerType::WindowsMetafile => self.execute_vector_transcode(target, start_time)?,
             ContainerType::Pdf | ContainerType::Docx => self.execute_document_pdf(target, start_time)?,
-            ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
-                self.execute_document_publication(target, start_time)?
-            }
+            ContainerType::Idml
+            | ContainerType::AdobeInDesignIndd
+            | ContainerType::ArtcraftDesigncraft
+            | ContainerType::Epub
+            | ContainerType::Pptx => self.execute_document_publication(target, start_time)?,
             ContainerType::Gltf
             | ContainerType::Usdz
             | ContainerType::Usdc
@@ -414,7 +418,9 @@ impl TranscodePipeline {
             ContainerType::AutocadDxf | ContainerType::AutocadDwg | ContainerType::HpglPlotter | ContainerType::ArtcraftCadcraft => {
                 self.execute_cad_transcode(target, start_time)?
             }
-            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => self.execute_motion_project(target, start_time)?,
+            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft | ContainerType::LottieJson => {
+                self.execute_motion_project(target, start_time)?
+            }
             ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_timeline_project(target, start_time)?,
             ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => self.execute_daw_session(target, start_time)?,
             ContainerType::ArtcraftAnicraft => self.execute_image_transcode(target, start_time)?,
@@ -737,6 +743,14 @@ impl TranscodePipeline {
                 }
                 let dxf_str = cad.to_dxf_ascii();
                 std::fs::write(&target.output_path, dxf_str.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write DXF file: {e}")))?;
+            }
+            ContainerType::WindowsMetafile => {
+                let wmf = canvas.to_wmf_bytes();
+                std::fs::write(&target.output_path, &wmf).map_err(|e| EncoderError::Io(format!("failed to write WMF file: {e}")))?;
+            }
+            ContainerType::LottieJson => {
+                let lottie = canvas.to_lottie_json().map_err(|e| EncoderError::InvalidJobSpec(e.to_string()))?;
+                std::fs::write(&target.output_path, lottie.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write Lottie JSON: {e}")))?;
             }
             _ => {
                 // Default to standard SVG
@@ -1106,6 +1120,14 @@ impl TranscodePipeline {
                 let pdf = doc.to_pdf_x4_bytes()?;
                 std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write PDF/X-4 document: {e}")))?;
             }
+            ContainerType::Epub => {
+                let epub = doc.to_epub_bytes()?;
+                std::fs::write(&target.output_path, &epub).map_err(|e| EncoderError::Io(format!("failed to write EPUB publication: {e}")))?;
+            }
+            ContainerType::Pptx => {
+                let pptx = doc.to_pptx_bytes()?;
+                std::fs::write(&target.output_path, &pptx).map_err(|e| EncoderError::Io(format!("failed to write PPTX slide presentation: {e}")))?;
+            }
             _ => {
                 let pdf = doc.to_pdf_x4_bytes()?;
                 std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write default publication file: {e}")))?;
@@ -1220,6 +1242,10 @@ impl TranscodePipeline {
                 out.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
                 out.extend_from_slice(&chunk);
                 std::fs::write(&target.output_path, &out).map_err(|e| EncoderError::Io(format!("failed to write AEP file: {e}")))?;
+            }
+            ContainerType::LottieJson => {
+                let lottie = project.to_lottie_json()?;
+                std::fs::write(&target.output_path, lottie.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write Lottie JSON: {e}")))?;
             }
             _ => {
                 let lottie = project.to_lottie_json()?;
