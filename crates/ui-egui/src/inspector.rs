@@ -1342,15 +1342,15 @@ fn render_effects_tab(ui: &mut Ui, target: &mut OutputTarget) {
     ui.add_space(6.0);
     ui.separator();
 
-    // 6. 3D LUT (.cube)
+    // 6. 3D LUT (.cube, .3dl, .look)
     let mut lut_str = target.lut_path.as_ref().and_then(|p| p.to_str()).unwrap_or("").to_string();
     ui.horizontal(|ui| {
-        ui.label("Apply 3D LUT (.cube):");
+        ui.label("Apply 3D LUT (.cube, .3dl, .look):");
         if ui.text_edit_singleline(&mut lut_str).changed() {
             target.lut_path = if lut_str.trim().is_empty() { None } else { Some(PathBuf::from(lut_str.trim())) };
         }
         if ui.button("Browse...").clicked()
-            && let Some(file) = rfd::FileDialog::new().add_filter("3D LUT", &["cube"]).pick_file()
+            && let Some(file) = rfd::FileDialog::new().add_filter("3D LUT / Look", &["cube", "3dl", "look"]).pick_file()
         {
             target.lut_path = Some(file);
         }

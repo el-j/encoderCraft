@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 encodercraft-core = { workspace = true }
+encodercraft-color = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-pipeline = { workspace = true }

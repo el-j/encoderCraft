@@ -187,7 +187,7 @@ impl TranscodePipeline {
         let lut = match &target.lut_path {
             Some(path) => {
                 let content = std::fs::read_to_string(path).map_err(|e| EncoderError::Io(format!("failed to read LUT file: {e}")))?;
-                Some(crate::lut::Lut3D::parse_cube(&content)?)
+                Some(crate::lut::Lut3D::parse_auto(&content)?)
             }
             None => None,
         };

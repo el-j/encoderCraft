@@ -752,7 +752,7 @@ flowchart LR
 **Objective:** Extend `encoderCraft` into advanced color science, universal subtitle conversion, and broadcast transport streams. Tracked under Milestone [M40 - Advanced Broadcast, Color & Delivery Paradigms (Novel Formats)](https://github.com/el-j/encoderCraft/milestone/18).
 
 #### Deliverables & Sub-Tasks:
-1. [ ] **3D Look-Up Table (LUT) Transcoding & Baking Engine ([#189](https://github.com/el-j/encoderCraft/issues/189)):**
+1. [x] **3D Look-Up Table (LUT) Transcoding & Baking Engine ([#189](https://github.com/el-j/encoderCraft/issues/189)):**
    - Implement `encodercraft-color::lut` supporting `.cube`, `.3dl`, and `.look` tables with tetrahedral interpolation.
    - Expose LUT lattice resampling and baking in the Inspector Effects tab and CLI.
 2. [ ] **Universal Subtitle & Closed Caption Transcoding Matrix ([#190](https://github.com/el-j/encoderCraft/issues/190)):**

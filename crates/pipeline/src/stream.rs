@@ -12,7 +12,7 @@ use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 use encodercraft_geom::Dimensions;
 
 use crate::captions::{CaptionBurner, CaptionTrack};
-use crate::lut::Lut3D;
+use crate::lut::{Lut3D, LutVideoFrameExt};
 use crate::overlay::TimecodeOverlay;
 use crate::progress::JobProgress;
 use crate::scale::FrameScaler;

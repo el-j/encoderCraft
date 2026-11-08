@@ -16,6 +16,9 @@ pub enum EncoderError {
     #[error("Color / Pixel format error: {0}")]
     Color(#[from] encodercraft_color::ColorError),
 
+    #[error("Color Look-Up Table (LUT) error: {0}")]
+    Lut(#[from] encodercraft_color::LutError),
+
     #[error("Invalid media container: {0}")]
     InvalidContainer(String),
 

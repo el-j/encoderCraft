@@ -5,6 +5,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+pub mod lut;
+
+pub use lut::{InterpolationMode, Lut1D, Lut3D, LutError};
+
 use encodercraft_geom::Dimensions;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

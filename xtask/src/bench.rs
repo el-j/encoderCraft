@@ -13,7 +13,7 @@ use encodercraft_audio_dsp::{SincResampler, normalize_loudness};
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{AudioSampleBuffer, ChannelLayout, Rational64, VideoFrame};
 use encodercraft_geom::{Dimensions, ScaleMode};
-use encodercraft_pipeline::{CaptionBurner, CaptionTrack, FrameScaler, Lut3D, NativeCaptionFormat};
+use encodercraft_pipeline::{CaptionBurner, CaptionTrack, FrameScaler, Lut3D, LutVideoFrameExt, NativeCaptionFormat};
 use encodercraft_video_codecs::{VideoCodecKind, create_video_encoder};
 
 struct BenchResult {
