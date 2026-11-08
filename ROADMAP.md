@@ -1,8 +1,8 @@
 # encoderCraft Roadmap
 
-> **Stage: Complete Implementation (Alpha 2 Release Candidate)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
+> **Stage: Complete Implementation (v0.1.0-alpha.2 Release)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-07 · **Last updated:** 2026-11-07 · **Change:** Complete M0–M36 implementation suite, UI table locking, theme neutrality, and Alpha 2 release hardening  
+> **Last reviewed:** 2026-11-08 · **Last updated:** 2026-11-08 · **Change:** Complete M0–M41 implementation suite, ecosystem codec harvest, broadcast MPEG-TS & Spatial Video, and v0.1.0-alpha.2 release  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -304,12 +304,12 @@ Tracked under Milestone [M38 - Queue Batch Multi-Selection, UI ID Clash Fixes, I
 
 Tracked under Milestone [M39 - Ecosystem Codec Harvest: Audio, Cinema, GPU, 3D & Publications](https://github.com/el-j/encoderCraft/milestone/17).
 
-- [ ] **M39.1: Pure-Rust MP3 & Ogg Vorbis Native Encoders (#183)** – Replace stub fallbacks with pure-Rust MPEG-1 Layer 3 (with ID3v2 headers) and Ogg Vorbis encoders (`execute_audio_mp3`, `execute_audio_ogg`).
-- [ ] **M39.2: Apple Core Audio Format (.caf) & Standalone Ogg Opus (.opus) (#184)** – 64-bit Apple CAF writer from `soundcraft-audio-io` and RFC 7845 standalone Ogg Opus container multiplexer.
-- [ ] **M39.3: GPU DirectDraw Surface (DDS), SMPTE DPX & JPEG XL (#185)** – Integrate `photocraft-codecs` for GPU textures (BC1–BC7/BC6H HDR), SMPTE 268M DPX film scans, and JPEG XL (.jxl).
-- [ ] **M39.4: Deep OpenEXR, Radiance HDR, DICOM & FITS (#186)** – Deep OpenEXR with Cryptomatte, Radiance HDR (.hdr), medical DICOM (.dcm), and astronomical FITS (.fits).
-- [ ] **M39.5: Autodesk FBX, Alembic (.abc) & Collada (.dae) 3D Interchange (#187)** – 3D mesh import/export from `texturecraft-formats` for FBX, Alembic Ogawa, Collada DAE, and binary USDC.
-- [ ] **M39.6: EPUB 3 Publications, PowerPoint PPTX & Lottie Animations (#188)** – Standards-compliant EPUB 3 packages, PowerPoint slide decks, and Lottie vector animation JSON exports.
+- [x] **M39.1: Pure-Rust MP3 & Ogg Vorbis Native Encoders (#183)** – Replace stub fallbacks with pure-Rust MPEG-1 Layer 3 (with ID3v2 headers) and Ogg Vorbis encoders (`execute_audio_mp3`, `execute_audio_ogg`).
+- [x] **M39.2: Apple Core Audio Format (.caf) & Standalone Ogg Opus (.opus) (#184)** – 64-bit Apple CAF writer from `soundcraft-audio-io` and RFC 7845 standalone Ogg Opus container multiplexer.
+- [x] **M39.3: GPU DirectDraw Surface (DDS), SMPTE DPX & JPEG XL (#185)** – Integrate `photocraft-codecs` for GPU textures (BC1–BC7/BC6H HDR), SMPTE 268M DPX film scans, and JPEG XL (.jxl).
+- [x] **M39.4: Deep OpenEXR, Radiance HDR, DICOM & FITS (#186)** – Deep OpenEXR with Cryptomatte, Radiance HDR (.hdr), medical DICOM (.dcm), and astronomical FITS (.fits).
+- [x] **M39.5: Autodesk FBX, Alembic (.abc) & Collada (.dae) 3D Interchange (#187)** – 3D mesh import/export from `texturecraft-formats` for FBX, Alembic Ogawa, Collada DAE, binary USDC, and 3D Gaussian Splats (.splat).
+- [x] **M39.6: EPUB 3 Publications, PowerPoint PPTX & Lottie Animations (#188)** – Standards-compliant EPUB 3 packages, PowerPoint slide decks, Lottie vector animation JSON, and Windows Metafile (.wmf) exports.
 
 ## Milestone 40: Advanced Broadcast, Color & Delivery Paradigms (Novel Formats)
 
@@ -323,17 +323,17 @@ Tracked under Milestone [M40 - Advanced Broadcast, Color & Delivery Paradigms (N
 
 Tracked under Milestone [M41 - Production Workflow, UI/UX Polish & Adobe Media Encoder Parity Fixes](https://github.com/el-j/encoderCraft/milestone/19).
 
-- [ ] **M41.1: Multi-Selection Batch Format & Preset Switching (#192)** – Update all highlighted queue items simultaneously with synchronized default presets and output extensions upon modifying any selected item.
-- [ ] **M41.2: Domain-Filtered Format Options (#193)** – Restrict format dropdowns strictly to candidate containers valid for the source media stream kind (no image/video options on audio sources).
-- [ ] **M41.3: Eliminate egui ID Clashes Across Panels & ScrollAreas (#194)** – Wrap dock panels in `ui.push_id(*panel, ...)` inside `EncoderDockContent::body` and assign unique explicit `id_salt` across scroll areas and comboboxes.
-- [ ] **M41.4: Shift+Click & Cmd+Click Multi-Selection in Media Browser (#195)** – Implement multi-file selection with range select (Shift) and toggle select (Cmd/Ctrl) in Media Browser list and thumbnail views.
-- [ ] **M41.5: Recursive Folder Ingestion & Batch Queueing (#196)** – Support adding folders directly to the queue with recursive traversal and automatic media stream classification.
-- [ ] **M41.6: Inline Format Dropdown Application & Instant UI Repaint (#197)** – Ensure inline format selection mutates job specs reliably and requests immediate frame repaint.
-- [ ] **M41.7: Set In / Set Out Range Synchronization (#198)** – Synchronize In/Out trim markers across Preview panel, Inspector modal, and pipeline transcoding engine for both video and audio.
-- [ ] **M41.8: Granular AME-Parity Preferences (#199)** – Tabbed Preferences dialog with granular GPU acceleration, CPU worker concurrency, memory quotas, and watch folder timing.
-- [ ] **M41.9: Official Audio Metadata Lookup & Editor (#200)** – Full audio metadata editor for ID3/Vorbis/RIFF tags with automated lookup from official sources (MusicBrainz/ISRC).
-- [ ] **M41.10: Distinctive Visual Media Kind Badges & Icons (#201)** – Render color-coded essence chips and distinctive icons (VID, AUD, IMG, DOC, 3D, SEQ) in the Queue Source column.
-- [ ] **M41.11: Preset Browser Layout Bounds & Scrolling Overflow Fix (#202)** – Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
+- [x] **M41.1: Multi-Selection Batch Format & Preset Switching (#192)** – Update all highlighted queue items simultaneously with synchronized default presets and output extensions upon modifying any selected item.
+- [x] **M41.2: Domain-Filtered Format Options (#193)** – Restrict format dropdowns strictly to candidate containers valid for the source media stream kind (no image/video options on audio sources).
+- [x] **M41.3: Eliminate egui ID Clashes Across Panels & ScrollAreas (#194)** – Wrap dock panels in `ui.push_id(*panel, ...)` inside `EncoderDockContent::body` and assign unique explicit `id_salt` across scroll areas and comboboxes.
+- [x] **M41.4: Shift+Click & Cmd+Click Multi-Selection in Media Browser (#195)** – Implement multi-file selection with range select (Shift) and toggle select (Cmd/Ctrl) in Media Browser list and thumbnail views.
+- [x] **M41.5: Recursive Folder Ingestion & Batch Queueing (#196)** – Support adding folders directly to the queue with recursive traversal and automatic media stream classification.
+- [x] **M41.6: Inline Format Dropdown Application & Instant UI Repaint (#197)** – Ensure inline format selection mutates job specs reliably and requests immediate frame repaint.
+- [x] **M41.7: Set In / Set Out Range Synchronization (#198)** – Synchronize In/Out trim markers across Preview panel, Inspector modal, and pipeline transcoding engine for both video and audio.
+- [x] **M41.8: Granular AME-Parity Preferences (#199)** – Tabbed Preferences dialog with granular GPU acceleration, CPU worker concurrency, memory quotas, and watch folder timing.
+- [x] **M41.9: Official Audio Metadata Lookup & Editor (#200)** – Full audio metadata editor for ID3/Vorbis/RIFF tags with automated lookup from official sources (MusicBrainz/ISRC).
+- [x] **M41.10: Distinctive Visual Media Kind Badges & Icons (#201)** – Render color-coded essence chips and distinctive icons (VID, AUD, IMG, DOC, 3D, SEQ) in the Queue Source column.
+- [x] **M41.11: Preset Browser Layout Bounds & Scrolling Overflow Fix (#202)** – Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
 
 ## Known Issues (alpha.1, tracked above)
 
