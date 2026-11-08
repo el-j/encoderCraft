@@ -324,3 +324,78 @@ fn unsupported_parameters_are_rejected_not_ignored() {
     assert!(create_video_encoder_with(VideoCodecKind::H264, W, H, fps(), &profile).is_err());
     assert!(create_video_encoder_with(VideoCodecKind::ProRes, W, H, fps(), &profile).is_ok());
 }
+
+#[test]
+fn mp3_and_ogg_vorbis_pipeline_transcode() {
+    let dir = tempdir().unwrap();
+    let wav_path = dir.path().join("input.wav");
+
+    // Write a mono 44.1kHz WAV source with 4410 samples (0.1s)
+    let samples: Vec<i16> = (0..4410).map(|i| ((i % 100) as i16 - 50) * 300).collect();
+    let mut pcm_bytes = Vec::new();
+    for s in &samples {
+        pcm_bytes.extend_from_slice(&s.to_le_bytes());
+    }
+
+    let mut wav_file = Vec::new();
+    wav_file.extend_from_slice(b"RIFF");
+    let total_size = (36 + pcm_bytes.len()) as u32;
+    wav_file.extend_from_slice(&total_size.to_le_bytes());
+    wav_file.extend_from_slice(b"WAVEfmt ");
+    wav_file.extend_from_slice(&16u32.to_le_bytes()); // subchunk1size
+    wav_file.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav_file.extend_from_slice(&1u16.to_le_bytes()); // Mono
+    wav_file.extend_from_slice(&44100u32.to_le_bytes()); // sample rate
+    wav_file.extend_from_slice(&(44100u32 * 2).to_le_bytes()); // byte rate
+    wav_file.extend_from_slice(&2u16.to_le_bytes()); // block align
+    wav_file.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    wav_file.extend_from_slice(b"data");
+    wav_file.extend_from_slice(&(pcm_bytes.len() as u32).to_le_bytes());
+    wav_file.extend_from_slice(&pcm_bytes);
+    std::fs::write(&wav_path, &wav_file).unwrap();
+
+    let mp3_path = dir.path().join("output.mp3");
+    let ogg_path = dir.path().join("output.ogg");
+
+    let mut mp3_target = small_target(&mp3_path, ContainerType::Mp3, "MP3");
+    mp3_target.audio = Some(encodercraft_core::AudioEncodeSettings {
+        codec: Some("mp3".into()),
+        sample_rate: Some(44100),
+        layout: Some(encodercraft_core::ChannelLayout::Mono),
+        bitrate_kbps: Some(192),
+        delay_ms: 0,
+    });
+    mp3_target.metadata =
+        Some(encodercraft_core::XmpMetadata { title: Some("Ecosystem Audio".into()), creator: Some("ArtCraft".into()), ..Default::default() });
+
+    let mut ogg_target = small_target(&ogg_path, ContainerType::OggAudio, "Ogg");
+    ogg_target.audio = Some(encodercraft_core::AudioEncodeSettings {
+        codec: Some("vorbis".into()),
+        sample_rate: Some(44100),
+        layout: Some(encodercraft_core::ChannelLayout::Mono),
+        bitrate_kbps: Some(160),
+        delay_ms: 0,
+    });
+
+    run(job(&wav_path, mp3_target)).unwrap();
+    run(job(&wav_path, ogg_target)).unwrap();
+
+    let mp3_data = std::fs::read(&mp3_path).unwrap();
+    assert!(!mp3_data.is_empty());
+    assert_eq!(&mp3_data[0..3], b"ID3");
+
+    let ogg_data = std::fs::read(&ogg_path).unwrap();
+    assert!(!ogg_data.is_empty());
+    assert_eq!(&ogg_data[0..4], b"OggS");
+
+    // Verify both are decodable by MediaReader
+    let mp3_reader = MediaReader::open(&mp3_path).unwrap();
+    assert_eq!(mp3_reader.frame_count(), 0);
+    let mp3_audio = mp3_reader.read_all_audio(44100).unwrap();
+    assert!(mp3_audio.samples_per_channel() > 0);
+
+    let ogg_reader = MediaReader::open(&ogg_path).unwrap();
+    assert_eq!(ogg_reader.frame_count(), 0);
+    let ogg_audio = ogg_reader.read_all_audio(44100).unwrap();
+    assert!(ogg_audio.samples_per_channel() > 0);
+}

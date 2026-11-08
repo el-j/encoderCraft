@@ -722,7 +722,7 @@ flowchart LR
 **Objective:** Harvest existing pure-Rust codecs from sibling ArtCraft repositories (`soundcraft`, `photocraft`, `texturecraft`, `designcraft`, `effectcraft`, `craft-libs`) to replace fallback stubs, eliminate external tool requirements, and complete universal multi-media conversion. Tracked under Milestone [M39 - Ecosystem Codec Harvest: Audio, Cinema, GPU, 3D & Publications](https://github.com/el-j/encoderCraft/milestone/17).
 
 #### Deliverables & Sub-Tasks:
-1. [ ] **Pure-Rust MP3 & Ogg Vorbis Native Encoders ([#183](https://github.com/el-j/encoderCraft/issues/183)):**
+1. [x] **Pure-Rust MP3 & Ogg Vorbis Native Encoders ([#183](https://github.com/el-j/encoderCraft/issues/183)):**
    - Replace FLAC-fallback stubs for `ContainerType::Mp3` and `ContainerType::OggAudio` in `crates/pipeline/src/pipeline.rs`.
    - Implement pure-Rust MPEG-1 Layer 3 encoder with ID3v2 metadata header injection.
    - Implement pure-Rust Ogg Vorbis audio encoder writing standards-compliant `.ogg` bitstreams with Vorbis comment tags.
