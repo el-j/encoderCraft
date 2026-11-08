@@ -122,6 +122,166 @@ pub fn encode_audio_ogg_vorbis(buffer: &AudioSampleBuffer, _quality: f32) -> Res
     oxideav_vorbis::oggfile::encode_pcm_to_ogg(&pcm, &config).map_err(|e| EncoderError::Internal(format!("Ogg Vorbis encoding failed: {e:?}")))
 }
 
+/// Encodes an `AudioSampleBuffer` to Apple Core Audio Format (CAF) with uncompressed Linear PCM.
+pub fn encode_audio_caf(buffer: &AudioSampleBuffer) -> Result<Vec<u8>, EncoderError> {
+    if buffer.channel_count() == 0 || buffer.samples_per_channel() == 0 {
+        return Err(EncoderError::InvalidJobSpec("cannot encode empty audio buffer to CAF".into()));
+    }
+
+    let channels = buffer.channel_count() as u32;
+    let len = buffer.samples_per_channel();
+    let bytes_per_sample = 2u32; // 16-bit integer PCM
+    let bytes_per_packet = channels * bytes_per_sample;
+
+    let mut pcm_bytes = Vec::with_capacity(len.saturating_mul(bytes_per_packet as usize));
+    for i in 0..len {
+        for ch in 0..channels {
+            let ch_data = buffer.channel(ch as usize).map_err(|e| EncoderError::Internal(e.to_string()))?;
+            let s = (ch_data.get(i).copied().unwrap_or(0.0).clamp(-1.0, 1.0) * 32767.0) as i16;
+            pcm_bytes.extend_from_slice(&s.to_le_bytes());
+        }
+    }
+
+    let mut out = Vec::with_capacity(64 + pcm_bytes.len());
+    // File header: 'caff', version 1, flags 0
+    out.extend_from_slice(b"caff");
+    out.extend_from_slice(&1u16.to_be_bytes());
+    out.extend_from_slice(&0u16.to_be_bytes());
+
+    // 'desc' chunk (32 bytes)
+    out.extend_from_slice(b"desc");
+    out.extend_from_slice(&32i64.to_be_bytes());
+    out.extend_from_slice(&(buffer.sample_rate as f64).to_be_bytes());
+    out.extend_from_slice(b"lpcm");
+    out.extend_from_slice(&0x0000_0002u32.to_be_bytes()); // Little-endian signed integer
+    out.extend_from_slice(&bytes_per_packet.to_be_bytes());
+    out.extend_from_slice(&1u32.to_be_bytes()); // 1 frame per packet
+    out.extend_from_slice(&channels.to_be_bytes());
+    out.extend_from_slice(&16u32.to_be_bytes()); // 16 bits per channel
+
+    // 'data' chunk
+    let data_chunk_size = (4 + pcm_bytes.len()) as i64;
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_chunk_size.to_be_bytes());
+    out.extend_from_slice(&0u32.to_be_bytes()); // mEditCount = 0
+    out.extend_from_slice(&pcm_bytes);
+
+    Ok(out)
+}
+
+/// Encodes an `AudioSampleBuffer` to standalone RFC 7845 Ogg Opus format.
+pub fn encode_audio_opus(
+    buffer: &AudioSampleBuffer,
+    bitrate_kbps: u32,
+    metadata: Option<&encodercraft_core::XmpMetadata>,
+) -> Result<Vec<u8>, EncoderError> {
+    if buffer.channel_count() == 0 || buffer.samples_per_channel() == 0 {
+        return Err(EncoderError::InvalidJobSpec("cannot encode empty audio buffer to Opus".into()));
+    }
+
+    let channels = (buffer.channel_count().clamp(1, 2)) as u8;
+    let bitrate_bps = bitrate_kbps.clamp(16, 510) * 1000;
+
+    let mut enc = effectcraft_opusenc::OpusEncoder::new(channels, bitrate_bps);
+    let c = channels as usize;
+    let _len = buffer.samples_per_channel();
+
+    // Prepare interleaved 48 kHz float samples (Opus natively operates at 48 kHz)
+    let resampled = if buffer.sample_rate != 48_000 { crate::resample::SincResampler::new(32).resample(buffer, 48_000)? } else { buffer.clone() };
+
+    let r_len = resampled.samples_per_channel();
+    let mut pcm = vec![0.0f32; r_len * c];
+    for ch in 0..c {
+        let ch_data = resampled.channel(ch).map_err(|e| EncoderError::Internal(e.to_string()))?;
+        for (i, &v) in ch_data.iter().enumerate() {
+            if let Some(slot) = pcm.get_mut(i * c + ch) {
+                *slot = v;
+            }
+        }
+    }
+
+    let frame_size = effectcraft_opusenc::OpusEncoder::FRAME_SIZE;
+    let total = r_len + enc.pre_skip() as usize;
+    let frame_count = total.div_ceil(frame_size);
+    pcm.resize(frame_count * frame_size * c, 0.0);
+
+    let packets: Vec<Vec<u8>> = pcm.chunks(frame_size * c).map(|f| enc.encode_float(f)).collect();
+
+    let mut out = Vec::new();
+    // Page 0: OpusHead (header_type 0x02 = beginning of stream)
+    ogg_page(&mut out, &enc.opus_head(), 0x02, 0, 0);
+
+    // Page 1: OpusTags
+    let vendor = b"encoderCraft-opusenc";
+    let mut tags = b"OpusTags".to_vec();
+    tags.extend_from_slice(&(vendor.len() as u32).to_le_bytes());
+    tags.extend_from_slice(vendor);
+
+    let mut comments: Vec<String> = Vec::new();
+    if let Some(meta) = metadata {
+        if let Some(ref title) = meta.title {
+            comments.push(format!("TITLE={title}"));
+        }
+        if let Some(ref creator) = meta.creator {
+            comments.push(format!("ARTIST={creator}"));
+        }
+        if let Some(ref album) = meta.album {
+            comments.push(format!("ALBUM={album}"));
+        }
+        if let Some(ref isrc) = meta.isrc {
+            comments.push(format!("ISRC={isrc}"));
+        }
+    }
+    tags.extend_from_slice(&(comments.len() as u32).to_le_bytes());
+    for comm in &comments {
+        let comm_bytes = comm.as_bytes();
+        tags.extend_from_slice(&(comm_bytes.len() as u32).to_le_bytes());
+        tags.extend_from_slice(comm_bytes);
+    }
+    ogg_page(&mut out, &tags, 0, 0, 1);
+
+    // Subsequent pages: audio packets
+    let pre_skip = enc.pre_skip() as u64;
+    for (i, p) in packets.iter().enumerate() {
+        let last = i + 1 == packets.len();
+        let granule = if last { pre_skip + r_len as u64 } else { ((i + 1) * frame_size) as u64 };
+        ogg_page(&mut out, p, if last { 0x04 } else { 0 }, granule, i as u32 + 2);
+    }
+
+    Ok(out)
+}
+
+fn ogg_crc(data: &[u8]) -> u32 {
+    let mut crc = 0u32;
+    for &b in data {
+        crc ^= (b as u32) << 24;
+        for _ in 0..8 {
+            crc = if crc & 0x8000_0000 != 0 { (crc << 1) ^ 0x04C1_1DB7 } else { crc << 1 };
+        }
+    }
+    crc
+}
+
+fn ogg_page(out: &mut Vec<u8>, packet: &[u8], header_type: u8, granule: u64, seq: u32) {
+    let mut lacing = vec![255u8; packet.len() / 255];
+    lacing.push((packet.len() % 255) as u8);
+    let start = out.len();
+    out.extend_from_slice(b"OggS");
+    out.push(0);
+    out.push(header_type);
+    out.extend_from_slice(&granule.to_le_bytes());
+    out.extend_from_slice(&0x4F50_5553u32.to_le_bytes()); // 'OPUS' serial
+    out.extend_from_slice(&seq.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // CRC placeholder
+    out.push(lacing.len() as u8);
+    out.extend_from_slice(&lacing);
+    out.extend_from_slice(packet);
+    let crc = ogg_crc(&out[start..]);
+    if let Some(crc_dest) = out.get_mut(start + 22..start + 26) {
+        crc_dest.copy_from_slice(&crc.to_le_bytes());
+    }
+}
+
 fn build_id3v2_tag(meta: &encodercraft_core::XmpMetadata) -> Vec<u8> {
     let mut frames = Vec::new();
 
@@ -231,5 +391,28 @@ mod tests {
 
         let decoded = decode_audio(&ogg_bytes).unwrap();
         assert_eq!(decoded.channel_count(), 2);
+    }
+
+    #[test]
+    fn test_caf_encode_and_decode() {
+        let buf = AudioSampleBuffer::new_silent(48000, ChannelLayout::Stereo, 2048, 0).unwrap();
+        let caf_bytes = encode_audio_caf(&buf).unwrap();
+        assert!(!caf_bytes.is_empty());
+        assert_eq!(&caf_bytes[0..4], b"caff");
+
+        let decoded = decode_audio(&caf_bytes).unwrap();
+        assert_eq!(decoded.sample_rate, 48000);
+        assert_eq!(decoded.channel_count(), 2);
+    }
+
+    #[test]
+    fn test_opus_encode_and_decode() {
+        let buf = AudioSampleBuffer::new_silent(48000, ChannelLayout::Stereo, 2880, 0).unwrap();
+        let meta = encodercraft_core::XmpMetadata { title: Some("Opus Track".into()), creator: Some("Opus Artist".into()), ..Default::default() };
+        let opus_bytes = encode_audio_opus(&buf, 128, Some(&meta)).unwrap();
+        assert!(!opus_bytes.is_empty());
+        assert_eq!(&opus_bytes[0..4], b"OggS");
+        assert!(opus_bytes.windows(8).any(|w| w == b"OpusHead"));
+        assert!(opus_bytes.windows(8).any(|w| w == b"OpusTags"));
     }
 }

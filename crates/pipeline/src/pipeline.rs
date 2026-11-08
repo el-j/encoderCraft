@@ -356,6 +356,8 @@ impl TranscodePipeline {
             ContainerType::Aiff => self.execute_audio_aiff(target, start_time)?,
             ContainerType::Mp3 => self.execute_audio_mp3(target, start_time)?,
             ContainerType::OggAudio => self.execute_audio_ogg(target, start_time)?,
+            ContainerType::Caf => self.execute_audio_caf(target, start_time)?,
+            ContainerType::Opus => self.execute_audio_opus(target, start_time)?,
             ContainerType::IsoBmffMp4 => self.execute_video_mp4(target, false, start_time)?,
             ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time)?,
             ContainerType::MxfOp1a => self.execute_video_mxf(target, false, start_time)?,
@@ -504,6 +506,38 @@ impl TranscodePipeline {
 
         let ogg_bytes = encodercraft_audio_dsp::encode_audio_ogg_vorbis(&sample_buf, 0.7)?;
         std::fs::write(&target.output_path, ogg_bytes).map_err(|e| EncoderError::Io(format!("failed to write Ogg Vorbis file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
+    }
+
+    fn execute_audio_caf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let caf_bytes = encodercraft_audio_dsp::encode_audio_caf(&sample_buf)?;
+        std::fs::write(&target.output_path, caf_bytes).map_err(|e| EncoderError::Io(format!("failed to write CAF file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
+    }
+
+    fn execute_audio_opus(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let bitrate_kbps = target.audio.as_ref().and_then(|a| a.bitrate_kbps).unwrap_or(128);
+
+        let opus_bytes = encodercraft_audio_dsp::encode_audio_opus(&sample_buf, bitrate_kbps, target.metadata.as_ref())?;
+        std::fs::write(&target.output_path, opus_bytes).map_err(|e| EncoderError::Io(format!("failed to write Opus file: {e}")))?;
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);

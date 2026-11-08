@@ -20,6 +20,7 @@ miniz_oxide = { workspace = true }
 thiserror = { workspace = true }
 audio2mp3-core = "0.2.0"
 oxideav-vorbis = "0.0.13"
+effectcraft-opusenc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
