@@ -317,7 +317,7 @@ Tracked under Milestone [M40 - Advanced Broadcast, Color & Delivery Paradigms (N
 
 - [x] **M40.1: 3D Look-Up Table (LUT) Transcoding & Baking Engine (#189)** – Bidirectional 1D/3D LUT conversion (.cube, .3dl, .look), tetrahedral interpolation, and direct transcode color baking.
 - [x] **M40.2: Universal Subtitle & Closed Caption Transcoding Matrix (#190)** – Bidirectional matrix across SRT, WebVTT, SCC, SMPTE-TT/IMSC1, and ASS/SSA with framerate retiming.
-- [ ] **M40.3: Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) (#191)** – 188-byte MPEG-TS transport stream packetizer and stereoscopic MV-HEVC signaling in ISO BMFF.
+- [x] **M40.3: Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) (#191)** – 188-byte MPEG-TS transport stream packetizer and stereoscopic MV-HEVC signaling in ISO BMFF.
 
 ## Milestone 41: Production Workflow, UI/UX Polish & Adobe Media Encoder Parity Fixes
 

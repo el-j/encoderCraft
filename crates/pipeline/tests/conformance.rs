@@ -52,6 +52,7 @@ fn write_av_source(path: &Path) {
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
             codec_private: encoder.config_record(),
+            spatial: None,
         })
         .unwrap();
     for i in 0..FRAMES {

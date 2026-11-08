@@ -50,6 +50,7 @@ pub fn codecs_for_container(container: ContainerType) -> &'static [VideoCodecKin
         ContainerType::QuickTimeMov => &[H264, Hevc, ProRes, DnxHd],
         ContainerType::WebM => &[Vp9, Av1],
         ContainerType::MxfOp1a | ContainerType::MxfOpAtom => &[DnxHd, ProRes, H264],
+        ContainerType::MpegTs => &[H264, Hevc],
         ContainerType::AnimatedGif => &[Gif],
         _ => &[],
     }
@@ -69,6 +70,7 @@ pub fn render_container_matrix_markdown() -> String {
         ("WebM", ContainerType::WebM),
         ("MXF OP1a", ContainerType::MxfOp1a),
         ("MXF OP-Atom", ContainerType::MxfOpAtom),
+        ("MPEG-TS", ContainerType::MpegTs),
         ("GIF", ContainerType::AnimatedGif),
     ];
     let codecs = [
@@ -153,7 +155,7 @@ mod tests {
         assert!(!container_accepts(ContainerType::IsoBmffMp4, VideoCodecKind::ProRes));
         assert!(!container_accepts(ContainerType::WebM, VideoCodecKind::H264));
         assert!(codecs_for_container(ContainerType::Wave).is_empty());
-        assert_eq!(render_container_matrix_markdown().lines().count(), 9);
+        assert_eq!(render_container_matrix_markdown().lines().count(), 10);
     }
 
     #[test]

@@ -50,6 +50,7 @@ fn write_source(path: &Path) {
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
             codec_private: encoder.config_record(),
+            spatial: None,
         })
         .unwrap();
     let mut packets = Vec::new();
@@ -170,6 +171,7 @@ fn every_video_preset_encodes_and_decodes() {
             ContainerType::MatroskaMkv => "mkv",
             ContainerType::WebM => "webm",
             ContainerType::MxfOp1a | ContainerType::MxfOpAtom => "mxf",
+            ContainerType::MpegTs => "ts",
             other => panic!("unexpected video container {other:?} in preset {}", preset.name),
         };
         let out = dir.path().join(format!("preset_{checked}.{ext}"));
@@ -178,6 +180,14 @@ fn every_video_preset_encodes_and_decodes() {
         assert!(target.video.codec.is_some(), "{}: preset settings were not applied", preset.name);
         target.target_bitrate_kbps = target.target_bitrate_kbps.map(|b| b.min(4_000));
         run(job(&source, target)).unwrap_or_else(|e| panic!("{}: encode failed: {e}", preset.name));
+        if matches!(preset.container, ContainerType::MpegTs) {
+            let bytes = std::fs::read(&out).unwrap();
+            assert!(!bytes.is_empty(), "MPEG-TS output must not be empty");
+            assert_eq!(bytes.len() % 188, 0, "MPEG-TS output must be divisible by 188-byte packets");
+            assert_eq!(bytes[0], 0x47, "First byte must be TS sync 0x47");
+            checked += 1;
+            continue;
+        }
         assert_matches_source(&preset.name, &source, &out);
         checked += 1;
     }
@@ -601,4 +611,36 @@ fn publications_and_lottie_and_metafile_pipeline_transcode() {
 
     let lottie_data = std::fs::read_to_string(&lottie_path).unwrap();
     assert!(lottie_data.contains("\"v\": \"5.7.0\""));
+}
+
+#[test]
+fn broadcast_mpeg_ts_and_apple_spatial_video_pipeline_transcode() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_mp4 = dir.path().join("source.mp4");
+    write_source(&src_mp4);
+
+    // 1. MPEG-TS Broadcast transcode
+    let ts_path = dir.path().join("broadcast.ts");
+    let ts_target = small_target(&ts_path, ContainerType::MpegTs, "CableLabs Broadcast MPEG-TS");
+    run(job(&src_mp4, ts_target)).unwrap();
+
+    let ts_data = std::fs::read(&ts_path).unwrap();
+    assert!(!ts_data.is_empty());
+    assert_eq!(ts_data.len() % 188, 0, "MPEG-TS file size must be multiple of 188");
+    for (idx, chunk) in ts_data.as_chunks::<188>().0.iter().enumerate() {
+        assert_eq!(chunk[0], 0x47, "TS packet {idx} missing 0x47 sync byte");
+    }
+    // Check PAT packet (PID 0x0000 with PUSI = 1 => 0x47 0x40 0x00)
+    assert!(ts_data.windows(3).any(|w| w == [0x47, 0x40, 0x00]), "Missing PAT packet in MPEG-TS");
+
+    // 2. Apple Spatial Video (MV-HEVC)
+    let spatial_path = dir.path().join("spatial.mov");
+    let spatial_target = small_target(&spatial_path, ContainerType::QuickTimeMov, "Apple Spatial Video (MV-HEVC)");
+    run(job(&src_mp4, spatial_target)).unwrap();
+
+    let spatial_data = std::fs::read(&spatial_path).unwrap();
+    assert!(!spatial_data.is_empty());
+    assert!(spatial_data.windows(4).any(|w| w == b"svhd"), "Missing svhd spatial header box");
+    assert!(spatial_data.windows(4).any(|w| w == b"st3d"), "Missing st3d stereoscopic 3D box");
+    assert!(spatial_data.windows(4).any(|w| w == b"lhvC"), "Missing lhvC layered HEVC config box");
 }

@@ -364,6 +364,7 @@ impl TranscodePipeline {
             ContainerType::MxfOpAtom => self.execute_video_mxf(target, true, start_time)?,
             ContainerType::MatroskaMkv => self.execute_video_mkv(target, false, start_time)?,
             ContainerType::WebM => self.execute_video_mkv(target, true, start_time)?,
+            ContainerType::MpegTs => self.execute_video_ts(target, start_time)?,
             ContainerType::AnimatedGif => {
                 let is_still = match &self.spec.source {
                     SourceDescriptor::File { path, .. } => {
@@ -1489,6 +1490,8 @@ impl TranscodePipeline {
             .open(staged.path())
             .map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
         let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
+        let is_spatial = lower_preset.contains("spatial") || lower_preset.contains("mv-hevc");
+        let spatial_config = if is_spatial { Some(encodercraft_muxers::SpatialVideoConfig::default()) } else { None };
         let v_cfg = VideoStreamConfig {
             codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
@@ -1497,6 +1500,7 @@ impl TranscodePipeline {
             color_space: ColorTransform::target_tag(target.video.color),
             bit_depth: pixel_format.bits_per_component(),
             codec_private: encoder.config_record(),
+            spatial: spatial_config,
         };
         let v_track_idx = mp4_muxer.add_video_stream(&v_cfg)?;
 
@@ -1580,6 +1584,101 @@ impl TranscodePipeline {
             encodercraft_muxers::append_xmp_uuid_box(&mut file, &xmp_packet)?;
         }
 
+        // Append Apple Spatial Video (MV-HEVC) 3D stereoscopic metadata boxes if requested
+        if let Some(ref spatial) = spatial_config {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(staged.path())
+                .map_err(|e| EncoderError::Io(format!("failed to open MP4 for spatial metadata embedding: {e}")))?;
+            encodercraft_muxers::append_spatial_video_boxes(&mut file, spatial, &encoder.config_record())?;
+        }
+
+        staged.commit()
+    }
+
+    fn execute_video_ts(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let input = VideoInput::open(&self.spec.source, target)?;
+        let dims = input.dims();
+        let fps = input.fps();
+        let frame_ticks = u32::try_from(fps.den).map_err(|_| EncoderError::InvalidJobSpec("frame rate denominator is too large".into()))?;
+
+        let codec_kind = VideoCodecKind::H264;
+        let pixel_format = target_pixel_format(target)?;
+        let mut encoder = create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &encode_params(target))?;
+
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(staged.path())
+            .map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
+
+        let mut ts_muxer = encodercraft_muxers::TsMuxer::new(out_file)?;
+        let v_cfg = VideoStreamConfig {
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
+            dimensions: dims,
+            frame_rate: fps,
+            pixel_format,
+            color_space: ColorTransform::target_tag(target.video.color),
+            bit_depth: pixel_format.bits_per_component(),
+            codec_private: encoder.config_record(),
+            spatial: None,
+        };
+        let v_track_idx = ts_muxer.add_video_stream(&v_cfg)?;
+
+        let audio = match input.audio_feed(target, &self.limits)? {
+            Some(feed) => {
+                let channels = u8::try_from(feed.layout().channel_count())
+                    .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the AAC encoder limit".into()))?;
+                let aac_enc = AacEncoderWrapper::new(feed.rate(), channels, aac_bitrate_bps(target)?)?;
+                let a_cfg = AudioStreamConfig {
+                    codec_fourcc: *b"mp4a",
+                    sample_rate: feed.rate(),
+                    layout: feed.layout(),
+                    bits_per_sample: 16,
+                    codec_private: aac_enc.audio_specific_config(),
+                };
+                let track = ts_muxer.add_audio_stream(&a_cfg)?;
+                Some((feed, aac_enc, track))
+            }
+            None => None,
+        };
+
+        self.progress.set_total_frames(input.len());
+        let processor = self.frame_processor(target, fps)?;
+        self.stream_video(&input, &processor, start_time, |index, frame| {
+            frame.pts = i64::try_from(index).unwrap_or(i64::MAX).saturating_mul(fps.den);
+            for pkt in encoder.encode_frame(frame)? {
+                let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_ticks, is_keyframe: pkt.is_keyframe };
+                ts_muxer.write_video_sample(v_track_idx, sample)?;
+            }
+            Ok(())
+        })?;
+
+        for pkt in encoder.flush()? {
+            let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_ticks, is_keyframe: pkt.is_keyframe };
+            ts_muxer.write_video_sample(v_track_idx, sample)?;
+        }
+
+        if let Some((mut feed, mut aac_enc, a_track_idx)) = audio {
+            let mut next_pts = 0i64;
+            while let Some(window) = feed.next_window()? {
+                self.progress.checkpoint()?;
+                let packets = aac_enc.encode_buffer(&window)?;
+                for pkt in &packets {
+                    ts_muxer.write_audio_sample(a_track_idx, AudioSample { data: pkt, pts: next_pts, duration_ticks: 1024 })?;
+                    next_pts += 1024;
+                }
+            }
+            for pkt in aac_enc.flush()? {
+                ts_muxer.write_audio_sample(a_track_idx, AudioSample { data: &pkt, pts: next_pts, duration_ticks: 1024 })?;
+                next_pts += 1024;
+            }
+        }
+
+        let _ = ts_muxer.finish()?;
         staged.commit()
     }
 
@@ -1615,6 +1714,7 @@ impl TranscodePipeline {
             color_space: ColorTransform::target_tag(target.video.color),
             bit_depth,
             codec_private: encoder.config_record(),
+            spatial: None,
         };
 
         let mut audio = input.audio_feed(target, &self.limits)?;
@@ -1711,6 +1811,7 @@ impl TranscodePipeline {
             color_space: ColorTransform::target_tag(target.video.color),
             bit_depth: pixel_format.bits_per_component(),
             codec_private: encoder.config_record(),
+            spatial: None,
         };
 
         let mut builder = MkvMuxerBuilder::new(writer, is_webm);

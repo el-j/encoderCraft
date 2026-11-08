@@ -40,6 +40,7 @@ fn write_source(path: &Path, frames: u64, with_audio: bool) {
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
             codec_private: encoder.config_record(),
+            spatial: None,
         })
         .unwrap();
     for index in 0..frames {
