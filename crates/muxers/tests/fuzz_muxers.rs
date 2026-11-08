@@ -57,6 +57,7 @@ proptest! {
                 color_space: ColorSpaceTag::REC709,
                 bit_depth: 8,
                 codec_private: vec![0, 0, 0, 1],
+                spatial: None,
             };
 
             if let Ok(track) = muxer.add_video_stream(&cfg) {
@@ -89,6 +90,7 @@ proptest! {
                 color_space: ColorSpaceTag::REC709,
                 bit_depth: 8,
                 codec_private: vec![],
+                spatial: None,
             };
             let track = builder.add_video_stream(&cfg);
             if let Ok(mut muxer) = builder.build() {

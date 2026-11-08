@@ -170,6 +170,40 @@ pub fn append_xmp_uuid_box<W: Write>(w: &mut W, xmp_xml: &str) -> Result<(), Enc
     Ok(())
 }
 
+/// Appends Apple Spatial Video (MV-HEVC) 3D stereoscopic metadata boxes:
+/// `svhd` (Spatial Video Header), `st3d` (Stereo 3D), and `lhvC` (Layered HEVC Configuration).
+pub fn append_spatial_video_boxes<W: Write>(w: &mut W, config: &crate::muxer::SpatialVideoConfig, hevc_private: &[u8]) -> Result<(), EncoderError> {
+    // 1. svhd (Spatial Video Header Box) - 24 bytes total
+    let svhd_len = 24u32;
+    w.write_all(&svhd_len.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write svhd box length: {e}")))?;
+    w.write_all(b"svhd").map_err(|e| EncoderError::Io(format!("failed to write svhd box type: {e}")))?;
+    w.write_all(&0u32.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write svhd version/flags: {e}")))?;
+    w.write_all(&config.baseline_micrometers.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write baseline: {e}")))?;
+    w.write_all(&config.hfov_millidegrees.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write hfov: {e}")))?;
+    w.write_all(&config.disparity_adjustment.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write disparity: {e}")))?;
+
+    // 2. st3d (Stereo 3D Box) - 13 bytes total
+    let st3d_len = 13u32;
+    w.write_all(&st3d_len.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write st3d box length: {e}")))?;
+    w.write_all(b"st3d").map_err(|e| EncoderError::Io(format!("failed to write st3d box type: {e}")))?;
+    w.write_all(&0u32.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write st3d version/flags: {e}")))?;
+    let stereo_mode = if config.is_multiview { 3u8 } else { 0u8 };
+    w.write_all(&[stereo_mode]).map_err(|e| EncoderError::Io(format!("failed to write st3d stereo mode: {e}")))?;
+
+    // 3. lhvC (Layered HEVC Configuration Box)
+    let lhvc_payload = if !hevc_private.is_empty() {
+        hevc_private
+    } else {
+        &[0x01, 0x01, 0x60, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0xF0, 0x00, 0xFC, 0xFD, 0xF8, 0xF8, 0x00, 0x00, 0x0F, 0x03]
+    };
+    let lhvc_len = (8 + lhvc_payload.len()) as u32;
+    w.write_all(&lhvc_len.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write lhvC box length: {e}")))?;
+    w.write_all(b"lhvC").map_err(|e| EncoderError::Io(format!("failed to write lhvC box type: {e}")))?;
+    w.write_all(lhvc_payload).map_err(|e| EncoderError::Io(format!("failed to write lhvC payload: {e}")))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +226,7 @@ mod tests {
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
             codec_private: avcc,
+            spatial: None,
         };
         let v_track = muxer.add_video_stream(&v_cfg).unwrap();
         assert_eq!(v_track, 0);
@@ -206,5 +241,30 @@ mod tests {
         assert!(bytes.len() > 32);
         // First 4 bytes length, then ftyp
         assert_eq!(&bytes[4..8], b"ftyp");
+    }
+
+    #[test]
+    fn test_apple_spatial_video_mv_hevc_boxes() {
+        let mut cursor = Cursor::new(Vec::new());
+        let spatial_cfg =
+            crate::muxer::SpatialVideoConfig { baseline_micrometers: 64_000, hfov_millidegrees: 65_000, disparity_adjustment: 0, is_multiview: true };
+        append_spatial_video_boxes(&mut cursor, &spatial_cfg, &[0xAA, 0xBB, 0xCC, 0xDD]).unwrap();
+        let bytes = cursor.into_inner();
+
+        // 1. svhd box
+        assert_eq!(&bytes[0..4], &24u32.to_be_bytes());
+        assert_eq!(&bytes[4..8], b"svhd");
+        assert_eq!(&bytes[12..16], &64_000u32.to_be_bytes()); // baseline
+        assert_eq!(&bytes[16..20], &65_000u32.to_be_bytes()); // hfov
+
+        // 2. st3d box
+        assert_eq!(&bytes[24..28], &13u32.to_be_bytes());
+        assert_eq!(&bytes[28..32], b"st3d");
+        assert_eq!(bytes[36], 3u8); // stereo_mode = 3 (multiview)
+
+        // 3. lhvC box
+        assert_eq!(&bytes[37..41], &12u32.to_be_bytes()); // 8 + 4
+        assert_eq!(&bytes[41..45], b"lhvC");
+        assert_eq!(&bytes[45..49], &[0xAA, 0xBB, 0xCC, 0xDD]);
     }
 }

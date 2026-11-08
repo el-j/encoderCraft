@@ -243,6 +243,7 @@ pub enum ContainerType {
     QuickTimeMov,
     MatroskaMkv,
     WebM,
+    MpegTs,
     MxfOp1a,
     MxfOpAtom,
     Wave,
@@ -315,6 +316,7 @@ impl ContainerType {
         Self::QuickTimeMov,
         Self::MatroskaMkv,
         Self::WebM,
+        Self::MpegTs,
         Self::MxfOp1a,
         Self::MxfOpAtom,
         Self::Wave,
@@ -384,6 +386,7 @@ impl ContainerType {
             Self::QuickTimeMov => "mov",
             Self::MatroskaMkv => "mkv",
             Self::WebM => "webm",
+            Self::MpegTs => "ts",
             Self::MxfOp1a | Self::MxfOpAtom => "mxf",
             Self::Wave => "wav",
             Self::Aiff => "aif",
@@ -451,6 +454,7 @@ impl ContainerType {
         let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
         let alias = match ext.as_str() {
             "m4v" => Some(Self::IsoBmffMp4),
+            "ts" | "m2ts" | "mts" => Some(Self::MpegTs),
             "aiff" => Some(Self::Aiff),
             "jpeg" => Some(Self::Jpeg),
             "tiff" => Some(Self::Tiff),
@@ -496,6 +500,7 @@ impl ContainerType {
             Self::QuickTimeMov => "QuickTime Movie (MOV)",
             Self::MatroskaMkv => "Matroska Video (MKV)",
             Self::WebM => "WebM",
+            Self::MpegTs => "MPEG Transport Stream (TS)",
             Self::MxfOp1a => "MXF OP1a Broadcast",
             Self::MxfOpAtom => "MXF OP-Atom",
             Self::Wave => "Waveform Audio (WAV / BWF)",
@@ -562,9 +567,14 @@ impl ContainerType {
     /// Primary media domain for this container.
     pub fn media_kind(&self) -> MediaStreamKind {
         match self {
-            Self::IsoBmffMp4 | Self::QuickTimeMov | Self::MatroskaMkv | Self::WebM | Self::MxfOp1a | Self::MxfOpAtom | Self::AnimatedGif => {
-                MediaStreamKind::VideoWithAudio
-            }
+            Self::IsoBmffMp4
+            | Self::QuickTimeMov
+            | Self::MatroskaMkv
+            | Self::WebM
+            | Self::MpegTs
+            | Self::MxfOp1a
+            | Self::MxfOpAtom
+            | Self::AnimatedGif => MediaStreamKind::VideoWithAudio,
             Self::Wave
             | Self::Aiff
             | Self::Flac
@@ -617,6 +627,7 @@ impl ContainerType {
                 Self::QuickTimeMov,
                 Self::WebM,
                 Self::MatroskaMkv,
+                Self::MpegTs,
                 Self::MxfOp1a,
                 Self::MxfOpAtom,
                 Self::AnimatedGif,

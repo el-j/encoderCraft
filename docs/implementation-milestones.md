@@ -758,7 +758,7 @@ flowchart LR
 2. [x] **Universal Subtitle & Closed Caption Transcoding Matrix ([#190](https://github.com/el-j/encoderCraft/issues/190)):**
    - Implement bidirectional subtitle transcoding matrix across SubRip (`.srt`), WebVTT (`.vtt`), Scenarist (`.scc`), SMPTE-TT / IMSC1 (`.ttml`), and SubStation Alpha (`.ass` / `.ssa`).
    - Support framerate retiming, timecode shifting, and sidecar / burn-in export.
-3. [ ] **Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) ([#191](https://github.com/el-j/encoderCraft/issues/191)):**
+3. [x] **Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) ([#191](https://github.com/el-j/encoderCraft/issues/191)):**
    - Clean-room 188-byte MPEG-TS transport stream packetizer (`.ts` / `.m2ts`) with PAT/PMT and PCR timestamp alignment.
    - Apple Spatial Video stereoscopic Multi-View HEVC (MV-HEVC) metadata signaling in ISO BMFF containers.
 

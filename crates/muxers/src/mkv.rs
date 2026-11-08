@@ -186,6 +186,7 @@ mod tests {
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
             codec_private: vec![],
+            spatial: None,
         };
         let track_idx = builder.add_video_stream(&v_cfg);
         assert_eq!(track_idx, 0);

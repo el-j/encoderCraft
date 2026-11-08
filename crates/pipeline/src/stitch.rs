@@ -141,6 +141,7 @@ impl ClipStitcher {
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
             codec_private: encoder.config_record(),
+            spatial: None,
         };
 
         let track_idx = mp4_muxer.add_video_stream(&v_cfg)?;
