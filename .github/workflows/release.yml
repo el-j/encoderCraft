@@ -28,6 +28,8 @@ jobs:
       version: ${{ inputs.version }}
       has-web: false
       craft-fonts-ref: aced4137c022f1f587624d48e81ec77e1914a9cc
+      # iceoryx2 0.10.0 does not compile for FreeBSD aarch64 (signedness of c_char).
+      freebsd-architectures: '["x86_64"]'
     secrets:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

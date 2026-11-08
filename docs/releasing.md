@@ -40,11 +40,12 @@ User-facing names say **EncoderCraft**. Files, binaries and ids stay lowercase
 Pushing to `release` again before publishing rebuilds the same draft. Once published, bump the
 version before releasing again.
 
-**Test runs:** *Actions > Release > Run workflow* with an optional `version` override. On any
-branch other than `release` it is a dry run: the signing jobs are refused by the `release`
-environment and no draft is created. Download unsigned workflow artifacts and either run the
-matching smoke scripts locally or dispatch `release-smoke` with the Release run ID and version.
-The workflow downloads that run's unsigned artifacts without requiring a draft.
+**Test runs:** *Actions > Release > Run workflow* with an optional `version` override. Jobs
+using the `release` environment run only from branches allowed by its deployment rules.
+An allowed non-`release` branch builds unsigned and, if all required jobs succeed, creates
+or updates a draft release; it is not a dry run. The workflow refuses to update an already
+published release. To test without publishing, run the matching smoke scripts locally or
+dispatch `release-smoke` with the Release run ID and version.
 
 ## What gets built
 
@@ -55,6 +56,10 @@ The workflow downloads that run's unsigned artifacts without requiring a draft.
 | Linux x86_64, aarch64 | `.AppImage`, `.deb`, `.rpm`, `.tar.gz`, `.flatpak`, Arch package |
 | Linux riscv64 | `.tar.gz` |
 | FreeBSD x86_64 | `.tar.gz` |
+
+FreeBSD aarch64 is temporarily excluded: the `iceoryx2` 0.10.0 dependency fails to
+compile for that target because its FreeBSD implementation assumes a signed `c_char`.
+Restore the target once an upstream fix is available and the release build passes.
 
 ## One-time GitHub setup
 
@@ -77,11 +82,12 @@ regenerate the derived formats with `packaging/icons.sh`.
 ## Unsigned alpha releases
 
 Signing secrets are required on the `release` branch. To ship an unsigned pre-release without
-forking the shared workflow, run *Actions > Release > Run workflow* from a non-`release` branch
-with a `version` override: it builds every artifact unsigned and creates no draft. Download the
-artifacts from the run, run the matching archive or installer smoke scripts in
-`packaging/smoke/`, and attach them to a pre-release created by hand. Proposing an `allow-unsigned` input to
-`storytold/craft-common-actions` would remove the manual step.
+forking the shared workflow, create a dedicated branch at the intended `main` commit and
+temporarily allow that exact branch in the `release` environment's deployment rules. Dispatch
+*Actions > Release > Run workflow* from that branch. The workflow builds unsigned artifacts and
+creates a draft when all required jobs succeed. Remove the temporary environment rule after the
+run, smoke-test the draft, and explicitly disclose the absence of signatures before publishing.
+Unsigned macOS and Windows downloads may trigger operating-system security warnings.
 
 ## Release notes: known issues
 
