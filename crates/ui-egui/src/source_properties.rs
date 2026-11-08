@@ -196,7 +196,7 @@ fn render_dialog_contents(ui: &mut Ui, state: &mut SourcePropertiesState, tokens
         ui.add_space(8.0);
     }
 
-    egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("source_properties_essence_scroll_area").max_height(400.0).show(ui, |ui| {
         // --- 1. File Essence Group ---
         egui::CollapsingHeader::new(RichText::new("File & Container Essence").strong()).default_open(true).show(ui, |ui| {
             egui::Grid::new("file_essence_grid").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {

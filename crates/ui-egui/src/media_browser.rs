@@ -59,6 +59,8 @@ pub struct MediaBrowserState {
     pub view: BrowserView,
     pub thumb_size: f32,
     pub selected: Option<PathBuf>,
+    pub selected_paths: std::collections::HashSet<PathBuf>,
+    pub last_clicked_index: Option<usize>,
     pub inspect_properties: Option<PathBuf>,
     pub tree_state: MediaBrowserTreeState,
     locations: Vec<(String, PathBuf)>,
@@ -84,6 +86,8 @@ impl MediaBrowserState {
             view: BrowserView::List,
             thumb_size: 96.0,
             selected: None,
+            selected_paths: std::collections::HashSet::new(),
+            last_clicked_index: None,
             inspect_properties: None,
             tree_state: MediaBrowserTreeState::default(),
             locations,
@@ -97,6 +101,50 @@ impl MediaBrowserState {
         self.model.navigate(path);
         self.path_input = self.model.location().display().to_string();
         self.selected = None;
+        self.selected_paths.clear();
+        self.last_clicked_index = None;
+    }
+
+    pub fn select_single(&mut self, path: PathBuf, index: usize) {
+        self.selected_paths.clear();
+        self.selected_paths.insert(path.clone());
+        self.selected = Some(path);
+        self.last_clicked_index = Some(index);
+    }
+
+    pub fn toggle_select(&mut self, path: PathBuf, index: usize) {
+        if self.selected_paths.contains(&path) {
+            self.selected_paths.remove(&path);
+            if self.selected.as_ref() == Some(&path) {
+                self.selected = self.selected_paths.iter().next().cloned();
+            }
+        } else {
+            self.selected_paths.insert(path.clone());
+            self.selected = Some(path);
+        }
+        self.last_clicked_index = Some(index);
+    }
+
+    pub fn range_select(&mut self, entries: &[Entry], target_index: usize) {
+        let start = self.last_clicked_index.unwrap_or(0).min(target_index);
+        let end = self.last_clicked_index.unwrap_or(0).max(target_index);
+        for i in start..=end {
+            if let Some(e) = entries.get(i) {
+                self.selected_paths.insert(e.path.clone());
+            }
+        }
+        if let Some(e) = entries.get(target_index) {
+            self.selected = Some(e.path.clone());
+        }
+        self.last_clicked_index = Some(target_index);
+    }
+
+    pub fn select_all(&mut self, entries: &[Entry]) {
+        self.selected_paths.clear();
+        for e in entries {
+            self.selected_paths.insert(e.path.clone());
+        }
+        self.selected = self.selected_paths.iter().next().cloned();
     }
 
     /// Advances thumbnail decoding. Returns true while work is outstanding.
@@ -399,6 +447,8 @@ pub fn render_media_browser(
     ui.horizontal(|ui| {
         let count_text = if entries.is_empty() {
             "0 items".to_string()
+        } else if !state.selected_paths.is_empty() {
+            format!("{} item{} ({} selected)", entries.len(), if entries.len() == 1 { "" } else { "s" }, state.selected_paths.len())
         } else if state.selected.is_some() {
             format!("{} item{} (1 selected)", entries.len(), if entries.len() == 1 { "" } else { "s" })
         } else {
@@ -439,13 +489,22 @@ fn entry_menu(
 ) {
     for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::MediaItem) {
         let enabled = match info.command {
-            crate::commands::AppCommand::AddMediaItem | crate::commands::AppCommand::SourceProperties => e.kind.is_media(),
+            crate::commands::AppCommand::AddMediaItem => true,
+            crate::commands::AppCommand::SourceProperties => e.kind.is_media(),
             crate::commands::AppCommand::OpenMediaFolder | crate::commands::AppCommand::ToggleMediaFavorite => e.kind == EntryKind::Folder,
             _ => false,
         };
         if ui.add_enabled(enabled, egui::Button::new(info.context_label(crate::commands::CommandContextMenu::MediaItem))).clicked() {
             match info.command {
-                crate::commands::AppCommand::AddMediaItem => to_add.push(e.path.clone()),
+                crate::commands::AppCommand::AddMediaItem => {
+                    if state.selected_paths.is_empty() || !state.selected_paths.contains(&e.path) {
+                        to_add.push(e.path.clone());
+                    } else {
+                        for p in &state.selected_paths {
+                            to_add.push(p.clone());
+                        }
+                    }
+                }
                 crate::commands::AppCommand::SourceProperties => state.inspect_properties = Some(e.path.clone()),
                 crate::commands::AppCommand::OpenMediaFolder => {
                     match commands.dispatch(queue_mgr, "media.open_folder", serde_json::json!({ "path": e.path.clone() })) {
@@ -538,11 +597,16 @@ fn list_view(
         }
     });
 
+    // Cmd/Ctrl+A shortcut to select all files
+    if ui.input(|i| (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::A)) {
+        state.select_all(entries);
+    }
+
     let row_h = 20.0;
     egui::ScrollArea::vertical().id_salt("media_browser_list_scroll").auto_shrink([false, false]).show_rows(ui, row_h, entries.len(), |ui, range| {
-        for e in entries.iter().skip(range.start).take(range.len()) {
+        for (idx, e) in entries.iter().enumerate().skip(range.start).take(range.len()) {
             ui.push_id(&e.path, |ui| {
-                let selected = state.selected.as_ref() == Some(&e.path);
+                let selected = state.selected_paths.contains(&e.path) || state.selected.as_ref() == Some(&e.path);
                 let row_start_y = ui.cursor().min.y;
 
                 ui.horizontal(|ui| {
@@ -571,10 +635,27 @@ fn list_view(
                     ui.add_sized([cols.date, 18.0], egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
 
                     if resp.clicked() {
-                        state.selected = Some(e.path.clone());
+                        let cmd_held = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                        let shift_held = ui.input(|i| i.modifiers.shift);
+                        if shift_held {
+                            state.range_select(entries, idx);
+                        } else if cmd_held {
+                            state.toggle_select(e.path.clone(), idx);
+                        } else {
+                            state.select_single(e.path.clone(), idx);
+                        }
                     }
                     if resp.double_clicked() {
-                        activate(state, e, to_add);
+                        if state.selected_paths.len() > 1 && state.selected_paths.contains(&e.path) {
+                            let selected: Vec<_> = state.selected_paths.iter().cloned().collect();
+                            for p in &selected {
+                                if let Some(entry) = entries.iter().find(|it| &it.path == p) {
+                                    activate(state, entry, to_add);
+                                }
+                            }
+                        } else {
+                            activate(state, e, to_add);
+                        }
                     }
                     resp.context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
                 });
@@ -582,11 +663,17 @@ fn list_view(
         }
     });
 
-    if ui.input(|i| i.key_pressed(egui::Key::Enter))
-        && !ui.ctx().egui_wants_keyboard_input()
-        && let Some(sel) = entries.iter().find(|e| state.selected.as_ref() == Some(&e.path))
-    {
-        activate(state, sel, to_add);
+    if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !ui.ctx().egui_wants_keyboard_input() {
+        if state.selected_paths.len() > 1 {
+            let selected: Vec<_> = state.selected_paths.iter().cloned().collect();
+            for p in &selected {
+                if let Some(entry) = entries.iter().find(|it| &it.path == p) {
+                    activate(state, entry, to_add);
+                }
+            }
+        } else if let Some(sel) = entries.iter().find(|e| state.selected.as_ref() == Some(&e.path)) {
+            activate(state, sel, to_add);
+        }
     }
 }
 
@@ -605,10 +692,11 @@ fn thumbnail_view(
     egui::ScrollArea::vertical().id_salt("media_browser_thumb_scroll").auto_shrink([false, false]).show_rows(ui, cell.y + 8.0, rows, |ui, range| {
         for row in range {
             ui.horizontal(|ui| {
-                for e in entries.iter().skip(row * cols).take(cols) {
+                for (col_idx, e) in entries.iter().skip(row * cols).take(cols).enumerate() {
+                    let entry_idx = row * cols + col_idx;
                     ui.push_id(&e.path, |ui| {
                         state.want_thumb(e);
-                        let selected = state.selected.as_ref() == Some(&e.path);
+                        let selected = state.selected_paths.contains(&e.path) || state.selected.as_ref() == Some(&e.path);
                         let (rect, resp) = ui.allocate_exact_size(cell, egui::Sense::click());
                         let painter = ui.painter_at(rect);
                         if selected {
@@ -646,10 +734,27 @@ fn thumbnail_view(
                             tokens.text_primary,
                         );
                         if resp.clicked() {
-                            state.selected = Some(e.path.clone());
+                            let cmd_held = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                            let shift_held = ui.input(|i| i.modifiers.shift);
+                            if shift_held {
+                                state.range_select(entries, entry_idx);
+                            } else if cmd_held {
+                                state.toggle_select(e.path.clone(), entry_idx);
+                            } else {
+                                state.select_single(e.path.clone(), entry_idx);
+                            }
                         }
                         if resp.double_clicked() {
-                            activate(state, e, to_add);
+                            if state.selected_paths.len() > 1 && state.selected_paths.contains(&e.path) {
+                                let selected: Vec<_> = state.selected_paths.iter().cloned().collect();
+                                for p in &selected {
+                                    if let Some(entry) = entries.iter().find(|it| &it.path == p) {
+                                        activate(state, entry, to_add);
+                                    }
+                                }
+                            } else {
+                                activate(state, e, to_add);
+                            }
                         }
                         resp.on_hover_text(&e.name).context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
                     });

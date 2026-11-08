@@ -1563,87 +1563,94 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
     fn body(&mut self, ui: &mut Ui, panel: &crate::workspace::PanelId) {
         use crate::workspace::PanelId;
 
-        egui::Frame::new().fill(self.app.tokens.bg_panel).inner_margin(self.app.tokens.panel_margin()).show(ui, |ui| match panel {
-            PanelId::MediaBrowser => {
-                for path in crate::media_browser::render_media_browser(
-                    ui,
-                    &mut self.app.media_state,
-                    &self.app.tokens,
-                    &self.app.engine_commands,
-                    &self.app.queue_mgr,
-                ) {
-                    self.app.pending_media_item = Some(path);
-                    self.app.run_command(crate::commands::AppCommand::AddMediaItem);
+        ui.push_id(*panel, |ui| {
+            egui::Frame::new().fill(self.app.tokens.bg_panel).inner_margin(self.app.tokens.panel_margin()).show(ui, |ui| match panel {
+                PanelId::MediaBrowser => {
+                    for path in crate::media_browser::render_media_browser(
+                        ui,
+                        &mut self.app.media_state,
+                        &self.app.tokens,
+                        &self.app.engine_commands,
+                        &self.app.queue_mgr,
+                    ) {
+                        self.app.pending_media_item = Some(path);
+                        self.app.run_command(crate::commands::AppCommand::AddMediaItem);
+                    }
+                    if let Some(path) = self.app.media_state.inspect_properties.take() {
+                        self.app.source_properties_state.open_for_file(path);
+                    }
                 }
-                if let Some(path) = self.app.media_state.inspect_properties.take() {
-                    self.app.source_properties_state.open_for_file(path);
-                }
-            }
 
-            PanelId::Presets => {
-                if let Some(command) = render_preset_browser(
-                    ui,
-                    &mut self.app.preset_state,
-                    &self.app.queue_mgr,
-                    &self.app.engine_commands,
-                    &self.app.queue_state.selected_ids_list(),
-                    &self.app.tokens,
-                ) {
-                    self.app.run_command(command);
+                PanelId::Presets => {
+                    if let Some(command) = render_preset_browser(
+                        ui,
+                        &mut self.app.preset_state,
+                        &self.app.queue_mgr,
+                        &self.app.engine_commands,
+                        &self.app.queue_state.selected_ids_list(),
+                        &self.app.tokens,
+                    ) {
+                        self.app.run_command(command);
+                    }
                 }
-            }
-            PanelId::Queue => {
-                let mut add_media = false;
-                render_queue_panel(
-                    ui,
-                    &mut self.app.queue_state,
-                    crate::queue_panel::QueuePanelContext {
-                        queue_mgr: &self.app.queue_mgr,
-                        commands: &self.app.engine_commands,
-                        tokens: &self.app.tokens,
-                        on_inspect_job: self.inspect_job,
-                        on_open_log: &mut self.app.log_state.is_open,
-                        auto_shutdown: &mut self.app.prefs_state.prefs.auto_shutdown,
-                        on_add_media: &mut add_media,
-                        selected_renderer: &mut self.app.prefs_state.prefs.selected_renderer,
-                        on_show_source_properties: &mut self.app.pending_source_properties,
-                    },
+                PanelId::Queue => {
+                    let mut add_media = false;
+                    let mut add_folder = false;
+                    render_queue_panel(
+                        ui,
+                        &mut self.app.queue_state,
+                        crate::queue_panel::QueuePanelContext {
+                            queue_mgr: &self.app.queue_mgr,
+                            commands: &self.app.engine_commands,
+                            tokens: &self.app.tokens,
+                            on_inspect_job: self.inspect_job,
+                            on_open_log: &mut self.app.log_state.is_open,
+                            auto_shutdown: &mut self.app.prefs_state.prefs.auto_shutdown,
+                            on_add_media: &mut add_media,
+                            on_add_folder: &mut add_folder,
+                            selected_renderer: &mut self.app.prefs_state.prefs.selected_renderer,
+                            on_show_source_properties: &mut self.app.pending_source_properties,
+                        },
+                    );
+                    if let Some(path) = self.app.pending_source_properties.take() {
+                        self.app.source_properties_state.open_for_file(path);
+                    }
+                    if add_media {
+                        self.app.pick_media();
+                    }
+                    if add_folder {
+                        self.app.pick_folder();
+                    }
+                }
+                PanelId::WatchFolders => {
+                    render_watch_panel(
+                        ui,
+                        &mut self.app.watch_state,
+                        &self.app.queue_mgr,
+                        &self.app.preset_registry,
+                        &self.app.engine_commands,
+                        &self.app.tokens,
+                    );
+                }
+                PanelId::Preview => self.app.preview_section(ui, self.selected_job.as_ref(), self.output_ready),
+                PanelId::Encoding => {
+                    if let Some(job_id) =
+                        crate::encoding_panel::render_encoding_panel(ui, &mut self.app.encoding_state, &self.app.queue_mgr, &self.app.tokens)
+                    {
+                        self.app.dispatch_engine_command("queue.stop", serde_json::json!({ "jobId": job_id }));
+                    }
+                }
+            });
+
+            if self.app.focused_panel == *panel {
+                ui.painter().rect_stroke(
+                    ui.max_rect().shrink(1.0),
+                    4.0,
+                    egui::Stroke::new(1.5, self.app.tokens.accent_primary),
+                    egui::StrokeKind::Inside,
                 );
-                if let Some(path) = self.app.pending_source_properties.take() {
-                    self.app.source_properties_state.open_for_file(path);
-                }
-                if add_media {
-                    self.app.pick_media();
-                }
-            }
-            PanelId::WatchFolders => {
-                render_watch_panel(
-                    ui,
-                    &mut self.app.watch_state,
-                    &self.app.queue_mgr,
-                    &self.app.preset_registry,
-                    &self.app.engine_commands,
-                    &self.app.tokens,
-                );
-            }
-            PanelId::Preview => self.app.preview_section(ui, self.selected_job.as_ref(), self.output_ready),
-            PanelId::Encoding => {
-                if let Some(job_id) =
-                    crate::encoding_panel::render_encoding_panel(ui, &mut self.app.encoding_state, &self.app.queue_mgr, &self.app.tokens)
-                {
-                    self.app.dispatch_engine_command("queue.stop", serde_json::json!({ "jobId": job_id }));
-                }
             }
         });
-
-        if self.app.focused_panel == *panel {
-            ui.painter().rect_stroke(
-                ui.max_rect().shrink(1.0),
-                4.0,
-                egui::Stroke::new(1.5, self.app.tokens.accent_primary),
-                egui::StrokeKind::Inside,
-            );
-        }
     }
 
     fn logical_label(&self, panel: &crate::workspace::PanelId) -> String {

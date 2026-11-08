@@ -147,119 +147,67 @@ pub fn render_preset_browser(
 
         let cols = PresetColumnWidths::compute(ui.available_width());
 
-        // --- 4. Hierarchical Tree Scroll Area ---
-        egui::ScrollArea::both().id_salt("preset_browser_scroll").auto_shrink([false; 2]).show(ui, |ui| {
-            render_preset_table_header(ui, state, tokens, cols);
-            ui.separator();
+        // Fixed Table Header (AME Parity: stays visible when scrolling presets)
+        render_preset_table_header(ui, state, tokens, cols);
+        ui.separator();
 
-            let is_searching = !state.search_query.trim().is_empty();
+        // --- 4. Hierarchical Tree Scroll Area strictly bounded to pane height ---
+        egui::ScrollArea::both().id_salt("preset_browser_scroll").max_height(ui.available_height().max(60.0)).auto_shrink([false, false]).show(
+            ui,
+            |ui| {
+                let is_searching = !state.search_query.trim().is_empty();
 
-            if is_searching {
-                // Flat search results list
-                let mut table = catalog::filter_rows(catalog::rows(&presets), &state.search_query, state.selected_category);
-                if let Some(col) = state.sort_column {
-                    catalog::sort_rows(&mut table, col, state.sort_descending);
-                }
-
-                if table.is_empty() {
-                    ui.add_space(16.0);
-                    ui.label(RichText::new("No matching presets found.").color(tokens.text_dim));
-                } else {
-                    for row in &table {
-                        let Some(preset) = presets.iter().find(|p| p.name == row.name) else { continue };
-                        let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 0.0 };
-                        if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
-                            chosen_command = Some(cmd);
-                        }
+                if is_searching {
+                    // Flat search results list
+                    let mut table = catalog::filter_rows(catalog::rows(&presets), &state.search_query, state.selected_category);
+                    if let Some(col) = state.sort_column {
+                        catalog::sort_rows(&mut table, col, state.sort_descending);
                     }
-                }
-            } else {
-                // Tree Group 1: User Presets & Groups
-                let user_group_name = "User Presets & Groups";
-                let is_user_expanded = state.expanded_groups.contains(user_group_name);
-                let user_presets: Vec<EncodingPreset> = presets.iter().filter(|p| p.category == PresetCategory::Custom).cloned().collect();
 
-                ui.horizontal(|ui| {
-                    let chevron = if is_user_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
-                    if icons::button(ui, chevron, 16.0, false, tokens, "Toggle User Presets").clicked() {
-                        if is_user_expanded {
-                            state.expanded_groups.remove(user_group_name);
-                        } else {
-                            state.expanded_groups.insert(user_group_name.to_string());
-                        }
-                    }
-                    icons::icon_label(ui, icons::Icon::Folder, 14.0, tokens.accent_primary);
-                    ui.label(RichText::new(format!("{user_group_name} ({})", user_presets.len())).strong());
-                });
-
-                if is_user_expanded {
-                    if user_presets.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.add_space(24.0);
-                            ui.label(RichText::new("(No user presets created yet. Click 'New' above to create one.)").small().color(tokens.text_dim));
-                        });
+                    if table.is_empty() {
+                        ui.add_space(16.0);
+                        ui.label(RichText::new("No matching presets found.").color(tokens.text_dim));
                     } else {
-                        let user_rows = catalog::rows(&user_presets);
-                        for row in &user_rows {
-                            let Some(preset) = user_presets.iter().find(|p| p.name == row.name) else { continue };
-                            let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 16.0 };
-                            ui.horizontal(|ui| {
-                                if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
-                                    chosen_command = Some(cmd);
-                                }
-                            });
-                        }
-                    }
-                }
-
-                ui.add_space(2.0);
-
-                // Tree Group 2: System Presets
-                let sys_group_name = "System Presets";
-                let is_sys_expanded = state.expanded_groups.contains(sys_group_name);
-                let system_presets: Vec<EncodingPreset> = presets.iter().filter(|p| p.category != PresetCategory::Custom).cloned().collect();
-
-                ui.horizontal(|ui| {
-                    let chevron = if is_sys_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
-                    if icons::button(ui, chevron, 16.0, false, tokens, "Toggle System Presets").clicked() {
-                        if is_sys_expanded {
-                            state.expanded_groups.remove(sys_group_name);
-                        } else {
-                            state.expanded_groups.insert(sys_group_name.to_string());
-                        }
-                    }
-                    icons::icon_label(ui, icons::Icon::Folder, 14.0, tokens.text_dim);
-                    ui.label(RichText::new(format!("{sys_group_name} ({})", system_presets.len())).strong());
-                });
-
-                if is_sys_expanded {
-                    for cat in PresetCategory::ALL_SYSTEM {
-                        let cat_presets: Vec<EncodingPreset> = system_presets.iter().filter(|p| p.category == *cat).cloned().collect();
-                        if cat_presets.is_empty() {
-                            continue;
-                        }
-                        let cat_name = cat.label();
-                        let is_cat_expanded = state.expanded_groups.contains(cat_name);
-
-                        ui.horizontal(|ui| {
-                            ui.add_space(18.0);
-                            let chevron = if is_cat_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
-                            if icons::button(ui, chevron, 14.0, false, tokens, "Toggle category").clicked() {
-                                if is_cat_expanded {
-                                    state.expanded_groups.remove(cat_name);
-                                } else {
-                                    state.expanded_groups.insert(cat_name.to_string());
-                                }
+                        for row in &table {
+                            let Some(preset) = presets.iter().find(|p| p.name == row.name) else { continue };
+                            let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 0.0 };
+                            if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
+                                chosen_command = Some(cmd);
                             }
-                            icons::icon_label(ui, icons::Icon::Preset, 13.0, tokens.text_dim);
-                            ui.label(RichText::new(format!("{cat_name} ({})", cat_presets.len())).small().color(tokens.text_secondary));
-                        });
+                        }
+                    }
+                } else {
+                    // Tree Group 1: User Presets & Groups
+                    let user_group_name = "User Presets & Groups";
+                    let is_user_expanded = state.expanded_groups.contains(user_group_name);
+                    let user_presets: Vec<EncodingPreset> = presets.iter().filter(|p| p.category == PresetCategory::Custom).cloned().collect();
 
-                        if is_cat_expanded {
-                            let cat_rows = catalog::rows(&cat_presets);
-                            for row in &cat_rows {
-                                let Some(preset) = cat_presets.iter().find(|p| p.name == row.name) else { continue };
-                                let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 28.0 };
+                    ui.horizontal(|ui| {
+                        let chevron = if is_user_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+                        if icons::button(ui, chevron, 16.0, false, tokens, "Toggle User Presets").clicked() {
+                            if is_user_expanded {
+                                state.expanded_groups.remove(user_group_name);
+                            } else {
+                                state.expanded_groups.insert(user_group_name.to_string());
+                            }
+                        }
+                        icons::icon_label(ui, icons::Icon::Folder, 14.0, tokens.accent_primary);
+                        ui.label(RichText::new(format!("{user_group_name} ({})", user_presets.len())).strong());
+                    });
+
+                    if is_user_expanded {
+                        if user_presets.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.add_space(24.0);
+                                ui.label(
+                                    RichText::new("(No user presets created yet. Click 'New' above to create one.)").small().color(tokens.text_dim),
+                                );
+                            });
+                        } else {
+                            let user_rows = catalog::rows(&user_presets);
+                            for row in &user_rows {
+                                let Some(preset) = user_presets.iter().find(|p| p.name == row.name) else { continue };
+                                let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 16.0 };
                                 ui.horizontal(|ui| {
                                     if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
                                         chosen_command = Some(cmd);
@@ -268,9 +216,67 @@ pub fn render_preset_browser(
                             }
                         }
                     }
+
+                    ui.add_space(2.0);
+
+                    // Tree Group 2: System Presets
+                    let sys_group_name = "System Presets";
+                    let is_sys_expanded = state.expanded_groups.contains(sys_group_name);
+                    let system_presets: Vec<EncodingPreset> = presets.iter().filter(|p| p.category != PresetCategory::Custom).cloned().collect();
+
+                    ui.horizontal(|ui| {
+                        let chevron = if is_sys_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+                        if icons::button(ui, chevron, 16.0, false, tokens, "Toggle System Presets").clicked() {
+                            if is_sys_expanded {
+                                state.expanded_groups.remove(sys_group_name);
+                            } else {
+                                state.expanded_groups.insert(sys_group_name.to_string());
+                            }
+                        }
+                        icons::icon_label(ui, icons::Icon::Folder, 14.0, tokens.text_dim);
+                        ui.label(RichText::new(format!("{sys_group_name} ({})", system_presets.len())).strong());
+                    });
+
+                    if is_sys_expanded {
+                        for cat in PresetCategory::ALL_SYSTEM {
+                            let cat_presets: Vec<EncodingPreset> = system_presets.iter().filter(|p| p.category == *cat).cloned().collect();
+                            if cat_presets.is_empty() {
+                                continue;
+                            }
+                            let cat_name = cat.label();
+                            let is_cat_expanded = state.expanded_groups.contains(cat_name);
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(18.0);
+                                let chevron = if is_cat_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+                                if icons::button(ui, chevron, 14.0, false, tokens, "Toggle category").clicked() {
+                                    if is_cat_expanded {
+                                        state.expanded_groups.remove(cat_name);
+                                    } else {
+                                        state.expanded_groups.insert(cat_name.to_string());
+                                    }
+                                }
+                                icons::icon_label(ui, icons::Icon::Preset, 13.0, tokens.text_dim);
+                                ui.label(RichText::new(format!("{cat_name} ({})", cat_presets.len())).small().color(tokens.text_secondary));
+                            });
+
+                            if is_cat_expanded {
+                                let cat_rows = catalog::rows(&cat_presets);
+                                for row in &cat_rows {
+                                    let Some(preset) = cat_presets.iter().find(|p| p.name == row.name) else { continue };
+                                    let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 28.0 };
+                                    ui.horizontal(|ui| {
+                                        if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
+                                            chosen_command = Some(cmd);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        });
+            },
+        );
 
         // --- 5. Detail Card & Actions for Selected Preset ---
         if let Some(ref preset) = state.selected_preset {

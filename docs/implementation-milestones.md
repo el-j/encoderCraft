@@ -2,7 +2,7 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** Implementation Complete & Verified (M0 through M36)  
+> **Status:** Implementation Complete & Verified (M0 through M38); M39 & M40 In Active Development  
 > **Verification:** 100% CI compliance via `cargo xtask ci` (>150 unit, fuzz, layout, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
@@ -715,6 +715,81 @@ flowchart LR
 6. [x] **Granular Rendering Preferences & Audio Metadata Tag Editor ([#181](https://github.com/el-j/encoderCraft/issues/181)):**
    - Added GPU/CPU renderer selection, worker concurrency slider (1..=16), and GPU VRAM budget controls in Preferences dialog.
    - Extended `XmpMetadata` with Title, Artist, Album, Track Number, Year, and Genre tags with interactive editing in the Inspector Metadata tab.
+
+---
+
+### Milestone 39: Ecosystem Codec Harvest: Audio, Cinema, GPU, 3D & Publications
+**Objective:** Harvest existing pure-Rust codecs from sibling ArtCraft repositories (`soundcraft`, `photocraft`, `texturecraft`, `designcraft`, `effectcraft`, `craft-libs`) to replace fallback stubs, eliminate external tool requirements, and complete universal multi-media conversion. Tracked under Milestone [M39 - Ecosystem Codec Harvest: Audio, Cinema, GPU, 3D & Publications](https://github.com/el-j/encoderCraft/milestone/17).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **Pure-Rust MP3 & Ogg Vorbis Native Encoders ([#183](https://github.com/el-j/encoderCraft/issues/183)):**
+   - Replace FLAC-fallback stubs for `ContainerType::Mp3` and `ContainerType::OggAudio` in `crates/pipeline/src/pipeline.rs`.
+   - Implement pure-Rust MPEG-1 Layer 3 encoder with ID3v2 metadata header injection.
+   - Implement pure-Rust Ogg Vorbis audio encoder writing standards-compliant `.ogg` bitstreams with Vorbis comment tags.
+2. [ ] **Apple Core Audio Format (.caf) & Standalone Ogg Opus (.opus) ([#184](https://github.com/el-j/encoderCraft/issues/184)):**
+   - Integrate 64-bit Apple Core Audio Format (`.caf`) writer from `soundcraft-audio-io` supporting arbitrary file sizes and up to 64 surround audio channels.
+   - Implement standalone RFC 7845 `.opus` container multiplexing with OpusHead and OpusTags header packets.
+3. [ ] **GPU DirectDraw Surface (DDS), SMPTE DPX & JPEG XL ([#185](https://github.com/el-j/encoderCraft/issues/185)):**
+   - Integrate `photocraft-codecs` DDS block compression encoder (BC1 through BC7, BC6H HDR).
+   - Integrate 10/12/16-bit SMPTE 268M DPX film scans with timecode headers.
+   - Integrate JPEG XL (`.jxl`) next-generation image compression with VarDCT and Modular modes.
+4. [ ] **Deep OpenEXR, Radiance HDR, DICOM & FITS ([#186](https://github.com/el-j/encoderCraft/issues/186)):**
+   - Connect `photocraft-codecs` Deep EXR with Cryptomatte ID channels.
+   - Add Radiance HDR (`.hdr` / `.pic`) RGBE environment maps and image-based lighting.
+   - Add medical DICOM (`.dcm`) and astronomical FITS (`.fits`) image parsing and writing.
+5. [ ] **Autodesk FBX, Alembic (.abc) & Collada (.dae) 3D Interchange ([#187](https://github.com/el-j/encoderCraft/issues/187)):**
+   - Integrate `texturecraft-formats` for Autodesk FBX binary and ASCII mesh geometries.
+   - Integrate Alembic Ogawa animation caches and Collada DAE asset interchange.
+   - Support binary Universal Scene Description (`.usdc`).
+6. [ ] **EPUB 3 Publications, PowerPoint PPTX & Lottie Animations ([#188](https://github.com/el-j/encoderCraft/issues/188)):**
+   - Connect `designcraft-epub` for EPUB 3 reflowable and fixed-layout packages.
+   - Connect `designcraft-pptx` for Microsoft PowerPoint slide deck generation.
+   - Connect `effectcraft-lottie` for web vector animation JSON exports.
+
+---
+
+### Milestone 40: Advanced Broadcast, Color & Delivery Paradigms (Novel Formats)
+**Objective:** Extend `encoderCraft` into advanced color science, universal subtitle conversion, and broadcast transport streams. Tracked under Milestone [M40 - Advanced Broadcast, Color & Delivery Paradigms (Novel Formats)](https://github.com/el-j/encoderCraft/milestone/18).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **3D Look-Up Table (LUT) Transcoding & Baking Engine ([#189](https://github.com/el-j/encoderCraft/issues/189)):**
+   - Implement `encodercraft-color::lut` supporting `.cube`, `.3dl`, and `.look` tables with tetrahedral interpolation.
+   - Expose LUT lattice resampling and baking in the Inspector Effects tab and CLI.
+2. [ ] **Universal Subtitle & Closed Caption Transcoding Matrix ([#190](https://github.com/el-j/encoderCraft/issues/190)):**
+   - Implement bidirectional subtitle transcoding matrix across SubRip (`.srt`), WebVTT (`.vtt`), Scenarist (`.scc`), SMPTE-TT / IMSC1 (`.ttml`), and SubStation Alpha (`.ass` / `.ssa`).
+   - Support framerate retiming, timecode shifting, and sidecar / burn-in export.
+3. [ ] **Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) ([#191](https://github.com/el-j/encoderCraft/issues/191)):**
+   - Clean-room 188-byte MPEG-TS transport stream packetizer (`.ts` / `.m2ts`) with PAT/PMT and PCR timestamp alignment.
+   - Apple Spatial Video stereoscopic Multi-View HEVC (MV-HEVC) metadata signaling in ISO BMFF containers.
+
+---
+
+### Milestone 41: Production Workflow, UI/UX Polish & Adobe Media Encoder Parity Fixes
+**Objective:** Resolve the 11 core UI/UX and workflow defects identified during real-world user QA: multi-selection batch format/preset changes, domain-filtered format dropdowns, egui ID clash elimination, Shift/Cmd multi-selection in Media Browser, recursive folder queueing, format dropdown change persistence, Set In/Set Out trim synchronization, granular GPU/CPU & concurrency preferences, official audio metadata lookup, visual media type badges, and preset browser layout bounds. Tracked under Milestone [M41 - Production Workflow, UI/UX Polish & Adobe Media Encoder Parity Fixes](https://github.com/el-j/encoderCraft/milestone/19).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Multi-Selection Batch Format & Preset Switching ([#192](https://github.com/el-j/encoderCraft/issues/192)):**
+   - When multiple jobs are selected in the queue, changing format or preset updates all selected items simultaneously with matched default presets and output extensions.
+2. [x] **Domain-Filtered Format Options ([#193](https://github.com/el-j/encoderCraft/issues/193)):**
+   - Restrict format dropdowns strictly to candidate containers valid for the source media stream kind (no image/video options on audio sources).
+3. [x] **Eliminate egui ID Clashes Across Panels & ScrollAreas ([#194](https://github.com/el-j/encoderCraft/issues/194)):**
+   - Wrap each dock panel in `ui.push_id(*panel, ...)` inside `EncoderDockContent::body` and assign unique explicit `id_salt` to all scroll areas and comboboxes.
+4. [x] **Shift+Click & Cmd+Click Multi-Selection in Media Browser ([#195](https://github.com/el-j/encoderCraft/issues/195)):**
+   - Implement multi-file selection with range select (Shift) and toggle select (Cmd/Ctrl) in Media Browser list and thumbnail views.
+5. [x] **Recursive Folder Ingestion & Batch Queueing ([#196](https://github.com/el-j/encoderCraft/issues/196)):**
+   - Support adding folders directly to the queue with recursive traversal and automatic media stream classification.
+6. [x] **Inline Format Dropdown Application & Instant UI Repaint ([#197](https://github.com/el-j/encoderCraft/issues/197)):**
+   - Ensure inline format selection mutates job specs reliably and requests immediate frame repaint.
+7. [x] **Set In / Set Out Range Synchronization ([#198](https://github.com/el-j/encoderCraft/issues/198)):**
+   - Synchronize In/Out trim markers across Preview panel, Inspector modal, and pipeline transcoding engine for both video and audio.
+8. [x] **Granular AME-Parity Preferences ([#199](https://github.com/el-j/encoderCraft/issues/199)):**
+   - Add tabbed Preferences dialog with granular GPU acceleration, CPU worker concurrency, memory quotas, and watch folder timing.
+9. [x] **Official Audio Metadata Lookup & Editor ([#200](https://github.com/el-j/encoderCraft/issues/200)):**
+   - Full audio metadata editor for ID3/Vorbis/RIFF tags with automated lookup from official sources (MusicBrainz/ISRC).
+10. [x] **Distinctive Visual Media Kind Badges & Icons ([#201](https://github.com/el-j/encoderCraft/issues/201)):**
+    - Render color-coded essence chips and distinctive icons (VID, AUD, IMG, DOC, 3D, SEQ) in the Queue Source column.
+11. [x] **Preset Browser Layout Bounds & Scrolling Overflow Fix ([#202](https://github.com/el-j/encoderCraft/issues/202)):**
+    - Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
 
 ---
 

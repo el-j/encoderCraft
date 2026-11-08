@@ -121,7 +121,7 @@ fn render_dialog_contents(ui: &mut Ui, state: &mut StitchDialogState, tokens: &T
     egui::CollapsingHeader::new(RichText::new(format!("Clips in Sequence Order ({})", state.clip_names.len())).strong()).default_open(true).show(
         ui,
         |ui| {
-            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("stitch_dialog_clips_scroll_area").max_height(160.0).show(ui, |ui| {
                 let mut swap_up = None;
                 let mut swap_down = None;
 

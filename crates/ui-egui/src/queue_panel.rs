@@ -288,6 +288,7 @@ pub const AUDIO_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
     (ContainerType::Aiff, "AIFF", "aif"),
     (ContainerType::Flac, "FLAC", "flac"),
     (ContainerType::Mp3, "MP3", "mp3"),
+    (ContainerType::OggAudio, "Ogg Vorbis", "ogg"),
 ];
 
 pub const IMAGE_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
@@ -328,30 +329,30 @@ pub fn candidate_containers_for_job(job: &QueuedJob) -> &'static [(ContainerType
 
 /// Renders a distinctive, color-coded essence chip indicating media type (Video, Audio, Image, 3D, Stitched).
 fn render_media_kind_chip(ui: &mut egui::Ui, job: &QueuedJob, tokens: &Tokens) {
-    let (tag, bg, fg) = match &job.spec.source {
-        encodercraft_core::SourceDescriptor::StitchedClips { .. } => ("SEQ", egui::Color32::from_rgb(180, 60, 180), egui::Color32::WHITE),
+    let (tag, bg, fg, glyph) = match &job.spec.source {
+        encodercraft_core::SourceDescriptor::StitchedClips { .. } => ("SEQ", egui::Color32::from_rgb(180, 60, 180), egui::Color32::WHITE, "🎞"),
         encodercraft_core::SourceDescriptor::File { path, .. } => {
             let kind = encodercraft_demux::classify_stream_kind(path);
             if kind.is_audio_only() {
-                ("AUD", egui::Color32::from_rgb(35, 134, 54), egui::Color32::WHITE)
+                ("AUD", egui::Color32::from_rgb(35, 134, 54), egui::Color32::WHITE, "🎵")
             } else if kind.is_image() {
-                ("IMG", egui::Color32::from_rgb(187, 128, 9), egui::Color32::WHITE)
+                ("IMG", egui::Color32::from_rgb(187, 128, 9), egui::Color32::WHITE, "🖼")
             } else if kind.is_document() {
-                ("DOC", egui::Color32::from_rgb(137, 87, 229), egui::Color32::WHITE)
+                ("DOC", egui::Color32::from_rgb(137, 87, 229), egui::Color32::WHITE, "📄")
             } else if kind.is_spatial_3d() {
-                ("3D", egui::Color32::from_rgb(41, 140, 150), egui::Color32::WHITE)
+                ("3D", egui::Color32::from_rgb(41, 140, 150), egui::Color32::WHITE, "📦")
             } else {
-                ("VID", tokens.accent_primary, egui::Color32::WHITE)
+                ("VID", tokens.accent_primary, egui::Color32::WHITE, "🎬")
             }
         }
-        _ => ("VID", tokens.accent_primary, egui::Color32::WHITE),
+        _ => ("VID", tokens.accent_primary, egui::Color32::WHITE, "🎬"),
     };
 
-    let chip_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(28.0, 14.0));
-    ui.allocate_exact_size(egui::vec2(28.0, 14.0), egui::Sense::hover());
+    let chip_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(36.0, 15.0));
+    ui.allocate_exact_size(egui::vec2(36.0, 15.0), egui::Sense::hover());
     ui.painter().rect_filled(chip_rect, 2.0, bg.gamma_multiply(0.25));
     ui.painter().rect_stroke(chip_rect, 2.0, egui::Stroke::new(1.0, bg), egui::StrokeKind::Inside);
-    ui.painter().text(chip_rect.center(), egui::Align2::CENTER_CENTER, tag, egui::FontId::monospace(9.0), fg);
+    ui.painter().text(chip_rect.center(), egui::Align2::CENTER_CENTER, format!("{glyph} {tag}"), egui::FontId::proportional(8.5), fg);
 }
 
 /// Returns the default preset name for a given container format.
@@ -484,6 +485,7 @@ pub struct QueuePanelContext<'a> {
     pub on_open_log: &'a mut bool,
     pub auto_shutdown: &'a mut bool,
     pub on_add_media: &'a mut bool,
+    pub on_add_folder: &'a mut bool,
     pub selected_renderer: &'a mut String,
     pub on_show_source_properties: &'a mut Option<std::path::PathBuf>,
 }
@@ -497,6 +499,7 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
     let on_open_log = &mut *ctx.on_open_log;
     let auto_shutdown = &mut *ctx.auto_shutdown;
     let on_add_media = &mut *ctx.on_add_media;
+    let on_add_folder = &mut *ctx.on_add_folder;
     let selected_renderer = &mut *ctx.selected_renderer;
     let on_show_source_properties = &mut *ctx.on_show_source_properties;
 
@@ -550,6 +553,11 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
             let add_btn = icons::button(ui, icons::Icon::Plus, 20.0, false, tokens, "Add Media Files... (Cmd+I)");
             if add_btn.clicked() {
                 *on_add_media = true;
+            }
+
+            let add_folder_btn = icons::button(ui, icons::Icon::Folder, 20.0, false, tokens, "Add Entire Folder to Queue... (Cmd+Shift+I)");
+            if add_folder_btn.clicked() {
+                *on_add_folder = true;
             }
 
             ui.add_enabled_ui(has_selection, |ui| {
@@ -691,7 +699,7 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
             ui.separator();
 
             // Table Rows Scroll Area
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            egui::ScrollArea::both().id_salt("queue_job_rows_scroll_area").auto_shrink([false; 2]).show(ui, |ui| {
                 for (idx, job) in jobs.iter().enumerate() {
                     let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs, cols, on_inspect_job, on_show_source_properties };
                     render_grouped_job_row(ui, item, state, queue_mgr, commands, tokens);
@@ -897,7 +905,9 @@ fn render_grouped_job_row(
                             .width(cols.format - 12.0)
                             .show_ui(ui, |ui| {
                                 for (c, name, _) in candidate_containers {
-                                    ui.selectable_value(&mut current_container, *c, *name);
+                                    if ui.selectable_label(current_container == *c, *name).clicked() {
+                                        current_container = *c;
+                                    }
                                 }
                             });
 
@@ -914,11 +924,10 @@ fn render_grouped_job_row(
                                 {
                                     let mut updated = target_t.clone();
                                     updated.container = current_container;
-                                    if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
-                                        let mut p = updated.output_path.clone();
-                                        p.set_extension(ext);
-                                        updated.output_path = p;
-                                    }
+                                    let ext = current_container.file_extension();
+                                    let mut p = updated.output_path.clone();
+                                    p.set_extension(ext);
+                                    updated.output_path = p;
                                     updated.preset_name = default_preset_for_container(current_container).to_string();
                                     execute_queue_command(
                                         state,
@@ -929,6 +938,7 @@ fn render_grouped_job_row(
                                     );
                                 }
                             }
+                            ui.ctx().request_repaint();
                         }
                     }
                 } else {
@@ -978,6 +988,7 @@ fn render_grouped_job_row(
                                     );
                                 }
                             }
+                            ui.ctx().request_repaint();
                         }
                     }
                 } else {
@@ -1064,7 +1075,9 @@ fn render_grouped_job_row(
                             .width(cols.format - 12.0)
                             .show_ui(ui, |ui| {
                                 for (c, name, _) in candidate_containers {
-                                    ui.selectable_value(&mut current_container, *c, *name);
+                                    if ui.selectable_label(current_container == *c, *name).clicked() {
+                                        current_container = *c;
+                                    }
                                 }
                             });
 
@@ -1081,11 +1094,10 @@ fn render_grouped_job_row(
                                     if let Some(target_t) = sel_job.spec.targets.get(target_idx) {
                                         let mut updated = target_t.clone();
                                         updated.container = current_container;
-                                        if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
-                                            let mut p = updated.output_path.clone();
-                                            p.set_extension(ext);
-                                            updated.output_path = p;
-                                        }
+                                        let ext = current_container.file_extension();
+                                        let mut p = updated.output_path.clone();
+                                        p.set_extension(ext);
+                                        updated.output_path = p;
                                         updated.preset_name = default_preset_for_container(current_container).to_string();
                                         execute_queue_command(
                                             state,
@@ -1097,6 +1109,7 @@ fn render_grouped_job_row(
                                     }
                                 }
                             }
+                            ui.ctx().request_repaint();
                         }
                     });
 
@@ -1146,6 +1159,7 @@ fn render_grouped_job_row(
                                                 }
                                             }
                                         }
+                                        ui.ctx().request_repaint();
                                         state.active_preset_menu = None;
                                     }
                                 }
@@ -1623,6 +1637,7 @@ mod tests {
         let mut on_open_log = false;
         let mut auto_shutdown = false;
         let mut on_add_media = false;
+        let mut on_add_folder = false;
         let mut selected_renderer = String::new();
         let mut on_show_source_properties = None;
 
@@ -1638,6 +1653,7 @@ mod tests {
                     on_open_log: &mut on_open_log,
                     auto_shutdown: &mut auto_shutdown,
                     on_add_media: &mut on_add_media,
+                    on_add_folder: &mut on_add_folder,
                     selected_renderer: &mut selected_renderer,
                     on_show_source_properties: &mut on_show_source_properties,
                 },

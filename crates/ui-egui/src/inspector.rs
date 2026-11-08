@@ -249,7 +249,14 @@ pub fn render_inspector_modal(ctx: &egui::Context, state: &mut InspectorState, t
         while let Some(ev) = dec.poll() {
             match ev {
                 PreviewEvent::Opened { probe, frame_count } => {
-                    state.preview_frame_count = frame_count.max(1);
+                    let total = if frame_count > 0 {
+                        frame_count
+                    } else if probe.duration_seconds > 0.0 {
+                        (probe.duration_seconds * 30.0).round().max(1.0) as u64
+                    } else {
+                        1
+                    };
+                    state.preview_frame_count = total;
                     state.preview_probe = Some(probe);
                     dec.request_frame(state.preview_frame_idx);
                 }
@@ -498,7 +505,7 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut Cr
         }
     }
 
-    // In / Out range controls
+    // In / Out range controls (AME Parity with I/O keyboard shortcuts)
     ui.horizontal(|ui| {
         let fps_int = fps.round().max(1.0) as i64;
         let mut in_tick = None;
@@ -508,9 +515,14 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut Cr
             dur_tick = *duration_ticks;
         }
 
-        if ui.button("Set In").on_hover_text("Mark in-point for transcode range").clicked()
-            && let SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut spec.source
-        {
+        let mark_in = ui.button("Set In (I)").on_hover_text("Mark in-point for transcode range (I)").clicked()
+            || (!ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::I)));
+        let mark_out = ui.button("Set Out (O)").on_hover_text("Mark out-point for transcode range (O)").clicked()
+            || (!ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::O)));
+        let reset_range = ui.button("Reset Range (Alt+X)").on_hover_text("Clear In/Out mark points (Alt+X)").clicked()
+            || (!ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::X)));
+
+        if mark_in && let SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut spec.source {
             let current_tick = i64::try_from(current_frame).unwrap_or(0);
             *start_tick = Some(current_tick);
             if timebase.is_none() {
@@ -522,9 +534,7 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut Cr
                 *duration_ticks = None;
             }
         }
-        if ui.button("Set Out").on_hover_text("Mark out-point for transcode range").clicked()
-            && let SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut spec.source
-        {
+        if mark_out && let SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut spec.source {
             let current_tick = i64::try_from(current_frame).unwrap_or(0);
             let start = start_tick.unwrap_or(0);
             let dur = current_tick.saturating_sub(start).max(1);
@@ -533,9 +543,7 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut Cr
                 *timebase = encodercraft_core::Rational64::new(1, fps_int).ok();
             }
         }
-        if ui.button("Reset Range").on_hover_text("Clear In/Out mark points").clicked()
-            && let SourceDescriptor::File { start_tick, duration_ticks, .. } = &mut spec.source
-        {
+        if reset_range && let SourceDescriptor::File { start_tick, duration_ticks, .. } = &mut spec.source {
             *start_tick = None;
             *duration_ticks = None;
         }
@@ -638,7 +646,7 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
     ui.separator();
     ui.add_space(4.0);
 
-    egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| match state.active_tab {
+    egui::ScrollArea::vertical().id_salt("inspector_modal_tabs_scroll_area").auto_shrink([false; 2]).show(ui, |ui| match state.active_tab {
         InspectorTab::Video => render_video_tab(ui, target, state),
         InspectorTab::Composition => render_composition_tab(ui, &mut target.selection, &state.inventory),
         InspectorTab::Layout => render_layout_tab(ui, &mut target.selection, &state.inventory),
@@ -1513,6 +1521,24 @@ fn render_metadata_tab(ui: &mut Ui, client_info: &mut encodercraft_core::ClientI
         ui.label("Copyright Notice (dc:rights):");
         if ui.text_edit_singleline(&mut copyright).changed() {
             meta.copyright = if copyright.trim().is_empty() { None } else { Some(copyright) };
+            changed = true;
+        }
+    });
+
+    let mut composer = meta.composer.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Composer / Songwriter (xmpDM:composer):");
+        if ui.text_edit_singleline(&mut composer).changed() {
+            meta.composer = if composer.trim().is_empty() { None } else { Some(composer) };
+            changed = true;
+        }
+    });
+
+    let mut isrc = meta.isrc.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("ISRC Code (xmpDM:ISRC):");
+        if ui.text_edit_singleline(&mut isrc).changed() {
+            meta.isrc = if isrc.trim().is_empty() { None } else { Some(isrc) };
             changed = true;
         }
     });
