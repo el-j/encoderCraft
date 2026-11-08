@@ -241,9 +241,14 @@ pub enum ContainerType {
     PostScriptEps,
     Gltf,
     Usdz,
+    Usdc,
     Obj,
     Stl,
     Ply,
+    Fbx,
+    Alembic,
+    Collada,
+    Splat,
     Pdf,
     Docx,
     Idml,
@@ -304,9 +309,14 @@ impl ContainerType {
         Self::PostScriptEps,
         Self::Gltf,
         Self::Usdz,
+        Self::Usdc,
         Self::Obj,
         Self::Stl,
         Self::Ply,
+        Self::Fbx,
+        Self::Alembic,
+        Self::Collada,
+        Self::Splat,
         Self::Pdf,
         Self::Docx,
         Self::Idml,
@@ -363,9 +373,14 @@ impl ContainerType {
             Self::PostScriptEps => "eps",
             Self::Gltf => "glb",
             Self::Usdz => "usdz",
+            Self::Usdc => "usdc",
             Self::Obj => "obj",
             Self::Stl => "stl",
             Self::Ply => "ply",
+            Self::Fbx => "fbx",
+            Self::Alembic => "abc",
+            Self::Collada => "dae",
+            Self::Splat => "splat",
             Self::Pdf => "pdf",
             Self::Docx => "docx",
             Self::Idml => "idml",
@@ -411,6 +426,11 @@ impl ContainerType {
             "hdr" | "pic" => Some(Self::RadianceHdr),
             "dcm" | "dicom" => Some(Self::Dicom),
             "fits" | "fit" | "fts" => Some(Self::Fits),
+            "fbx" => Some(Self::Fbx),
+            "abc" | "alembic" => Some(Self::Alembic),
+            "dae" | "collada" => Some(Self::Collada),
+            "usdc" => Some(Self::Usdc),
+            "splat" => Some(Self::Splat),
             _ => None,
         };
         if alias.is_some() {
@@ -458,9 +478,14 @@ impl ContainerType {
             Self::PostScriptEps => "Encapsulated PostScript (EPS)",
             Self::Gltf => "glTF 2.0 Binary (GLB)",
             Self::Usdz => "Apple AR Quick Look (USDZ)",
+            Self::Usdc => "Universal Scene Description Crate (USDC)",
             Self::Obj => "Wavefront 3D (OBJ)",
             Self::Stl => "Stereolithography 3D (STL)",
             Self::Ply => "Stanford Polygon 3D (PLY)",
+            Self::Fbx => "Autodesk Filmbox 3D (FBX)",
+            Self::Alembic => "Alembic VFX Animation Cache (ABC)",
+            Self::Collada => "Collada Digital Asset Exchange (DAE)",
+            Self::Splat => "3D Gaussian Splat Point Cloud (SPLAT)",
             Self::Pdf => "Portable Document Format (PDF)",
             Self::Docx => "Microsoft Word Document (DOCX)",
             Self::Idml => "InDesign Markup Language (IDML)",
@@ -515,7 +540,9 @@ impl ContainerType {
             Self::StillSequence | Self::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
             Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps => MediaStreamKind::Vector2D,
             Self::Pdf | Self::Docx | Self::Idml | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => MediaStreamKind::Document,
-            Self::Gltf | Self::Usdz | Self::Obj | Self::Stl | Self::Ply => MediaStreamKind::Spatial3D,
+            Self::Gltf | Self::Usdz | Self::Usdc | Self::Obj | Self::Stl | Self::Ply | Self::Fbx | Self::Alembic | Self::Collada | Self::Splat => {
+                MediaStreamKind::Spatial3D
+            }
             Self::AutocadDxf | Self::AutocadDwg | Self::HpglPlotter | Self::ArtcraftCadcraft => MediaStreamKind::Cad2D,
             Self::AdobePhotoshopPsd | Self::AdobePhotoshopPsb | Self::ArtcraftPhotocraft => MediaStreamKind::LayeredComposite,
             Self::AdobeAfterEffectsAep | Self::ArtcraftEffectcraft => MediaStreamKind::MotionGraph,
@@ -586,7 +613,9 @@ impl ContainerType {
                 vec![Self::ArtcraftVectorcraft, Self::Svg, Self::Pdf, Self::PostScriptEps, Self::AutocadDxf, Self::Png, Self::AdobeIllustratorAi]
             }
             MediaStreamKind::Document => vec![Self::ArtcraftDesigncraft, Self::Pdf, Self::Idml, Self::Docx, Self::Png, Self::Tiff],
-            MediaStreamKind::Spatial3D => vec![Self::Gltf, Self::Usdz, Self::Obj, Self::Stl, Self::Ply],
+            MediaStreamKind::Spatial3D => {
+                vec![Self::Gltf, Self::Usdz, Self::Usdc, Self::Obj, Self::Stl, Self::Ply, Self::Fbx, Self::Alembic, Self::Collada, Self::Splat]
+            }
             MediaStreamKind::Cad2D => {
                 vec![Self::ArtcraftCadcraft, Self::AutocadDxf, Self::AutocadDwg, Self::Svg, Self::Pdf, Self::HpglPlotter, Self::Png]
             }

@@ -501,3 +501,50 @@ fn dds_dpx_and_jxl_pipeline_transcode() {
     let fits_data = std::fs::read(&fits_path).unwrap();
     assert!(fits_data.starts_with(b"SIMPLE  ="));
 }
+
+#[test]
+fn spatial_3d_fbx_abc_dae_usdc_splat_pipeline_transcode() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_glb = dir.path().join("source.glb");
+
+    let mut mesh = encodercraft_spatial_io::TriangleMesh::new("UnitBox");
+    mesh.vertices = vec![[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5]];
+    mesh.indices = vec![[0, 1, 2]];
+    mesh.generate_flat_normals();
+
+    let glb_bytes = encodercraft_spatial_io::write_glb(&mesh).unwrap();
+    std::fs::write(&src_glb, glb_bytes).unwrap();
+
+    let fbx_path = dir.path().join("out.fbx");
+    let dae_path = dir.path().join("out.dae");
+    let abc_path = dir.path().join("out.abc");
+    let usdc_path = dir.path().join("out.usdc");
+    let splat_path = dir.path().join("out.splat");
+
+    let fbx_target = small_target(&fbx_path, ContainerType::Fbx, "Autodesk Filmbox 3D (FBX)");
+    let dae_target = small_target(&dae_path, ContainerType::Collada, "Collada Digital Asset Exchange (DAE)");
+    let abc_target = small_target(&abc_path, ContainerType::Alembic, "Alembic VFX Animation Cache (ABC)");
+    let usdc_target = small_target(&usdc_path, ContainerType::Usdc, "Universal Scene Description Crate (USDC)");
+    let splat_target = small_target(&splat_path, ContainerType::Splat, "3D Gaussian Splat Point Cloud (SPLAT)");
+
+    run(job(&src_glb, fbx_target)).unwrap();
+    run(job(&src_glb, dae_target)).unwrap();
+    run(job(&src_glb, abc_target)).unwrap();
+    run(job(&src_glb, usdc_target)).unwrap();
+    run(job(&src_glb, splat_target)).unwrap();
+
+    let fbx_data = std::fs::read(&fbx_path).unwrap();
+    assert!(fbx_data.starts_with(b"Kaydara FBX Binary  \0"));
+
+    let dae_data = std::fs::read_to_string(&dae_path).unwrap();
+    assert!(dae_data.contains("<COLLADA"));
+
+    let abc_data = std::fs::read(&abc_path).unwrap();
+    assert!(abc_data.starts_with(b"Ogawa"));
+
+    let usdc_data = std::fs::read(&usdc_path).unwrap();
+    assert!(usdc_data.starts_with(b"PXR-USDC"));
+
+    let splat_data = std::fs::read(&splat_path).unwrap();
+    assert_eq!(splat_data.len() % 32, 0);
+}
