@@ -285,6 +285,9 @@ pub const INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
     (ContainerType::Dds, "DDS", "dds"),
     (ContainerType::Dpx, "DPX", "dpx"),
     (ContainerType::Jxl, "JPEG XL", "jxl"),
+    (ContainerType::RadianceHdr, "Radiance HDR", "hdr"),
+    (ContainerType::Dicom, "Medical DICOM", "dcm"),
+    (ContainerType::Fits, "Astronomical FITS", "fits"),
     (ContainerType::AnimatedGif, "GIF", "gif"),
 ];
 
@@ -307,6 +310,9 @@ pub const IMAGE_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
     (ContainerType::Dds, "DDS (GPU Texture)", "dds"),
     (ContainerType::Dpx, "DPX (SMPTE 268M)", "dpx"),
     (ContainerType::Jxl, "JPEG XL (JXL)", "jxl"),
+    (ContainerType::RadianceHdr, "Radiance HDR (RGBE)", "hdr"),
+    (ContainerType::Dicom, "Medical DICOM (.dcm)", "dcm"),
+    (ContainerType::Fits, "Astronomical FITS (.fits)", "fits"),
     (ContainerType::AnimatedGif, "GIF", "gif"),
 ];
 
@@ -387,6 +393,9 @@ pub fn default_preset_for_container(c: ContainerType) -> &'static str {
         ContainerType::Dds => "DirectDraw Surface DDS (BC3)",
         ContainerType::Dpx => "SMPTE DPX 10-bit Film Scan",
         ContainerType::Jxl => "JPEG XL Lossless Modular",
+        ContainerType::RadianceHdr => "Radiance HDR RGBE Environment",
+        ContainerType::Dicom => "Medical DICOM Image (Secondary Capture)",
+        ContainerType::Fits => "Astronomical FITS Scientific Data",
         ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
             "Print-Ready PDF/X-4"
         }
@@ -453,6 +462,9 @@ fn candidate_presets_for_container(c: ContainerType) -> Vec<&'static str> {
         | ContainerType::Dds
         | ContainerType::Dpx
         | ContainerType::Jxl
+        | ContainerType::RadianceHdr
+        | ContainerType::Dicom
+        | ContainerType::Fits
         | ContainerType::AdobePhotoshopPsd
         | ContainerType::AdobePhotoshopPsb
         | ContainerType::ArtcraftPhotocraft => vec![
@@ -465,6 +477,9 @@ fn candidate_presets_for_container(c: ContainerType) -> Vec<&'static str> {
             "DirectDraw Surface DDS (BC3)",
             "SMPTE DPX 10-bit Film Scan",
             "JPEG XL Lossless Modular",
+            "Radiance HDR RGBE Environment",
+            "Medical DICOM Image (Secondary Capture)",
+            "Astronomical FITS Scientific Data",
         ],
         ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
             vec!["Print-Ready PDF/X-4"]

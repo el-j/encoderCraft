@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bmp;
+pub mod dicom;
 pub mod exr;
 pub mod layered;
 pub mod png;
@@ -14,6 +15,7 @@ pub mod tiff;
 pub mod vector;
 
 pub use bmp::{decode_bmp, encode_bmp};
+pub use dicom::encode_dicom;
 pub use exr::encode_exr_half;
 pub use layered::{ImageLayer, LayerBlendMode, LayeredColorMode, LayeredImage};
 pub use png::encode_png;

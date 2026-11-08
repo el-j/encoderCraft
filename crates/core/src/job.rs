@@ -234,6 +234,9 @@ pub enum ContainerType {
     Dds,
     Dpx,
     Jxl,
+    RadianceHdr,
+    Dicom,
+    Fits,
     Svg,
     PostScriptEps,
     Gltf,
@@ -294,6 +297,9 @@ impl ContainerType {
         Self::Dds,
         Self::Dpx,
         Self::Jxl,
+        Self::RadianceHdr,
+        Self::Dicom,
+        Self::Fits,
         Self::Svg,
         Self::PostScriptEps,
         Self::Gltf,
@@ -350,6 +356,9 @@ impl ContainerType {
             Self::Dds => "dds",
             Self::Dpx => "dpx",
             Self::Jxl => "jxl",
+            Self::RadianceHdr => "hdr",
+            Self::Dicom => "dcm",
+            Self::Fits => "fits",
             Self::Svg => "svg",
             Self::PostScriptEps => "eps",
             Self::Gltf => "glb",
@@ -399,6 +408,9 @@ impl ContainerType {
             "tif" => Some(Self::Tiff),
             "glb" => Some(Self::Gltf),
             "ps" => Some(Self::PostScriptEps),
+            "hdr" | "pic" => Some(Self::RadianceHdr),
+            "dcm" | "dicom" => Some(Self::Dicom),
+            "fits" | "fit" | "fts" => Some(Self::Fits),
             _ => None,
         };
         if alias.is_some() {
@@ -439,6 +451,9 @@ impl ContainerType {
             Self::Dds => "DirectDraw Surface Texture (DDS)",
             Self::Dpx => "SMPTE 268M Digital Picture Exchange (DPX)",
             Self::Jxl => "JPEG XL Image (JXL)",
+            Self::RadianceHdr => "Radiance HDR RGBE (.hdr)",
+            Self::Dicom => "Medical DICOM Image (.dcm)",
+            Self::Fits => "Astronomical FITS Data (.fits)",
             Self::Svg => "Scalable Vector Graphics (SVG)",
             Self::PostScriptEps => "Encapsulated PostScript (EPS)",
             Self::Gltf => "glTF 2.0 Binary (GLB)",
@@ -485,9 +500,18 @@ impl ContainerType {
             | Self::Opus
             | Self::AdobeAuditionSesx
             | Self::ArtcraftSoundcraft => MediaStreamKind::AudioOnly,
-            Self::Png | Self::Jpeg | Self::WebP | Self::Tiff | Self::OpenExr | Self::Bmp | Self::Dds | Self::Dpx | Self::Jxl => {
-                MediaStreamKind::StillImage
-            }
+            Self::Png
+            | Self::Jpeg
+            | Self::WebP
+            | Self::Tiff
+            | Self::OpenExr
+            | Self::Bmp
+            | Self::Dds
+            | Self::Dpx
+            | Self::Jxl
+            | Self::RadianceHdr
+            | Self::Dicom
+            | Self::Fits => MediaStreamKind::StillImage,
             Self::StillSequence | Self::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
             Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps => MediaStreamKind::Vector2D,
             Self::Pdf | Self::Docx | Self::Idml | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => MediaStreamKind::Document,
@@ -535,6 +559,9 @@ impl ContainerType {
                     Self::Dds,
                     Self::Dpx,
                     Self::Jxl,
+                    Self::RadianceHdr,
+                    Self::Dicom,
+                    Self::Fits,
                     Self::AdobePhotoshopPsd,
                     Self::ArtcraftPhotocraft,
                 ]
@@ -552,6 +579,8 @@ impl ContainerType {
                 Self::Dds,
                 Self::Dpx,
                 Self::Jxl,
+                Self::RadianceHdr,
+                Self::Fits,
             ],
             MediaStreamKind::Vector2D => {
                 vec![Self::ArtcraftVectorcraft, Self::Svg, Self::Pdf, Self::PostScriptEps, Self::AutocadDxf, Self::Png, Self::AdobeIllustratorAi]
