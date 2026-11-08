@@ -409,6 +409,10 @@ pub fn default_preset_for_container(c: ContainerType) -> &'static str {
         ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
             "Print-Ready PDF/X-4"
         }
+        ContainerType::Epub => "EPUB 3 Reflowable Publication",
+        ContainerType::Pptx => "PowerPoint Presentation Slide Deck",
+        ContainerType::LottieJson => "Lottie Motion Vector JSON",
+        ContainerType::WindowsMetafile => "Windows Metafile (WMF)",
         ContainerType::Svg
         | ContainerType::PostScriptEps
         | ContainerType::AdobeIllustratorAi
@@ -515,6 +519,10 @@ fn candidate_presets_for_container(c: ContainerType) -> Vec<&'static str> {
         ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
             vec!["Print-Ready PDF/X-4"]
         }
+        ContainerType::Epub => vec!["EPUB 3 Reflowable Publication", "Print-Ready PDF/X-4"],
+        ContainerType::Pptx => vec!["PowerPoint Presentation Slide Deck", "Print-Ready PDF/X-4"],
+        ContainerType::LottieJson => vec!["Lottie Motion Vector JSON", "Web Vector SVG (Optimized)"],
+        ContainerType::WindowsMetafile => vec!["Windows Metafile (WMF)", "Web Vector SVG (Optimized)"],
         ContainerType::Svg
         | ContainerType::PostScriptEps
         | ContainerType::AdobeIllustratorAi

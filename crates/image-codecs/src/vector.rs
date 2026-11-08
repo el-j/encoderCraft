@@ -856,6 +856,225 @@ impl VectorCanvas {
         Ok(canvas)
     }
 
+    /// Exports canvas to standard 16-bit Windows Placeable Metafile (WMF) format.
+    pub fn to_wmf_bytes(&self) -> Vec<u8> {
+        let mut records = Vec::new();
+
+        // Record 1: SetWindowOrg (function 0x020B, 5 words = 10 bytes: size, func, y, x)
+        records.extend_from_slice(&5u32.to_le_bytes());
+        records.extend_from_slice(&0x020Bu16.to_le_bytes());
+        records.extend_from_slice(&0i16.to_le_bytes());
+        records.extend_from_slice(&0i16.to_le_bytes());
+
+        // Record 2: SetWindowExt (function 0x020C, 5 words = 10 bytes: size, func, cy, cx)
+        let cx = self.width.clamp(1.0, 32767.0) as i16;
+        let cy = self.height.clamp(1.0, 32767.0) as i16;
+        records.extend_from_slice(&5u32.to_le_bytes());
+        records.extend_from_slice(&0x020Cu16.to_le_bytes());
+        records.extend_from_slice(&cy.to_le_bytes());
+        records.extend_from_slice(&cx.to_le_bytes());
+
+        // Line commands
+        for path in &self.paths {
+            for cmd in &path.commands {
+                match *cmd {
+                    PathCommand::MoveTo(x, y) => {
+                        let px = x.clamp(-32768.0, 32767.0) as i16;
+                        let py = y.clamp(-32768.0, 32767.0) as i16;
+                        records.extend_from_slice(&5u32.to_le_bytes());
+                        records.extend_from_slice(&0x0214u16.to_le_bytes());
+                        records.extend_from_slice(&py.to_le_bytes());
+                        records.extend_from_slice(&px.to_le_bytes());
+                    }
+                    PathCommand::LineTo(x, y) => {
+                        let px = x.clamp(-32768.0, 32767.0) as i16;
+                        let py = y.clamp(-32768.0, 32767.0) as i16;
+                        records.extend_from_slice(&5u32.to_le_bytes());
+                        records.extend_from_slice(&0x0213u16.to_le_bytes());
+                        records.extend_from_slice(&py.to_le_bytes());
+                        records.extend_from_slice(&px.to_le_bytes());
+                    }
+                    PathCommand::CubicTo(_, _, _, _, x, y) | PathCommand::QuadTo(_, _, x, y) => {
+                        let px = x.clamp(-32768.0, 32767.0) as i16;
+                        let py = y.clamp(-32768.0, 32767.0) as i16;
+                        records.extend_from_slice(&5u32.to_le_bytes());
+                        records.extend_from_slice(&0x0213u16.to_le_bytes());
+                        records.extend_from_slice(&py.to_le_bytes());
+                        records.extend_from_slice(&px.to_le_bytes());
+                    }
+                    PathCommand::Close => {}
+                }
+            }
+        }
+
+        // EOF record: META_EOF (size 3 words = 6 bytes, function 0x0000)
+        records.extend_from_slice(&3u32.to_le_bytes());
+        records.extend_from_slice(&0x0000u16.to_le_bytes());
+
+        // Standard WMF header: 18 bytes (9 words)
+        let total_words = ((18 + records.len()) / 2) as u32;
+        let mut wmf_header = Vec::with_capacity(18);
+        wmf_header.extend_from_slice(&1u16.to_le_bytes()); // file type (1 = disk)
+        wmf_header.extend_from_slice(&9u16.to_le_bytes()); // header size (9 words)
+        wmf_header.extend_from_slice(&0x0300u16.to_le_bytes()); // version 3.0
+        wmf_header.extend_from_slice(&total_words.to_le_bytes()); // file size in words
+        wmf_header.extend_from_slice(&0u16.to_le_bytes()); // num objects
+        wmf_header.extend_from_slice(&5u32.to_le_bytes()); // max record size in words
+        wmf_header.extend_from_slice(&0u16.to_le_bytes()); // reserved
+
+        // Placeable Header: 22 bytes (Key: 0x9AC6CDD7)
+        let mut placeable = Vec::with_capacity(22);
+        placeable.extend_from_slice(&0x9AC6CDD7u32.to_le_bytes());
+        placeable.extend_from_slice(&0u16.to_le_bytes()); // handle
+        placeable.extend_from_slice(&0i16.to_le_bytes()); // left
+        placeable.extend_from_slice(&0i16.to_le_bytes()); // top
+        placeable.extend_from_slice(&cx.to_le_bytes()); // right
+        placeable.extend_from_slice(&cy.to_le_bytes()); // bottom
+        placeable.extend_from_slice(&1440u16.to_le_bytes()); // inch
+        placeable.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+        // Checksum: XOR of first 10 16-bit words in placeable header
+        let mut checksum = 0u16;
+        for chunk in placeable.as_chunks::<2>().0 {
+            checksum ^= u16::from_le_bytes(*chunk);
+        }
+        placeable.extend_from_slice(&checksum.to_le_bytes());
+
+        let mut out = Vec::with_capacity(22 + 18 + records.len());
+        out.extend_from_slice(&placeable);
+        out.extend_from_slice(&wmf_header);
+        out.extend_from_slice(&records);
+        out
+    }
+
+    /// Parses a Windows Placeable Metafile or standard WMF into a [`VectorCanvas`].
+    pub fn from_wmf_bytes(bytes: &[u8]) -> Result<Self, VectorCodecError> {
+        let (records_start, width, height) = if bytes.len() >= 22 && bytes.starts_with(&0x9AC6CDD7u32.to_le_bytes()) {
+            let right = i16::from_le_bytes([bytes[10], bytes[11]]) as f64;
+            let bottom = i16::from_le_bytes([bytes[12], bytes[13]]) as f64;
+            let w = if right > 0.0 { right } else { 1920.0 };
+            let h = if bottom > 0.0 { bottom } else { 1080.0 };
+            (22 + 18, w, h)
+        } else if bytes.len() >= 18 && bytes.starts_with(&1u16.to_le_bytes()) && bytes[2..4] == 9u16.to_le_bytes() {
+            (18, 1920.0, 1080.0)
+        } else {
+            return Err(VectorCodecError::Parse("not a valid Windows Metafile (WMF)".into()));
+        };
+
+        let mut canvas = Self::new(width, height);
+        let mut cur_path = VectorPath::new();
+        let mut offset = records_start;
+
+        while offset + 6 <= bytes.len() {
+            let rec_words = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]) as usize;
+            let rec_bytes = rec_words * 2;
+            if rec_bytes < 6 || offset + rec_bytes > bytes.len() {
+                break;
+            }
+            let func = u16::from_le_bytes([bytes[offset + 4], bytes[offset + 5]]);
+            if func == 0x0000 {
+                break;
+            } else if func == 0x0214 && rec_bytes >= 10 {
+                let py = i16::from_le_bytes([bytes[offset + 6], bytes[offset + 7]]) as f64;
+                let px = i16::from_le_bytes([bytes[offset + 8], bytes[offset + 9]]) as f64;
+                if !cur_path.commands.is_empty() {
+                    canvas.add_path(std::mem::take(&mut cur_path));
+                }
+                cur_path.move_to(px, py);
+            } else if func == 0x0213 && rec_bytes >= 10 {
+                let py = i16::from_le_bytes([bytes[offset + 6], bytes[offset + 7]]) as f64;
+                let px = i16::from_le_bytes([bytes[offset + 8], bytes[offset + 9]]) as f64;
+                cur_path.line_to(px, py);
+            }
+            offset += rec_bytes;
+        }
+
+        if !cur_path.commands.is_empty() {
+            canvas.add_path(cur_path);
+        }
+
+        Ok(canvas)
+    }
+
+    /// Exports vector canvas to standard Lottie / Bodymovin JSON animation specification.
+    pub fn to_lottie_json(&self) -> Result<String, VectorCodecError> {
+        let mut layers = Vec::new();
+        for (i, path) in self.paths.iter().enumerate() {
+            let mut shapes = Vec::new();
+            let mut pts: Vec<[f64; 2]> = Vec::new();
+            for cmd in &path.commands {
+                match *cmd {
+                    PathCommand::MoveTo(x, y) | PathCommand::LineTo(x, y) => {
+                        pts.push([x, y]);
+                    }
+                    PathCommand::CubicTo(_, _, _, _, x, y) | PathCommand::QuadTo(_, _, x, y) => {
+                        pts.push([x, y]);
+                    }
+                    PathCommand::Close => {}
+                }
+            }
+            if !pts.is_empty() {
+                shapes.push(serde_json::json!({
+                    "ty": "sh",
+                    "nm": format!("Path {}", i + 1),
+                    "ks": {
+                        "a": 0,
+                        "k": {
+                            "i": vec![[0.0, 0.0]; pts.len()],
+                            "o": vec![[0.0, 0.0]; pts.len()],
+                            "v": pts,
+                            "c": true
+                        }
+                    }
+                }));
+            }
+            if let Some(fill) = path.fill {
+                shapes.push(serde_json::json!({
+                    "ty": "fl",
+                    "nm": "Fill",
+                    "c": {
+                        "a": 0,
+                        "k": [fill.r as f64 / 255.0, fill.g as f64 / 255.0, fill.b as f64 / 255.0, fill.a as f64 / 255.0]
+                    },
+                    "o": { "a": 0, "k": 100 }
+                }));
+            }
+            layers.push(serde_json::json!({
+                "ddd": 0,
+                "ind": i + 1,
+                "ty": 4,
+                "nm": format!("Layer {}", i + 1),
+                "sr": 1,
+                "ks": {
+                    "o": { "a": 0, "k": 100 },
+                    "r": { "a": 0, "k": 0 },
+                    "p": { "a": 0, "k": [0, 0, 0] },
+                    "a": { "a": 0, "k": [0, 0, 0] },
+                    "s": { "a": 0, "k": [100, 100, 100] }
+                },
+                "shapes": shapes,
+                "ip": 0,
+                "op": 60,
+                "st": 0
+            }));
+        }
+
+        let lottie = serde_json::json!({
+            "v": "5.7.0",
+            "fr": 30,
+            "ip": 0,
+            "op": 60,
+            "w": self.width as u32,
+            "h": self.height as u32,
+            "nm": "VectorCraft Lottie Export",
+            "ddd": 0,
+            "assets": [],
+            "layers": layers
+        });
+
+        serde_json::to_string_pretty(&lottie).map_err(|e| VectorCodecError::Serialization(format!("failed to serialize Lottie JSON: {e}")))
+    }
+
     /// Rasterizes vector canvas into a flat RGBA8 buffer of size `width * height * 4`.
     pub fn render_to_rgba8(&self) -> Vec<u8> {
         let w = (self.width.max(1.0).round() as usize).min(8192);
@@ -1067,5 +1286,38 @@ mod tests {
         canvas.text_to_outlines();
         assert_eq!(canvas.texts.len(), 0);
         assert_eq!(canvas.paths.len(), 3);
+    }
+
+    #[test]
+    fn test_wmf_roundtrip() {
+        let mut canvas = VectorCanvas::new(800.0, 600.0);
+        let mut path = VectorPath::new();
+        path.move_to(10.0, 20.0);
+        path.line_to(100.0, 200.0);
+        canvas.add_path(path);
+
+        let wmf = canvas.to_wmf_bytes();
+        assert!(wmf.len() >= 40);
+        assert_eq!(&wmf[0..4], &0x9AC6CDD7u32.to_le_bytes());
+
+        let parsed = VectorCanvas::from_wmf_bytes(&wmf).unwrap();
+        assert_eq!(parsed.width, 800.0);
+        assert_eq!(parsed.height, 600.0);
+        assert_eq!(parsed.paths.len(), 1);
+        assert_eq!(parsed.paths[0].commands.len(), 2);
+    }
+
+    #[test]
+    fn test_lottie_generation() {
+        let mut canvas = VectorCanvas::new(1920.0, 1080.0);
+        let mut path = VectorPath::new().with_fill(VectorColor::rgb(255, 0, 0));
+        path.move_to(0.0, 0.0);
+        path.line_to(100.0, 100.0);
+        canvas.add_path(path);
+
+        let lottie = canvas.to_lottie_json().unwrap();
+        assert!(lottie.contains("\"v\": \"5.7.0\""));
+        assert!(lottie.contains("\"w\": 1920"));
+        assert!(lottie.contains("\"h\": 1080"));
     }
 }

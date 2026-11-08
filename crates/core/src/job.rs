@@ -252,6 +252,10 @@ pub enum ContainerType {
     Pdf,
     Docx,
     Idml,
+    Epub,
+    Pptx,
+    LottieJson,
+    WindowsMetafile,
     // Adobe proprietary formats
     AdobeInDesignIndd,
     AdobePhotoshopPsd,
@@ -320,6 +324,10 @@ impl ContainerType {
         Self::Pdf,
         Self::Docx,
         Self::Idml,
+        Self::Epub,
+        Self::Pptx,
+        Self::LottieJson,
+        Self::WindowsMetafile,
         Self::AdobeInDesignIndd,
         Self::AdobePhotoshopPsd,
         Self::AdobePhotoshopPsb,
@@ -384,6 +392,10 @@ impl ContainerType {
             Self::Pdf => "pdf",
             Self::Docx => "docx",
             Self::Idml => "idml",
+            Self::Epub => "epub",
+            Self::Pptx => "pptx",
+            Self::LottieJson => "json",
+            Self::WindowsMetafile => "wmf",
             Self::AdobeInDesignIndd => "indd",
             Self::AdobePhotoshopPsd => "psd",
             Self::AdobePhotoshopPsb => "psb",
@@ -431,6 +443,10 @@ impl ContainerType {
             "dae" | "collada" => Some(Self::Collada),
             "usdc" => Some(Self::Usdc),
             "splat" => Some(Self::Splat),
+            "epub" => Some(Self::Epub),
+            "pptx" => Some(Self::Pptx),
+            "json" | "lottie" => Some(Self::LottieJson),
+            "wmf" | "emf" => Some(Self::WindowsMetafile),
             _ => None,
         };
         if alias.is_some() {
@@ -489,6 +505,10 @@ impl ContainerType {
             Self::Pdf => "Portable Document Format (PDF)",
             Self::Docx => "Microsoft Word Document (DOCX)",
             Self::Idml => "InDesign Markup Language (IDML)",
+            Self::Epub => "EPUB 3 Digital Publication (EPUB)",
+            Self::Pptx => "Microsoft PowerPoint Presentation (PPTX)",
+            Self::LottieJson => "Lottie Animation JSON (JSON)",
+            Self::WindowsMetafile => "Windows Metafile (WMF / EMF)",
             Self::AdobeInDesignIndd => "Adobe InDesign Document (INDD)",
             Self::AdobePhotoshopPsd => "Adobe Photoshop Document (PSD)",
             Self::AdobePhotoshopPsb => "Adobe Photoshop Large Document (PSB)",
@@ -538,14 +558,18 @@ impl ContainerType {
             | Self::Dicom
             | Self::Fits => MediaStreamKind::StillImage,
             Self::StillSequence | Self::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
-            Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps => MediaStreamKind::Vector2D,
-            Self::Pdf | Self::Docx | Self::Idml | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => MediaStreamKind::Document,
+            Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps | Self::WindowsMetafile => {
+                MediaStreamKind::Vector2D
+            }
+            Self::Pdf | Self::Docx | Self::Idml | Self::Epub | Self::Pptx | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => {
+                MediaStreamKind::Document
+            }
             Self::Gltf | Self::Usdz | Self::Usdc | Self::Obj | Self::Stl | Self::Ply | Self::Fbx | Self::Alembic | Self::Collada | Self::Splat => {
                 MediaStreamKind::Spatial3D
             }
             Self::AutocadDxf | Self::AutocadDwg | Self::HpglPlotter | Self::ArtcraftCadcraft => MediaStreamKind::Cad2D,
             Self::AdobePhotoshopPsd | Self::AdobePhotoshopPsb | Self::ArtcraftPhotocraft => MediaStreamKind::LayeredComposite,
-            Self::AdobeAfterEffectsAep | Self::ArtcraftEffectcraft => MediaStreamKind::MotionGraph,
+            Self::AdobeAfterEffectsAep | Self::ArtcraftEffectcraft | Self::LottieJson => MediaStreamKind::MotionGraph,
             Self::AdobePremierePrproj | Self::ArtcraftFilmcraft => MediaStreamKind::ProjectTimeline,
         }
     }
@@ -610,9 +634,20 @@ impl ContainerType {
                 Self::Fits,
             ],
             MediaStreamKind::Vector2D => {
-                vec![Self::ArtcraftVectorcraft, Self::Svg, Self::Pdf, Self::PostScriptEps, Self::AutocadDxf, Self::Png, Self::AdobeIllustratorAi]
+                vec![
+                    Self::ArtcraftVectorcraft,
+                    Self::Svg,
+                    Self::Pdf,
+                    Self::PostScriptEps,
+                    Self::AutocadDxf,
+                    Self::WindowsMetafile,
+                    Self::Png,
+                    Self::AdobeIllustratorAi,
+                ]
             }
-            MediaStreamKind::Document => vec![Self::ArtcraftDesigncraft, Self::Pdf, Self::Idml, Self::Docx, Self::Png, Self::Tiff],
+            MediaStreamKind::Document => {
+                vec![Self::ArtcraftDesigncraft, Self::Pdf, Self::Idml, Self::Docx, Self::Epub, Self::Pptx, Self::Png, Self::Tiff]
+            }
             MediaStreamKind::Spatial3D => {
                 vec![Self::Gltf, Self::Usdz, Self::Usdc, Self::Obj, Self::Stl, Self::Ply, Self::Fbx, Self::Alembic, Self::Collada, Self::Splat]
             }
@@ -628,6 +663,7 @@ impl ContainerType {
                 Self::AnimatedGif,
                 Self::StillSequence,
                 Self::Svg,
+                Self::LottieJson,
             ],
             MediaStreamKind::ProjectTimeline => {
                 vec![Self::ArtcraftFilmcraft, Self::IsoBmffMp4, Self::QuickTimeMov, Self::MxfOp1a, Self::MatroskaMkv, Self::Wave]
@@ -1230,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_container_type_extensions_and_media_kinds() {
+    fn test_container_type_extensions() {
         assert_eq!(ContainerType::AdobeInDesignIndd.file_extension(), "indd");
         assert_eq!(ContainerType::AdobePhotoshopPsd.file_extension(), "psd");
         assert_eq!(ContainerType::AdobePhotoshopPsb.file_extension(), "psb");
@@ -1250,9 +1286,19 @@ mod tests {
         assert_eq!(ContainerType::ArtcraftCadcraft.file_extension(), "cadcraft");
         assert_eq!(ContainerType::ArtcraftAnicraft.file_extension(), "anicraft");
         assert_eq!(ContainerType::PostScriptEps.file_extension(), "eps");
+        assert_eq!(ContainerType::Epub.file_extension(), "epub");
+        assert_eq!(ContainerType::Pptx.file_extension(), "pptx");
+        assert_eq!(ContainerType::LottieJson.file_extension(), "json");
+        assert_eq!(ContainerType::WindowsMetafile.file_extension(), "wmf");
+    }
 
-        // Media kind mapping
+    #[test]
+    fn test_container_type_media_kinds() {
         assert_eq!(ContainerType::AdobeInDesignIndd.media_kind(), MediaStreamKind::Document);
+        assert_eq!(ContainerType::Epub.media_kind(), MediaStreamKind::Document);
+        assert_eq!(ContainerType::Pptx.media_kind(), MediaStreamKind::Document);
+        assert_eq!(ContainerType::LottieJson.media_kind(), MediaStreamKind::MotionGraph);
+        assert_eq!(ContainerType::WindowsMetafile.media_kind(), MediaStreamKind::Vector2D);
         assert_eq!(ContainerType::AdobePhotoshopPsd.media_kind(), MediaStreamKind::LayeredComposite);
         assert_eq!(ContainerType::AutocadDxf.media_kind(), MediaStreamKind::Cad2D);
         assert_eq!(ContainerType::AdobeAfterEffectsAep.media_kind(), MediaStreamKind::MotionGraph);
@@ -1277,6 +1323,14 @@ mod tests {
         assert!(doc_targets.contains(&ContainerType::ArtcraftDesigncraft));
         assert!(doc_targets.contains(&ContainerType::Pdf));
         assert!(doc_targets.contains(&ContainerType::Idml));
+        assert!(doc_targets.contains(&ContainerType::Epub));
+        assert!(doc_targets.contains(&ContainerType::Pptx));
+
+        let motion_targets = ContainerType::ArtcraftEffectcraft.valid_conversion_targets();
+        assert!(motion_targets.contains(&ContainerType::LottieJson));
+
+        let vector_targets = ContainerType::ArtcraftVectorcraft.valid_conversion_targets();
+        assert!(vector_targets.contains(&ContainerType::WindowsMetafile));
 
         let psd_targets = ContainerType::AdobePhotoshopPsd.valid_conversion_targets();
         assert!(psd_targets.contains(&ContainerType::ArtcraftPhotocraft));
@@ -1289,6 +1343,11 @@ mod tests {
         assert_eq!(ContainerType::from_extension("aiff"), Some(ContainerType::Aiff));
         assert_eq!(ContainerType::from_extension("mxf"), Some(ContainerType::MxfOp1a));
         assert_eq!(ContainerType::from_extension("png"), Some(ContainerType::Png));
+        assert_eq!(ContainerType::from_extension("epub"), Some(ContainerType::Epub));
+        assert_eq!(ContainerType::from_extension("pptx"), Some(ContainerType::Pptx));
+        assert_eq!(ContainerType::from_extension("lottie"), Some(ContainerType::LottieJson));
+        assert_eq!(ContainerType::from_extension("wmf"), Some(ContainerType::WindowsMetafile));
+        assert_eq!(ContainerType::from_extension("emf"), Some(ContainerType::WindowsMetafile));
         assert_eq!(ContainerType::from_extension("nope"), None);
         for c in ContainerType::ALL {
             if !matches!(c, ContainerType::MxfOpAtom | ContainerType::StillSequence) {
