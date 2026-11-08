@@ -18,104 +18,82 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 `encoderCraft` has transitioned from initial workspace foundations into a battle-tested, production-ready universal media transcoding suite. Below is an executive overview of what has landed and what is actively in development.
 
-### ✅ What is Already Done (Milestones M0 – M38, Alpha 2 Release Candidate)
+### ✅ What is Already Done (Milestones M0 – M41, v0.1.0-alpha.2 Release)
 
-- **Universal Creative Suite Interoperability (Milestone 30):**
+- **Universal Creative Suite Interoperability (Milestone 30 & 39):**
   - Clean-room ingestion, parsing, and conversion for standard Adobe project files: Premiere Pro (`.prproj` gzipped XML), After Effects (`.aep` RIFX chunks), InDesign (`.indd` / `.idml`), Illustrator (`.ai` dual-stream PDF/PGF), Photoshop (`.psd` / `.psb` layer trees), and Audition (`.sesx` multitrack XML).
   - Technical drafting and CAD interop: AutoCAD DXF (ASCII & binary), DWG headers, HPGL/PLT plotter formats, and vector canvas blueprint PDF export.
   - Native ArtCraft binary container round-tripping with decompression bomb protection (64 MiB ceiling): `.filmcraft` (`\x89CRAFT\x00\x01F`), `.effectcraft` (`\x89CRAFT\x00\x01E`), `.soundcraft` (`\x89CRAFT\x00\x01S`), `.photocraft`, `.vectorcraft` (`\x89CRAFT\x00\x01V`), `.designcraft`, and `.cadcraft`.
-  - Open exchange format exports: Final Cut Pro XML (`fcpxml` v1.9), OpenTimelineIO (`.otio`), and W3C Bodymovin / Lottie JSON animations.
+  - Open exchange & office publications: Final Cut Pro XML (`fcpxml` v1.9), OpenTimelineIO (`.otio`), W3C Bodymovin / Lottie JSON animations, EPUB 3 (`.epub` reflowable & fixed-layout), Microsoft PowerPoint OpenXML (`.pptx`), and Windows Metafile (`.wmf`).
 
-- **Video & Broadcast Moving Image Pipeline:**
+- **Video, Broadcast MPEG-TS & Apple Spatial Video Pipeline (Milestones 19, 34, 40):**
   - Codecs: Apple ProRes (Proxy, LT, 422, HQ, 4444), Avid DNxHD / DNxHR (HQ, HQX 10-bit), H.264 / AVC, HEVC / H.265 (8-bit & 10-bit), AV1, VP9, VP8, Motion-JPEG, animated GIF with NeuQuant adaptive palette quantization.
   - Broadcast MXF: SMPTE ST 377-1 **MXF OP1a & OP-Atom** muxing/demuxing with simultaneous audio/video interleaving.
+  - Broadcast Transport Streams (MPEG-TS): Clean-room 188-byte packetizer (`.ts`, `.m2ts`, `.mts`) with `0x47` sync alignment, PAT (PID `0x0000`), PMT (PID `0x0100`), 90 kHz PCR timestamps, and Annex B / ADTS encapsulation (`CableLabs Broadcast MPEG-TS`).
+  - Apple Spatial Video (MV-HEVC): Stereoscopic 10-bit Multi-View HEVC in QuickTime/MP4 containers with `svhd`, `st3d`, and `lhvC` disparity signaling for Apple Vision Pro.
   - Pre-configured Broadcast Delivery Shims (Milestone 34): Sony XDCAM HD422 (50 Mbps), Panasonic AVC-Intra 100, DPP AS-11 UK HD Delivery (25p / EBU R128), and AMWA AS-10 in MXF OP-1a with 8-channel 24-bit 48 kHz PCM audio.
   - Numbered Image Sequences: Dual-direction conversion from/to numbered file sequences (`shot_%04d.png`, customizable frame rates).
 
-- **Advanced Transforms & Visual Effects Overlays (Milestones 32 & 37):**
+- **Advanced Transforms, 3D Color LUTs, Subtitles & Visual Effects Overlays (Milestones 32, 37, 40):**
   - Video Transforms: Image flipping (`Horizontal`, `Vertical`, `Both`), deinterlacing (`TopFieldFirst`, `BottomFieldFirst`, `Bob`), and pixel aspect ratio conform (`Source`, `Square`, `Custom`).
+  - 3D Look-Up Table (LUT) Transcoding & Color Baking: Bidirectional conversion across Adobe/DaVinci `.cube`, Autodesk `.3dl`, and Lumetri `.look` with tetrahedral interpolation, lattice resizing (`17³`, `33³`, `65³`), and direct frame color baking.
+  - Universal Subtitle & Closed Caption Matrix: Bidirectional conversion across SubRip (`.srt`), WebVTT (`.vtt`), Scenarist CEA-608 (`.scc`), MacCaption CEA-708 (`.mcc`), SMPTE-TT / IMSC1 (`.ttml`), SubStation Alpha (`.ass` / `.ssa`), and EBU-STL (`.stl`) with rational framerate retiming and burn-in compositing.
   - Burn-In Timecode (BITC): Real SMPTE timecode generation with selectable anchor positioning, relative scaling, opacity, and custom starting timecodes.
   - Visual Overlays: Custom graphic watermarks with alpha blending and dailies name overlays (`NameOverlayConfig`).
   - Broadcast Video Limiter: Soft-knee rolloff clamping to legal broadcast luminance levels (IRE 100 / 103).
   - SDR Conform HDR Tone-Mapping: Extended Reinhard tone-mapping curve in `encodercraft-color` converting HDR (HLG / PQ) to standard Rec.709.
   - Split Compare A/B Preview: Real-time interactive split slider comparing Source vs. Output frames alongside frame crop margins (`CropConfig`).
 
-- **Professional Audio DSP & Multichannel Matrix Routing (Milestones 30, 34, 37, 38):**
-  - Formats: Broadcast Wave (BWF) with `bext` and `ixml` chunks, Lossless FLAC (24-bit 48 kHz), Apple Lossless AIFF, AAC-LC.
+- **Professional Audio DSP, Pure-Rust Encoders & Multichannel Matrix Routing (Milestones 30, 34, 37–41):**
+  - Formats: Broadcast Wave (BWF) with `bext` and `ixml` chunks, Lossless FLAC (24-bit 48 kHz), Apple Lossless AIFF, 64-bit Apple Core Audio Format (`.caf`), Pure-Rust MP3 (MPEG-1 Layer 3 with ID3v2.4), Ogg Vorbis (`.ogg`), standalone RFC 7845 Ogg Opus (`.opus`), and AAC-LC.
   - ITU-R BS.1770-4 / EBU R128 Loudness: Integrated LUFS measurement, True-Peak detection with 4x oversampling, and automatic loudness normalization (-23 LUFS broadcast, -14 LUFS streaming, -1 dBTP ceiling).
   - Multichannel Audio Matrix Router: Interactive routing grid mapping arbitrary source channels into Discrete Mono, Stereo Pairs, 5.1 Surround, or 7.1 Surround outputs.
   - Lip-Sync Delay Offset: Millisecond-precise audio delay compensation (-5000 ms to +5000 ms) with sample-exact silence prepending or head-trimming.
-  - Audio Tag Editor: Embedded ID3 and XMP metadata editor for Title, Artist, Album, Track Number, Year, and Genre.
+  - Official Audio Metadata Auto-Tagger & Editor: Full ID3v2.4, Vorbis, RIFF INFO, and XMP metadata editor for Title, Artist, Album, Track Number, Year, ISRC, and Genre with automated lookup from MusicBrainz and iTunes Search APIs.
 
-- **3D Spatial, Vector & Raster Image Domains:**
-  - 3D Assets: Khronos glTF 2.0 / binary GLB, Wavefront OBJ + MTL, 3D Print binary STL, Stanford PLY, Apple AR Quick Look USDZ (ZIP package + USDA schema).
-  - Raster Images: High-depth PNG (RGBA 8-bit), Broadcast TIFF (16-bit RGB), VFX OpenEXR (half-float 16-bit), WebP, BMP (uncompressed 24/32-bit), JPEG with high-fidelity `FrameScaler` (Fit, Fill, Stretch).
-  - Vectors & Print: Clean-room SVG 2.0 optimization, Print-Ready PDF/X-4 (ISO 15930), PostScript EPS, text-to-outlines conversion.
+- **3D Spatial, Scientific Imaging, GPU Textures, Vector & Raster Domains (Milestones 17, 30, 39):**
+  - 3D Assets: Khronos glTF 2.0 / binary GLB, Pixar USDZ & binary crate USDC (`.usdc`), Autodesk FBX (`.fbx` ASCII & binary), Alembic (`.abc` Ogawa), Collada (`.dae`), Wavefront OBJ + MTL, 3D Print binary STL, Stanford PLY, and 3D Gaussian Splats (`.splat`).
+  - Raster, Cinema, GPU & Scientific Images: High-depth PNG (RGBA 8-bit), Broadcast TIFF (16-bit RGB), VFX OpenEXR (half-float & multi-sample Deep EXR `DEEPSCANLINE`), SMPTE 268M DPX (`.dpx` 10-bit film scans), DirectX GPU textures (`.dds` BC1/BC2/BC3), Next-Gen JPEG XL (`.jxl`), Radiance RGBE (`.hdr`), Medical DICOM (`.dcm`), Astronomical FITS (`.fits`), WebP, BMP, and JPEG.
+  - Vectors & Print: Clean-room SVG 2.0 optimization, Print-Ready PDF/X-4 (ISO 15930), PostScript EPS, Windows Metafile (`.wmf`), and text-to-outlines conversion.
 
-- **Queue Automation, Ergonomics & Desktop UI (Milestones 27, 31, 33, 35, 36, 38):**
-  - Layout & Density: Standardized 8 px panel margins, AME-style pinned reference toolbar, footer with auto-shutdown and overall progress, strict table column boundary locking preventing layout shifts.
-  - Queue Multi-Selection & Batch Editing: Simultaneous format and preset switching across all highlighted items; native Shift/Command multi-file selection and recursive folder scanning (`AppCommand::AddFolder`).
+- **Queue Automation, Ergonomics & Desktop UI (Milestones 27, 31, 33, 35, 36, 38, 41):**
+  - Layout & Density: Standardized 8 px panel margins, AME-style pinned reference toolbar, footer with auto-shutdown and overall progress, strict table column boundary locking, zero egui ID collisions, and fixed-header Preset Browser bounds.
+  - Queue Multi-Selection & Batch Editing: Simultaneous format and preset switching across all highlighted items; native Shift/Command multi-file selection in OS dialogs and Media Browser, plus recursive folder scanning (`AppCommand::AddFolder`).
   - Source Properties Essence Viewer: Dedicated modal stream essence prober (`Cmd+I`) inspecting codecs, color spaces, matrix, primaries, audio sample rates, channels, duration, and timecode with one-click clipboard export.
-  - Quick-Switch Dropdowns & Stitch Dialog: In-row ComboBoxes with container auto-extension synchronization; sequence clip stitching dialog with clip order re-ordering.
-  - Context-Aware Format Filtering: Inline format choices filtered by media stream essence with visual chips (`[VID]`, `[AUD]`, `[IMG]`, `[DOC]`, `[3D]`, `[SEQ]`).
-  - Automated Queue Ingestion & Watch Folders: Auto-start queue on configurable user idle timeout, automatic destination collision incrementing (`_1`, `_2`), multi-target watch folder routing with automated archiving policies (`LeaveInPlace`, `MoveToProcessed`, `MoveToArchive`, `DeleteSource`), and completion chime alert.
+  - Quick-Switch Dropdowns & Stitch Dialog: In-row ComboBoxes with instant application and container auto-extension synchronization; sequence clip stitching dialog with clip order re-ordering.
+  - Context-Aware Format Filtering: Inline format choices strictly filtered by media stream essence with distinctive visual badges (`[VID]`, `[AUD]`, `[IMG]`, `[DOC]`, `[3D]`, `[SEQ]`).
+  - Granular AME-Parity Preferences: Tabbed Preferences dialog configuring GPU/CPU renderer selection, parallel worker concurrency (`1..=16`), memory/VRAM budgets, idle auto-start timeout, destination collision incrementing (`_1`, `_2`), and watch folder settle timing.
   - Synchronized In/Out Point Trimming: Inspector preview canvas markers synchronized with Preview Monitor transport (`I`, `O`, `[`, `]`).
 
 - **Architecture, Headless Tooling & Never-Crash Guarantee:**
   - Headless CLI (`encodercraft-cli`) with `encode`, `convert`, `probe`, `watch`, `daemon`, and `command` subcommands.
   - JSON-RPC stdio **Model Context Protocol (MCP)** server for autonomous AI coding agents.
-  - Quality verification: Over 150 unit, fuzz, layout, and integration tests passed in `cargo xtask ci` with strict L0–L7 architectural layering compliance and zero panics (`#![deny(clippy::unwrap_used)]`).
+  - Quality verification: Over 300 unit, fuzz, layout, and integration tests passed in `cargo xtask ci` with strict L0–L7 architectural layering compliance and zero panics (`#![deny(clippy::unwrap_used)]`).
 
 ---
 
-### 🛠️ What is in the Making (Active Milestones)
-
-Development is actively advancing on the next generation of creative and broadcast deliverables:
+### 🛠️ What is Next (Post-Alpha.2 Roadmap)
 
 ```mermaid
 flowchart LR
-    subgraph Completed ["✅ Completed (M0 - M38)"]
+    subgraph Completed ["✅ Completed (M0 - M41 · v0.1.0-alpha.2)"]
         M30["M30: Universal Format Expansion"]
-        M31["M31: UI Layout Parity"]
-        M32["M32: Inspector & Effects Overlays"]
-        M33["M33: Queue Automation & Watchers"]
-        M34["M34: Audio Matrix & Broadcast MXF"]
-        M35["M35: Source Properties & Stitch"]
-        M36["M36: Column Locking & Neutral Theme"]
-        M37["M37: Transforms & Industry E2E"]
-        M38["M38: Batch Select & Audio Tags"]
-    end
-
-    subgraph Active ["🛠️ In the Making (M39 - M40)"]
+        M31_38["M31-M38: UI Parity, Effects & Transforms"]
         M39["M39: Ecosystem Codec Harvest"]
-        M40["M40: Advanced Broadcast & Color"]
-        IPC["Cross-App IPC Project Streaming"]
+        M40["M40: LUTs, Captions, MPEG-TS & Spatial Video"]
+        M41["M41: Workflow & Batch UX Polish"]
     end
 
-    Completed --> Active
+    subgraph Next ["🛠️ Post-Alpha.2"]
+        IPC["#1: Live Project-Reference Rendering via IPC"]
+        UPSTREAM["craft-libs Upstream Codec Consolidation"]
+    end
+
+    Completed --> Next
 ```
 
-#### 1. Milestone 39: Ecosystem Codec Harvest — Audio, Cinema, GPU, 3D & Publications
-*Tracked under [GitHub Milestone 17 (M39)](https://github.com/el-j/encoderCraft/milestone/17)*
-
-Harvesting existing, pure-Rust implementations across sibling ArtCraft repositories (`soundcraft`, `photocraft`, `texturecraft`, `designcraft`, `effectcraft`, `craft-libs`) to eliminate all external tool requirements and bridge fallbacks:
-
-- **Pure-Rust MP3 & Ogg Vorbis Native Encoders ([#183](https://github.com/el-j/encoderCraft/issues/183)):** Replacing stub fallbacks with dedicated native encoders producing standards-compliant MPEG-1 Layer 3 with ID3v2 headers and Ogg Vorbis bitstreams with Vorbis comment tags.
-- **Apple Core Audio Format (.caf) & Standalone Ogg Opus (.opus) ([#184](https://github.com/el-j/encoderCraft/issues/184)):** Integrating the 64-bit Apple CAF writer from `soundcraft-audio-io` (arbitrary file sizes and up to 64 surround channels) and standalone RFC 7845 `.opus` container multiplexing.
-- **DirectDraw Surface (DDS), SMPTE DPX & JPEG XL ([#185](https://github.com/el-j/encoderCraft/issues/185)):** Integrating `photocraft-codecs` for GPU texture maps (BC1 through BC7 / BC6H HDR), 10/12/16-bit SMPTE 268M DPX film scans with timecode headers, and next-generation JPEG XL (VarDCT & Modular).
-- **Deep OpenEXR, Radiance HDR, DICOM & FITS ([#186](https://github.com/el-j/encoderCraft/issues/186)):** Multi-part Deep OpenEXR with Cryptomatte ID channels, Radiance HDR (`.hdr` / `.pic`) RGBE environment lighting, medical DICOM (`.dcm`), and astronomical FITS (`.fits`).
-- **Autodesk FBX, Alembic (.abc) & Collada (.dae) 3D Interchange ([#187](https://github.com/el-j/encoderCraft/issues/187)):** Integrating `texturecraft-formats` for Autodesk FBX binary/ASCII meshes, Alembic Ogawa VFX animation caches, Collada DAE, and binary Universal Scene Description (`.usdc`).
-- **EPUB 3 Publications, PowerPoint PPTX & Lottie Animations ([#188](https://github.com/el-j/encoderCraft/issues/188)):** Connecting `designcraft-epub` (reflowable and fixed-layout), `designcraft-pptx` (Microsoft PowerPoint OpenXML slide decks), and `effectcraft-lottie` for web vector animations.
-
-#### 2. Milestone 40: Advanced Broadcast, Color & Delivery Paradigms (Novel Formats)
-*Tracked under [GitHub Milestone 18 (M40)](https://github.com/el-j/encoderCraft/milestone/18)*
-
-Extending `encoderCraft` into specialized media domains that traditional batch encoders leave unaddressed:
-
-- **3D Look-Up Table (LUT) Transcoding & Baking Engine ([#189](https://github.com/el-j/encoderCraft/issues/189)):** Bidirectional conversion between 1D and 3D LUT tables (Adobe/DaVinci `.cube`, Autodesk `.3dl`, Lumetri `.look`), lattice dimension resampling (17x17x17 to 33x33x33 or 65x65x65), tetrahedral interpolation, and direct transcode pipeline color baking.
-- **Universal Subtitle & Closed Caption Transcoding Matrix ([#190](https://github.com/el-j/encoderCraft/issues/190)):** Bidirectional conversion across SubRip (`.srt`), WebVTT (`.vtt`), Scenarist Closed Caption (`.scc`), SMPTE-TT / IMSC1 (`.ttml`), and SubStation Alpha (`.ass` / `.ssa`) with framerate retiming (e.g. 23.976 to 24.0 or 25.0 fps drop-frame) and sync offset adjustment.
-- **Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) ([#191](https://github.com/el-j/encoderCraft/issues/191)):** Clean-room 188-byte MPEG-TS transport stream packetizer (`.ts` / `.m2ts`) with PAT/PMT tables and PCR timestamp alignment for broadcast playout, alongside Apple Vision Pro stereoscopic Multi-View HEVC (MV-HEVC) `lhvC` signaling in ISO BMFF containers.
-- **Cross-App Shared-Memory Project Streaming ([#1](https://github.com/el-j/encoderCraft/issues/1)):** Low-latency shared memory frame transport (iceoryx2 ring buffers) feeding raw RGBA frames and f32 audio directly between sibling ArtCraft applications (`filmcraft`, `effectcraft`, `soundcraft`) and `encoderCraft`.
+- **Cross-App Project-Reference Rendering ([#1](https://github.com/el-j/encoderCraft/issues/1)):** Extending the existing `iceoryx2` shared-memory frame/audio ring buffer transport to stream live timeline sequence references directly from running `filmcraft`, `effectcraft`, and `soundcraft` desktop sessions without intermediate project saves.
+- **Upstream `craft-libs` Consolidation:** Migrating the newly harvested modular codecs (`.dds`, `.dpx`, `.jxl`, `.fbx`, `.abc`, `.dae`, `.usdc`, `.splat`, `.cube`/`.3dl`/`.look`, `.ts`) into `storytold/craft-libs` as shared workspace crates for all 16 ArtCraft applications.
 
 ---
 

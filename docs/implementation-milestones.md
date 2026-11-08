@@ -726,25 +726,25 @@ flowchart LR
    - Replace FLAC-fallback stubs for `ContainerType::Mp3` and `ContainerType::OggAudio` in `crates/pipeline/src/pipeline.rs`.
    - Implement pure-Rust MPEG-1 Layer 3 encoder with ID3v2 metadata header injection.
    - Implement pure-Rust Ogg Vorbis audio encoder writing standards-compliant `.ogg` bitstreams with Vorbis comment tags.
-2. [ ] **Apple Core Audio Format (.caf) & Standalone Ogg Opus (.opus) ([#184](https://github.com/el-j/encoderCraft/issues/184)):**
+2. [x] **Apple Core Audio Format (.caf) & Standalone Ogg Opus (.opus) ([#184](https://github.com/el-j/encoderCraft/issues/184)):**
    - Integrate 64-bit Apple Core Audio Format (`.caf`) writer from `soundcraft-audio-io` supporting arbitrary file sizes and up to 64 surround audio channels.
    - Implement standalone RFC 7845 `.opus` container multiplexing with OpusHead and OpusTags header packets.
-3. [ ] **GPU DirectDraw Surface (DDS), SMPTE DPX & JPEG XL ([#185](https://github.com/el-j/encoderCraft/issues/185)):**
+3. [x] **GPU DirectDraw Surface (DDS), SMPTE DPX & JPEG XL ([#185](https://github.com/el-j/encoderCraft/issues/185)):**
    - Integrate `photocraft-codecs` DDS block compression encoder (BC1 through BC7, BC6H HDR).
    - Integrate 10/12/16-bit SMPTE 268M DPX film scans with timecode headers.
    - Integrate JPEG XL (`.jxl`) next-generation image compression with VarDCT and Modular modes.
-4. [ ] **Deep OpenEXR, Radiance HDR, DICOM & FITS ([#186](https://github.com/el-j/encoderCraft/issues/186)):**
+4. [x] **Deep OpenEXR, Radiance HDR, DICOM & FITS ([#186](https://github.com/el-j/encoderCraft/issues/186)):**
    - Connect `photocraft-codecs` Deep EXR with Cryptomatte ID channels.
    - Add Radiance HDR (`.hdr` / `.pic`) RGBE environment maps and image-based lighting.
    - Add medical DICOM (`.dcm`) and astronomical FITS (`.fits`) image parsing and writing.
-5. [ ] **Autodesk FBX, Alembic (.abc) & Collada (.dae) 3D Interchange ([#187](https://github.com/el-j/encoderCraft/issues/187)):**
+5. [x] **Autodesk FBX, Alembic (.abc) & Collada (.dae) 3D Interchange ([#187](https://github.com/el-j/encoderCraft/issues/187)):**
    - Integrate `texturecraft-formats` for Autodesk FBX binary and ASCII mesh geometries.
    - Integrate Alembic Ogawa animation caches and Collada DAE asset interchange.
-   - Support binary Universal Scene Description (`.usdc`).
-6. [ ] **EPUB 3 Publications, PowerPoint PPTX & Lottie Animations ([#188](https://github.com/el-j/encoderCraft/issues/188)):**
+   - Support binary Universal Scene Description (`.usdc`) and 3D Gaussian Splats (`.splat`).
+6. [x] **EPUB 3 Publications, PowerPoint PPTX & Lottie Animations ([#188](https://github.com/el-j/encoderCraft/issues/188)):**
    - Connect `designcraft-epub` for EPUB 3 reflowable and fixed-layout packages.
    - Connect `designcraft-pptx` for Microsoft PowerPoint slide deck generation.
-   - Connect `effectcraft-lottie` for web vector animation JSON exports.
+   - Connect `effectcraft-lottie` for web vector animation JSON exports and Windows Metafile (`.wmf`).
 
 ---
 
