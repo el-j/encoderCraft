@@ -39,6 +39,12 @@ pub struct XmpMetadata {
     /// Starting timecode string e.g. "01:00:00:00" (xmpDM:startTimecode).
     #[serde(default)]
     pub start_timecode: Option<String>,
+    /// Composer or songwriter (xmpDM:composer).
+    #[serde(default)]
+    pub composer: Option<String>,
+    /// International Standard Recording Code (ISRC) for music track identification.
+    #[serde(default)]
+    pub isrc: Option<String>,
     /// Whether to generate an external sidecar `.xmp` file alongside the output.
     #[serde(default)]
     pub export_sidecar_xmp: bool,
@@ -104,6 +110,14 @@ impl XmpMetadata {
             let escaped = escape_xml(genre);
             dm_elements.push_str(&format!("      <xmpDM:genre>{escaped}</xmpDM:genre>\n"));
         }
+        if let Some(ref composer) = self.composer {
+            let escaped = escape_xml(composer);
+            dm_elements.push_str(&format!("      <xmpDM:composer>{escaped}</xmpDM:composer>\n"));
+        }
+        if let Some(ref isrc) = self.isrc {
+            let escaped = escape_xml(isrc);
+            dm_elements.push_str(&format!("      <xmpDM:ISRC>{escaped}</xmpDM:ISRC>\n"));
+        }
 
         format!(
             "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
@@ -157,6 +171,8 @@ mod tests {
             project_name: Some("FilmCraft Sequence 1".into()),
             create_date: Some("2026-11-02T12:00:00Z".into()),
             start_timecode: Some("01:00:00:00".into()),
+            composer: Some("ArtCraft Audio Lab".into()),
+            isrc: Some("US-S1Z-26-00001".into()),
             export_sidecar_xmp: true,
         };
 
@@ -164,6 +180,8 @@ mod tests {
         assert!(packet.contains("<?xpacket begin="));
         assert!(packet.contains("Cinematic Master 4K"));
         assert!(packet.contains("ArtCraft Team"));
+        assert!(packet.contains("<xmpDM:composer>ArtCraft Audio Lab</xmpDM:composer>"));
+        assert!(packet.contains("<xmpDM:ISRC>US-S1Z-26-00001</xmpDM:ISRC>"));
         assert!(packet.contains("ArtCraft OST"));
         assert!(packet.contains("<xmpDM:trackNumber>3</xmpDM:trackNumber>"));
         assert!(packet.contains("<xmpDM:releaseDate>2026</xmpDM:releaseDate>"));

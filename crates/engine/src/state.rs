@@ -104,6 +104,12 @@ pub struct AppPreferences {
     /// Persistent allow/deny decisions for exact source-to-target lossy video conversions.
     #[serde(default)]
     pub lossy_conversion_decisions: Vec<ConversionDecision>,
+    /// Default audio master sample rate (Hz) for multi-channel export.
+    #[serde(default = "default_audio_sample_rate")]
+    pub default_audio_sample_rate: u32,
+    /// Default audio master channels (1 = Mono, 2 = Stereo, 6 = 5.1 Surround).
+    #[serde(default = "default_audio_channels")]
+    pub default_audio_channels: u8,
 }
 
 fn default_true() -> bool {
@@ -128,6 +134,14 @@ fn default_vram_budget_percent() -> u8 {
 
 fn default_renderer() -> String {
     "Pure-Rust Software (CPU)".into()
+}
+
+fn default_audio_sample_rate() -> u32 {
+    48_000
+}
+
+fn default_audio_channels() -> u8 {
+    2
 }
 
 /// Current preferences file schema.
@@ -186,6 +200,8 @@ impl Default for AppPreferences {
             vram_budget_percent: default_vram_budget_percent(),
             system_title_bar: false,
             lossy_conversion_decisions: Vec::new(),
+            default_audio_sample_rate: default_audio_sample_rate(),
+            default_audio_channels: default_audio_channels(),
         }
     }
 }

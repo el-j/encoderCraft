@@ -375,7 +375,12 @@ impl ContainerType {
             "jpeg" => Some(Self::Jpeg),
             "tiff" => Some(Self::Tiff),
             "gltf" => Some(Self::Gltf),
-            "oga" => Some(Self::OggAudio),
+            "oga" | "ogg" | "opus" => Some(Self::OggAudio),
+            "bwf" => Some(Self::Wave),
+            "aif" => Some(Self::Aiff),
+            "jpg" => Some(Self::Jpeg),
+            "tif" => Some(Self::Tiff),
+            "glb" => Some(Self::Gltf),
             "ps" => Some(Self::PostScriptEps),
             _ => None,
         };

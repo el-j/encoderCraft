@@ -133,7 +133,7 @@ pub fn render_watch_panel(
 
         ui.add_space(2.0);
 
-        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("watch_panel_configs_scroll_area").auto_shrink([false; 2]).show(ui, |ui| {
             let mut remove_idx = None;
             for (idx, cfg) in state.configs.iter_mut().enumerate() {
                 let is_selected = state.selected_config_idx == Some(idx);

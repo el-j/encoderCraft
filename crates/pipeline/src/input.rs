@@ -71,7 +71,7 @@ fn trim_window(source: &SourceDescriptor, out_fps: Rational64) -> (f64, Option<f
             _ => 0.0,
         }
     };
-    let start = start_tick.filter(|t| *t > 0).map(to_seconds).unwrap_or(0.0);
+    let start = start_tick.filter(|t| *t >= 0).map(to_seconds).unwrap_or(0.0);
     let duration = duration_ticks.filter(|t| *t > 0).map(to_seconds);
     (start, duration)
 }

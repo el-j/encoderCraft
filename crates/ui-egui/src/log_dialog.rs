@@ -114,7 +114,7 @@ pub fn render_log_dialog(
 
                 ui.add_space(2.0);
 
-                egui::ScrollArea::vertical().max_height(320.0).auto_shrink([false; 2]).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("log_dialog_events_scroll_area").max_height(320.0).auto_shrink([false; 2]).show(ui, |ui| {
                     for entry in filtered.iter().rev() {
                         let is_ok = entry.status == "Completed";
                         let status_color = if is_ok { tokens.status_completed } else { tokens.status_failed };

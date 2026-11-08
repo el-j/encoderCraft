@@ -382,7 +382,7 @@ impl MediaReader {
         &self.probe
     }
 
-    /// Number of video frames; stills have exactly one and audio-only sources none.
+    /// Number of video frames; stills have exactly one and audio-only sources have zero.
     pub fn frame_count(&self) -> u64 {
         let Some(video) = &self.probe.video else {
             return 0;
