@@ -426,3 +426,45 @@ LUT_3D_SIZE 2
     let look_text = std::fs::read_to_string(&out_look).unwrap();
     assert!(look_text.contains("<Look version=\"1.0\">"));
 }
+
+#[test]
+fn test_cli_caption_convert() {
+    let bin = env!("CARGO_BIN_EXE_encodercraft-cli");
+    let dir = tempfile::tempdir().unwrap();
+
+    let src_srt = dir.path().join("input.srt");
+    let srt_content = "\
+1
+00:00:01,000 --> 00:00:03,000
+First subtitle line.
+
+2
+00:00:04,500 --> 00:00:07,000
+Second subtitle line.
+";
+    std::fs::write(&src_srt, srt_content).unwrap();
+
+    let out_ass = dir.path().join("output.ass");
+    let run_ass = Command::new(bin)
+        .args(["caption-convert"])
+        .arg(&src_srt)
+        .arg(&out_ass)
+        .args(["--offset-ms", "500", "--retime", "24", "25"])
+        .output()
+        .expect("run caption-convert to ass");
+    assert!(run_ass.status.success(), "{}", String::from_utf8_lossy(&run_ass.stderr));
+
+    let ass_text = std::fs::read_to_string(&out_ass).unwrap();
+    assert!(ass_text.contains("[Script Info]"));
+    assert!(ass_text.contains("[Events]"));
+    assert!(ass_text.contains("Dialogue:"));
+    assert!(ass_text.contains("First subtitle line."));
+
+    let out_vtt = dir.path().join("output.vtt");
+    let run_vtt = Command::new(bin).args(["caption-convert"]).arg(&out_ass).arg(&out_vtt).output().expect("run caption-convert to vtt");
+    assert!(run_vtt.status.success(), "{}", String::from_utf8_lossy(&run_vtt.stderr));
+
+    let vtt_text = std::fs::read_to_string(&out_vtt).unwrap();
+    assert!(vtt_text.contains("WEBVTT"));
+    assert!(vtt_text.contains("First subtitle line."));
+}

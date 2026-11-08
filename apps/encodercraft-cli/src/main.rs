@@ -48,6 +48,7 @@ fn run() -> Result<(), EncoderError> {
         Some("stream-encode") => stream::cmd_stream_encode(&args[2..], &default_preset_registry())?,
         Some("stream-test") => stream::cmd_stream_test(&args[2..])?,
         Some("lut-convert") => cmd_lut_convert(&args[2..])?,
+        Some("caption-convert") => cmd_caption_convert(&args[2..])?,
         Some("mcp") => cmd_mcp()?,
         Some("--version") | Some("-V") => println!("encodercraft-cli {}", env!("CARGO_PKG_VERSION")),
         Some("--help") | Some("-h") | Some("help") => print_usage(),
@@ -79,6 +80,9 @@ fn print_usage() {
     println!("      --xmp-creator <creator>             Embed XMP Dublin Core author/creator");
     println!("      --sidecar-xmp                       Export external sidecar .xmp file");
     println!("      --caption <file>                    Subtitle/caption file to embed or burn");
+    println!("      --caption-format <format>           Sidecar caption format (srt, vtt, scc, mcc, ttml, ass, stl)");
+    println!("      --caption-offset-ms <ms>            Subtitle sync time offset in milliseconds");
+    println!("      --burn-captions                     Burn captions directly into video frames");
     println!("      --fps <rate>                        Frame rate for image sequences (e.g. 25, 29.97, 30000/1001); input like shot_%04d.png");
     println!("      --rotate <0|90|180|270>              Clockwise video rotation");
     println!("      --scale-mode <fit|fill|stretch|center> Video scaling and aspect handling");
@@ -86,7 +90,6 @@ fn print_usage() {
     println!("      --frame-rate-mode <nearest|blend>     Frame selection when changing video frame rate");
     println!("      --frame-memory-mib <MiB>               Bounded video-frame queue budget (default 256 MiB)");
     println!("      --normalization-memory-mib <MiB>       Maximum whole-track loudness buffer (default 1024 MiB)");
-    println!("      --burn-captions                     Burn captions directly into video frames");
     println!("      --sequence <name|index>             Export only this sequence/composition of a project source (see `probe`)");
     println!("      --pages <N|A-B>                     Export only these pages of a document source");
     println!("      --layers <a,b,...>                  Export only these layers of a CAD drawing or layered image");
@@ -97,6 +100,8 @@ fn print_usage() {
     println!("  probe <input>                           Inspect containers, codecs, and stream metadata");
     println!("  lut-convert <input> <output> [--size N] [--trilinear|--tetrahedral]");
     println!("                                          Convert, resample, and transcode 1D/3D LUT (.cube, .3dl, .look)");
+    println!("  caption-convert <input> <output> [--offset-ms <ms>] [--retime <src_fps> <dst_fps> | --factor <factor>]");
+    println!("                                          Convert and retime subtitles (.srt, .vtt, .scc, .mcc, .ttml, .ass, .stl)");
     println!("  presets                                 List all factory presets");
     println!("  --formats                               Show the codec decode/encode capability table");
     println!("  queue [list|start|pause|clear|cancel <id>|log] Interact with running daemon queue");
@@ -217,6 +222,8 @@ struct CliEncodeOptions {
     xmp_creator: Option<String>,
     sidecar_xmp: bool,
     caption_file: Option<PathBuf>,
+    caption_format: Option<encodercraft_core::CaptionExportFormat>,
+    caption_offset_ms: Option<i64>,
     lut_file: Option<PathBuf>,
     burn_captions: bool,
     fps: Option<encodercraft_core::Rational64>,
@@ -369,6 +376,21 @@ fn parse_encode_args(args: &[String]) -> Result<CliEncodeOptions, EncoderError> 
                         i += 1;
                     }
                 }
+                "--caption-format" => {
+                    if let Some(val) = args.get(i + 1) {
+                        opts.caption_format = Some(encodercraft_core::CaptionExportFormat::from_extension(val).ok_or_else(|| {
+                            EncoderError::InvalidJobSpec(format!("unknown caption format '{val}'; use srt, vtt, scc, mcc, ttml, ass or stl"))
+                        })?);
+                        i += 1;
+                    }
+                }
+                "--caption-offset-ms" => {
+                    if let Some(val) = args.get(i + 1) {
+                        opts.caption_offset_ms =
+                            Some(val.parse::<i64>().map_err(|_| EncoderError::InvalidJobSpec(format!("invalid caption offset '{val}'")))?);
+                        i += 1;
+                    }
+                }
                 "--burn-captions" => {
                     opts.burn_captions = true;
                 }
@@ -403,6 +425,8 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     let xmp_creator = opts.xmp_creator;
     let sidecar_xmp = opts.sidecar_xmp;
     let caption_file = opts.caption_file;
+    let caption_format = opts.caption_format;
+    let caption_offset_ms = opts.caption_offset_ms;
     let lut_file = opts.lut_file;
     let burn_captions = opts.burn_captions;
     let fps = opts.fps;
@@ -532,6 +556,8 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         }
         if let Some(ref cap) = caption_file {
             target.caption_path = Some(cap.clone());
+            target.caption_format = caption_format;
+            target.caption_offset_ms = caption_offset_ms;
             target.burn_captions = burn_captions;
         }
         if let Some(ref lut) = lut_file {
@@ -620,6 +646,76 @@ fn cmd_lut_convert(args: &[String]) -> Result<(), EncoderError> {
 
     std::fs::write(output_path, out_str).map_err(|e| EncoderError::Io(format!("failed to write output LUT `{}`: {e}", output_path.display())))?;
     println!("Successfully converted LUT to {} (size {}x{}x{})", output_path.display(), lut.size, lut.size, lut.size);
+    Ok(())
+}
+
+/// `caption-convert <input> <output> [--offset-ms <ms>] [--retime <from_fps> <to_fps> | --factor <factor>]`: converts and retimes subtitles.
+fn cmd_caption_convert(args: &[String]) -> Result<(), EncoderError> {
+    if args.is_empty() {
+        eprintln!("Usage: encodercraft caption-convert <input> <output> [--offset-ms <ms>] [--retime <from_fps> <to_fps> | --factor <factor>]");
+        return Ok(());
+    }
+    let input_path = Path::new(&args[0]);
+    let output_path = if args.len() > 1 && !args[1].starts_with('-') {
+        Path::new(&args[1])
+    } else {
+        return Err(EncoderError::InvalidJobSpec("output path required for caption-convert".into()));
+    };
+
+    let mut offset_ms = None;
+    let mut retime_factor = None;
+
+    let mut i = 2;
+    while i < args.len() {
+        if let Some(arg) = args.get(i) {
+            match arg.as_str() {
+                "--offset-ms" => {
+                    if let Some(val) = args.get(i + 1) {
+                        offset_ms = Some(val.parse::<i64>().map_err(|_| EncoderError::InvalidJobSpec(format!("invalid caption offset '{val}'")))?);
+                        i += 1;
+                    }
+                }
+                "--retime" => {
+                    if let (Some(src_s), Some(dst_s)) = (args.get(i + 1), args.get(i + 2)) {
+                        let src_fps = parse_fps(src_s)?.as_f64();
+                        let dst_fps = parse_fps(dst_s)?.as_f64();
+                        if src_fps > 0.0 && dst_fps > 0.0 {
+                            retime_factor = Some(src_fps / dst_fps);
+                        }
+                        i += 2;
+                    }
+                }
+                "--factor" => {
+                    if let Some(val) = args.get(i + 1) {
+                        let factor: f64 = val.parse().map_err(|_| EncoderError::InvalidJobSpec(format!("invalid retime factor '{val}'")))?;
+                        if factor.is_finite() && factor > 0.0 {
+                            retime_factor = Some(factor);
+                        }
+                        i += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+
+    let format = output_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .and_then(encodercraft_core::CaptionExportFormat::from_extension)
+        .ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown target caption format for {}", output_path.display())))?;
+
+    let track = encodercraft_pipeline::CaptionTrack::from_file(input_path)?;
+    track.export_sidecar_with_options(output_path, format, offset_ms, retime_factor)?;
+
+    println!(
+        "Successfully converted caption: {} -> {} ({} cues, format: {})",
+        input_path.display(),
+        output_path.display(),
+        track.cues().len(),
+        format.display_name()
+    );
     Ok(())
 }
 

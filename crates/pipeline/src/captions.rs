@@ -1,8 +1,9 @@
 //! Sidecar caption export and video burn-in engine.
 //!
-//! Provides subtitle and closed-caption sidecar export (SRT, WebVTT, SCC, MCC, TTML)
+//! Provides subtitle and closed-caption sidecar export (SRT, WebVTT, SCC, MCC, TTML, ASS/SSA, STL)
 //! and raster burn-in compositing over video frames, matching Adobe Media Encoder's Captions panel.
-//! Reuses `filmcraft-captions` for clean-room format translation and timing normalization.
+//! Reuses `filmcraft-captions` for clean-room format translation and timing normalization, and provides
+//! native SubStation Alpha (.ass / .ssa) matrix conversion.
 
 use std::path::{Path, PathBuf};
 
@@ -24,10 +25,26 @@ impl CaptionTrack {
     pub fn from_file(path: &Path) -> Result<Self, EncoderError> {
         let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read caption file {}: {e}", path.display())))?;
         let ext = path.extension().and_then(|s| s.to_str());
-        let format = filmcraft_captions::detect(&bytes, ext)
-            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("unable to recognize caption format for {}", path.display())))?;
-        let doc = filmcraft_captions::parse(&bytes, format)
-            .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse caption file {}: {e}", path.display())))?;
+        Self::from_bytes(&bytes, ext)
+    }
+
+    /// Loads and detects caption format from in-memory byte slice with optional extension hint.
+    pub fn from_bytes(bytes: &[u8], ext_hint: Option<&str>) -> Result<Self, EncoderError> {
+        let ext_lower = ext_hint.map(|s| s.trim_start_matches('.').to_ascii_lowercase());
+        let text_lossy = String::from_utf8_lossy(bytes);
+
+        // SubStation Alpha (.ass / .ssa)
+        if ext_lower.as_deref() == Some("ass")
+            || ext_lower.as_deref() == Some("ssa")
+            || (text_lossy.contains("[Script Info]") && text_lossy.contains("[Events]"))
+        {
+            let doc = parse_ass(&text_lossy)?;
+            return Ok(Self { doc });
+        }
+
+        let format =
+            filmcraft_captions::detect(bytes, ext_hint).ok_or_else(|| EncoderError::InvalidJobSpec("unable to recognize caption format".into()))?;
+        let doc = filmcraft_captions::parse(bytes, format).map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse caption file: {e}")))?;
         Ok(Self { doc })
     }
 
@@ -38,32 +55,86 @@ impl CaptionTrack {
         Ok(Self { doc })
     }
 
+    /// Parses caption text with a unified CaptionExportFormat.
+    pub fn from_export_format(text: &str, format: CaptionExportFormat) -> Result<Self, EncoderError> {
+        match format {
+            CaptionExportFormat::Ass => {
+                let doc = parse_ass(text)?;
+                Ok(Self { doc })
+            }
+            CaptionExportFormat::Srt => Self::from_text(text, Format::Srt),
+            CaptionExportFormat::WebVtt => Self::from_text(text, Format::WebVtt),
+            CaptionExportFormat::Scc => Self::from_text(text, Format::Scc),
+            CaptionExportFormat::Mcc => Self::from_text(text, Format::Mcc),
+            CaptionExportFormat::Ttml => Self::from_text(text, Format::Ttml),
+            CaptionExportFormat::Stl => Self::from_text(text, Format::Stl),
+        }
+    }
+
     /// Access the slice of parsed cues.
     pub fn cues(&self) -> &[Cue] {
         &self.doc.cues
     }
 
-    /// Exports a sidecar subtitle file alongside the target media file.
-    pub fn export_sidecar(&self, target_media_path: &Path, format: CaptionExportFormat, offset_ms: Option<i64>) -> Result<PathBuf, EncoderError> {
-        let mut doc = self.doc.clone();
-        if let Some(offset) = offset_ms {
-            let offset_ticks = (offset as i128 * TICKS_PER_SECOND as i128 / 1000) as i64;
-            for cue in &mut doc.cues {
-                cue.start = Tick(cue.start.0.saturating_add(offset_ticks));
-                cue.end = Tick(cue.end.0.saturating_add(offset_ticks));
+    /// Shifts all cues forward or backward in time by milliseconds.
+    pub fn shift_ms(&mut self, offset_ms: i64) {
+        if offset_ms == 0 {
+            return;
+        }
+        let offset_ticks = (offset_ms as i128 * TICKS_PER_SECOND as i128 / 1000) as i64;
+        for cue in &mut self.doc.cues {
+            cue.start = Tick(cue.start.0.saturating_add(offset_ticks));
+            cue.end = Tick(cue.end.0.saturating_add(offset_ticks));
+        }
+        self.doc.normalize();
+    }
+
+    /// Retimes all cues by a scaling factor (e.g. `source_fps / target_fps`).
+    pub fn retime(&mut self, factor: f64) {
+        if factor > 0.0 && (factor - 1.0).abs() > 1e-6 {
+            for cue in &mut self.doc.cues {
+                cue.start = Tick((cue.start.0 as f64 * factor).round() as i64);
+                cue.end = Tick((cue.end.0 as f64 * factor).round() as i64);
             }
-            doc.normalize();
+            self.doc.normalize();
+        }
+    }
+
+    /// Serializes the caption document into raw bytes of the requested format.
+    pub fn write_format(&self, format: CaptionExportFormat) -> Result<Vec<u8>, EncoderError> {
+        match format {
+            CaptionExportFormat::Ass => Ok(write_ass(&self.doc)),
+            CaptionExportFormat::Srt => Ok(filmcraft_captions::write(&self.doc, Format::Srt, WriteOptions::default())),
+            CaptionExportFormat::WebVtt => Ok(filmcraft_captions::write(&self.doc, Format::WebVtt, WriteOptions::default())),
+            CaptionExportFormat::Scc => Ok(filmcraft_captions::write(&self.doc, Format::Scc, WriteOptions::default())),
+            CaptionExportFormat::Mcc => Ok(filmcraft_captions::write(&self.doc, Format::Mcc, WriteOptions::default())),
+            CaptionExportFormat::Ttml => Ok(filmcraft_captions::write(&self.doc, Format::Ttml, WriteOptions::default())),
+            CaptionExportFormat::Stl => Ok(filmcraft_captions::write(&self.doc, Format::Stl, WriteOptions::default())),
+        }
+    }
+
+    /// Exports a sidecar subtitle file alongside the target media file with optional time offset.
+    pub fn export_sidecar(&self, target_media_path: &Path, format: CaptionExportFormat, offset_ms: Option<i64>) -> Result<PathBuf, EncoderError> {
+        self.export_sidecar_with_options(target_media_path, format, offset_ms, None)
+    }
+
+    /// Exports a sidecar subtitle file alongside the target media file with time offset and framerate retime.
+    pub fn export_sidecar_with_options(
+        &self,
+        target_media_path: &Path,
+        format: CaptionExportFormat,
+        offset_ms: Option<i64>,
+        retime_factor: Option<f64>,
+    ) -> Result<PathBuf, EncoderError> {
+        let mut track = self.clone();
+        if let Some(offset) = offset_ms {
+            track.shift_ms(offset);
+        }
+        if let Some(factor) = retime_factor {
+            track.retime(factor);
         }
 
-        let craft_format = match format {
-            CaptionExportFormat::Srt => Format::Srt,
-            CaptionExportFormat::WebVtt => Format::WebVtt,
-            CaptionExportFormat::Scc => Format::Scc,
-            CaptionExportFormat::Mcc => Format::Mcc,
-            CaptionExportFormat::Ttml => Format::Ttml,
-        };
-
-        let bytes = filmcraft_captions::write(&doc, craft_format, WriteOptions::default());
+        let bytes = track.write_format(format)?;
         let sidecar_path = target_media_path.with_extension(format.extension());
 
         if let Some(parent) = sidecar_path.parent() {
@@ -75,6 +146,146 @@ impl CaptionTrack {
 
         Ok(sidecar_path)
     }
+}
+
+/// Parses SubStation Alpha (.ass / .ssa) text into a normalized `Document`.
+fn parse_ass(text: &str) -> Result<Document, EncoderError> {
+    let mut cues = Vec::new();
+    let mut in_events = false;
+    let mut format_cols: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_events = trimmed.eq_ignore_ascii_case("[Events]");
+            continue;
+        }
+        if in_events {
+            if let Some(rest) = trimmed.strip_prefix("Format:") {
+                format_cols = rest.split(',').map(|s| s.trim().to_ascii_lowercase()).collect();
+            } else if let Some(rest) = trimmed.strip_prefix("Dialogue:") {
+                let col_limit = format_cols.len().max(10);
+                let parts: Vec<&str> = rest.splitn(col_limit, ',').collect();
+                let start_idx = format_cols.iter().position(|c| c == "start").unwrap_or(1);
+                let end_idx = format_cols.iter().position(|c| c == "end").unwrap_or(2);
+                let text_idx = format_cols.iter().position(|c| c == "text").unwrap_or(parts.len().saturating_sub(1));
+                let speaker_idx = format_cols.iter().position(|c| c == "name");
+
+                if let (Some(&start_str), Some(&end_str), Some(&raw_text)) = (parts.get(start_idx), parts.get(end_idx), parts.get(text_idx)) {
+                    let start_tick = parse_ass_timestamp(start_str.trim())?;
+                    let end_tick = parse_ass_timestamp(end_str.trim())?;
+                    let cue_text = clean_ass_text(raw_text.trim());
+                    let speaker = speaker_idx.and_then(|idx| parts.get(idx)).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                    cues.push(Cue { start: start_tick, end: end_tick, text: cue_text, speaker, id: None, settings: String::new() });
+                }
+            }
+        }
+    }
+    let mut doc = Document { cues, ..Default::default() };
+    doc.normalize();
+    Ok(doc)
+}
+
+/// Parses an ASS timestamp `H:MM:SS.cs` into `Tick`.
+fn parse_ass_timestamp(s: &str) -> Result<Tick, EncoderError> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 3 {
+        return Err(EncoderError::InvalidJobSpec(format!("invalid ASS timestamp format '{s}'")));
+    }
+    let h: f64 =
+        parts.first().and_then(|p| p.trim().parse().ok()).ok_or_else(|| EncoderError::InvalidJobSpec(format!("invalid hours in timestamp '{s}'")))?;
+    let m: f64 = parts
+        .get(1)
+        .and_then(|p| p.trim().parse().ok())
+        .ok_or_else(|| EncoderError::InvalidJobSpec(format!("invalid minutes in timestamp '{s}'")))?;
+    let s_part: f64 = parts
+        .get(2)
+        .and_then(|p| p.trim().parse().ok())
+        .ok_or_else(|| EncoderError::InvalidJobSpec(format!("invalid seconds in timestamp '{s}'")))?;
+
+    if !h.is_finite() || !m.is_finite() || !s_part.is_finite() || h < 0.0 || m < 0.0 || s_part < 0.0 {
+        return Err(EncoderError::InvalidJobSpec(format!("non-finite or negative timestamp '{s}'")));
+    }
+
+    let total_seconds = h * 3600.0 + m * 60.0 + s_part;
+    Ok(Tick::from_seconds_f64(total_seconds))
+}
+
+/// Removes style overrides `{...}` and converts newlines in ASS dialogue text.
+fn clean_ass_text(raw: &str) -> String {
+    let mut cleaned = String::with_capacity(raw.len());
+    let mut in_curly = false;
+    let mut chars = raw.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '{' {
+            in_curly = true;
+            continue;
+        }
+        if c == '}' {
+            in_curly = false;
+            continue;
+        }
+        if in_curly {
+            continue;
+        }
+        if c == '\\'
+            && let Some(&next) = chars.peek()
+        {
+            if next == 'N' || next == 'n' {
+                chars.next();
+                cleaned.push('\n');
+                continue;
+            } else if next == 'h' {
+                chars.next();
+                cleaned.push(' ');
+                continue;
+            }
+        }
+        cleaned.push(c);
+    }
+    cleaned
+}
+
+/// Serializes `Document` into SubStation Alpha (.ass) format.
+fn write_ass(doc: &Document) -> Vec<u8> {
+    let mut out = String::new();
+    out.push_str("[Script Info]\n");
+    out.push_str("Title: encoderCraft Subtitle Export\n");
+    out.push_str("ScriptType: v4.00+\n");
+    out.push_str("WrapStyle: 0\n");
+    out.push_str("ScaledBorderAndShadow: yes\n");
+    out.push_str("PlayResX: 1920\n");
+    out.push_str("PlayResY: 1080\n\n");
+    out.push_str("[V4+ Styles]\n");
+    out.push_str("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n");
+    out.push_str("Style: Default,Arial,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,2,2,20,20,20,1\n\n");
+    out.push_str("[Events]\n");
+    out.push_str("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
+    for cue in &doc.cues {
+        let start = format_ass_timestamp(cue.start);
+        let end = format_ass_timestamp(cue.end);
+        let name = cue.speaker.as_deref().unwrap_or("");
+        let text = cue.text.replace("\r\n", "\\N").replace(['\n', '\r'], "\\N");
+        out.push_str(&format!("Dialogue: 0,{start},{end},Default,{name},0,0,0,,{text}\n"));
+    }
+    out.into_bytes()
+}
+
+/// Formats a `Tick` timestamp as `H:MM:SS.cs` for ASS subtitles.
+fn format_ass_timestamp(tick: Tick) -> String {
+    let secs = tick.seconds();
+    let total_cs = (secs * 100.0).round().max(0.0) as u64;
+    let cs = total_cs % 100;
+    let total_s = total_cs / 100;
+    let s = total_s % 60;
+    let total_m = total_s / 60;
+    let m = total_m % 60;
+    let h = total_m / 60;
+    format!("{h}:{m:02}:{s:02}.{cs:02}")
 }
 
 /// Bitmapped 5x7 glyph representation for ASCII characters.
@@ -310,5 +521,71 @@ Subtitles Ready.
         // Verify that pixels were drawn (non-zero)
         let has_non_zero = frame.data().iter().any(|&b| b > 0);
         assert!(has_non_zero);
+    }
+
+    #[test]
+    fn test_ass_subtitle_parse_and_write_roundtrip() {
+        let sample_ass = "\
+[Script Info]
+Title: Test ASS
+ScriptType: v4.00+
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.50,0:00:04.25,Default,Hero,0,0,0,,Line 1{\\b1} styled{\\b0}\\NLine 2
+";
+        let track = CaptionTrack::from_export_format(sample_ass, CaptionExportFormat::Ass).unwrap();
+        assert_eq!(track.cues().len(), 1);
+        let cue = &track.cues()[0];
+        assert_eq!(cue.speaker.as_deref(), Some("Hero"));
+        assert_eq!(cue.text, "Line 1 styled\nLine 2");
+        assert!((cue.start.seconds() - 1.5).abs() < 0.01);
+        assert!((cue.end.seconds() - 4.25).abs() < 0.01);
+
+        let exported_bytes = track.write_format(CaptionExportFormat::Ass).unwrap();
+        let exported_text = String::from_utf8(exported_bytes).unwrap();
+        assert!(exported_text.contains("[Script Info]"));
+        assert!(exported_text.contains("Dialogue: 0,0:00:01.50,0:00:04.25,Default,Hero,0,0,0,,Line 1 styled\\NLine 2"));
+    }
+
+    #[test]
+    fn test_subtitle_universal_transcoding_matrix() {
+        let track = CaptionTrack::from_text(SAMPLE_SRT, Format::Srt).unwrap();
+
+        // Convert to WebVTT
+        let vtt_bytes = track.write_format(CaptionExportFormat::WebVtt).unwrap();
+        let vtt_text = String::from_utf8(vtt_bytes).unwrap();
+        assert!(vtt_text.contains("WEBVTT"));
+
+        // Convert to ASS
+        let ass_bytes = track.write_format(CaptionExportFormat::Ass).unwrap();
+        let ass_text = String::from_utf8(ass_bytes).unwrap();
+        assert!(ass_text.contains("Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Hello ArtCraft!"));
+
+        // Parse back from ASS
+        let track_from_ass = CaptionTrack::from_export_format(&ass_text, CaptionExportFormat::Ass).unwrap();
+        assert_eq!(track_from_ass.cues().len(), 2);
+        assert_eq!(track_from_ass.cues()[0].text, "Hello ArtCraft!");
+
+        // Convert to TTML
+        let ttml_bytes = track_from_ass.write_format(CaptionExportFormat::Ttml).unwrap();
+        let ttml_text = String::from_utf8(ttml_bytes).unwrap();
+        assert!(ttml_text.contains("<tt") || ttml_text.contains("<p"));
+    }
+
+    #[test]
+    fn test_caption_retiming_framerate_scaling() {
+        let mut track = CaptionTrack::from_text(SAMPLE_SRT, Format::Srt).unwrap();
+        let orig_start = track.cues()[0].start.seconds();
+        let orig_end = track.cues()[0].end.seconds();
+
+        // 24.0 fps conforming to 25.0 fps (speed up by 25/24, duration shrinks by 24/25)
+        let retime_factor = 24.0 / 25.0;
+        track.retime(retime_factor);
+
+        let new_start = track.cues()[0].start.seconds();
+        let new_end = track.cues()[0].end.seconds();
+        assert!((new_start - (orig_start * retime_factor)).abs() < 0.001);
+        assert!((new_end - (orig_end * retime_factor)).abs() < 0.001);
     }
 }
