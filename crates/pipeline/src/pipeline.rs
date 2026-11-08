@@ -385,9 +385,16 @@ impl TranscodePipeline {
             ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
                 self.execute_document_publication(target, start_time)?
             }
-            ContainerType::Gltf | ContainerType::Usdz | ContainerType::Obj | ContainerType::Stl | ContainerType::Ply => {
-                self.execute_spatial_3d(target, start_time)?
-            }
+            ContainerType::Gltf
+            | ContainerType::Usdz
+            | ContainerType::Usdc
+            | ContainerType::Obj
+            | ContainerType::Stl
+            | ContainerType::Ply
+            | ContainerType::Fbx
+            | ContainerType::Alembic
+            | ContainerType::Collada
+            | ContainerType::Splat => self.execute_spatial_3d(target, start_time)?,
             ContainerType::Png
             | ContainerType::Jpeg
             | ContainerType::WebP
@@ -854,6 +861,11 @@ impl TranscodePipeline {
                     "stl" => encodercraft_spatial_io::parse_stl_binary(&bytes)?,
                     "ply" => encodercraft_spatial_io::parse_ply_binary(&bytes)?,
                     "glb" | "gltf" => encodercraft_spatial_io::parse_glb(&bytes)?,
+                    "fbx" => encodercraft_spatial_io::parse_fbx(&bytes)?,
+                    "dae" => encodercraft_spatial_io::parse_collada(std::str::from_utf8(&bytes).unwrap_or(""))?,
+                    "abc" => encodercraft_spatial_io::parse_alembic(&bytes)?,
+                    "usdc" => encodercraft_spatial_io::parse_usdc(&bytes)?,
+                    "splat" => encodercraft_spatial_io::parse_splat(&bytes)?,
                     _ => {
                         if bytes.starts_with(b"glTF") {
                             encodercraft_spatial_io::parse_glb(&bytes)?
@@ -920,6 +932,26 @@ impl TranscodePipeline {
             ContainerType::Usdz => {
                 let usdz_bytes = encodercraft_spatial_io::write_usdz(&mesh)?;
                 std::fs::write(&target.output_path, usdz_bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
+            }
+            ContainerType::Usdc => {
+                let usdc_bytes = encodercraft_spatial_io::write_usdc(&mesh);
+                std::fs::write(&target.output_path, usdc_bytes).map_err(|e| EncoderError::Io(format!("failed to write USDC file: {e}")))?;
+            }
+            ContainerType::Fbx => {
+                let fbx_bytes = encodercraft_spatial_io::write_fbx_binary(&mesh);
+                std::fs::write(&target.output_path, fbx_bytes).map_err(|e| EncoderError::Io(format!("failed to write FBX file: {e}")))?;
+            }
+            ContainerType::Collada => {
+                let dae_text = encodercraft_spatial_io::write_collada(&mesh);
+                std::fs::write(&target.output_path, dae_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write DAE file: {e}")))?;
+            }
+            ContainerType::Alembic => {
+                let abc_bytes = encodercraft_spatial_io::write_alembic_ogawa(&mesh);
+                std::fs::write(&target.output_path, abc_bytes).map_err(|e| EncoderError::Io(format!("failed to write ABC file: {e}")))?;
+            }
+            ContainerType::Splat => {
+                let splat_bytes = encodercraft_spatial_io::write_splat(&mesh);
+                std::fs::write(&target.output_path, splat_bytes).map_err(|e| EncoderError::Io(format!("failed to write SPLAT file: {e}")))?;
             }
             _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported 3D container: {:?}", target.container))),
         }

@@ -396,6 +396,16 @@ pub fn default_preset_for_container(c: ContainerType) -> &'static str {
         ContainerType::RadianceHdr => "Radiance HDR RGBE Environment",
         ContainerType::Dicom => "Medical DICOM Image (Secondary Capture)",
         ContainerType::Fits => "Astronomical FITS Scientific Data",
+        ContainerType::Gltf => "glTF 2.0 Binary (GLB)",
+        ContainerType::Usdz => "Apple AR Quick Look (USDZ)",
+        ContainerType::Usdc => "Universal Scene Description Crate (USDC)",
+        ContainerType::Fbx => "Autodesk Filmbox 3D (FBX)",
+        ContainerType::Collada => "Collada Digital Asset Exchange (DAE)",
+        ContainerType::Alembic => "Alembic VFX Animation Cache (ABC)",
+        ContainerType::Splat => "3D Gaussian Splat Point Cloud (SPLAT)",
+        ContainerType::Obj => "Wavefront OBJ 3D Mesh",
+        ContainerType::Stl => "Stereolithography STL 3D",
+        ContainerType::Ply => "Stanford Polygon PLY 3D",
         ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
             "Print-Ready PDF/X-4"
         }
@@ -480,6 +490,27 @@ fn candidate_presets_for_container(c: ContainerType) -> Vec<&'static str> {
             "Radiance HDR RGBE Environment",
             "Medical DICOM Image (Secondary Capture)",
             "Astronomical FITS Scientific Data",
+        ],
+        ContainerType::Gltf
+        | ContainerType::Usdz
+        | ContainerType::Usdc
+        | ContainerType::Obj
+        | ContainerType::Stl
+        | ContainerType::Ply
+        | ContainerType::Fbx
+        | ContainerType::Alembic
+        | ContainerType::Collada
+        | ContainerType::Splat => vec![
+            "glTF 2.0 Binary (GLB)",
+            "Apple AR Quick Look (USDZ)",
+            "Universal Scene Description Crate (USDC)",
+            "Autodesk Filmbox 3D (FBX)",
+            "Collada Digital Asset Exchange (DAE)",
+            "Alembic VFX Animation Cache (ABC)",
+            "3D Gaussian Splat Point Cloud (SPLAT)",
+            "Wavefront OBJ 3D Mesh",
+            "Stereolithography STL 3D",
+            "Stanford Polygon PLY 3D",
         ],
         ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml | ContainerType::AdobeInDesignIndd | ContainerType::ArtcraftDesigncraft => {
             vec!["Print-Ready PDF/X-4"]
