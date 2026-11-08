@@ -755,7 +755,7 @@ flowchart LR
 1. [x] **3D Look-Up Table (LUT) Transcoding & Baking Engine ([#189](https://github.com/el-j/encoderCraft/issues/189)):**
    - Implement `encodercraft-color::lut` supporting `.cube`, `.3dl`, and `.look` tables with tetrahedral interpolation.
    - Expose LUT lattice resampling and baking in the Inspector Effects tab and CLI.
-2. [ ] **Universal Subtitle & Closed Caption Transcoding Matrix ([#190](https://github.com/el-j/encoderCraft/issues/190)):**
+2. [x] **Universal Subtitle & Closed Caption Transcoding Matrix ([#190](https://github.com/el-j/encoderCraft/issues/190)):**
    - Implement bidirectional subtitle transcoding matrix across SubRip (`.srt`), WebVTT (`.vtt`), Scenarist (`.scc`), SMPTE-TT / IMSC1 (`.ttml`), and SubStation Alpha (`.ass` / `.ssa`).
    - Support framerate retiming, timecode shifting, and sidecar / burn-in export.
 3. [ ] **Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) ([#191](https://github.com/el-j/encoderCraft/issues/191)):**

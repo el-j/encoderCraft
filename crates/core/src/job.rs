@@ -73,6 +73,8 @@ pub enum CaptionExportFormat {
     Scc,
     Mcc,
     Ttml,
+    Ass,
+    Stl,
 }
 
 impl CaptionExportFormat {
@@ -83,6 +85,33 @@ impl CaptionExportFormat {
             Self::Scc => "scc",
             Self::Mcc => "mcc",
             Self::Ttml => "ttml",
+            Self::Ass => "ass",
+            Self::Stl => "stl",
+        }
+    }
+
+    pub fn from_extension(ext: &str) -> Option<Self> {
+        match ext.trim_start_matches('.').to_ascii_lowercase().as_str() {
+            "srt" => Some(Self::Srt),
+            "vtt" => Some(Self::WebVtt),
+            "scc" => Some(Self::Scc),
+            "mcc" => Some(Self::Mcc),
+            "ttml" | "dfxp" => Some(Self::Ttml),
+            "ass" | "ssa" => Some(Self::Ass),
+            "stl" => Some(Self::Stl),
+            _ => None,
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Srt => "SubRip (.srt)",
+            Self::WebVtt => "WebVTT (.vtt)",
+            Self::Scc => "Scenarist SCC (.scc)",
+            Self::Mcc => "MacCaption MCC (.mcc)",
+            Self::Ttml => "TTML IMSC1 (.ttml)",
+            Self::Ass => "SubStation Alpha (.ass)",
+            Self::Stl => "EBU STL (.stl)",
         }
     }
 }

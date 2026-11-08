@@ -1363,12 +1363,13 @@ fn render_captions_tab(ui: &mut Ui, target: &mut OutputTarget) {
 
     let mut cap_str = target.caption_path.as_ref().and_then(|p| p.to_str()).unwrap_or("").to_string();
     ui.horizontal(|ui| {
-        ui.label("Caption File (.srt, .vtt, .scc, .ttml):");
+        ui.label("Caption File:");
         if ui.text_edit_singleline(&mut cap_str).changed() {
             target.caption_path = if cap_str.trim().is_empty() { None } else { Some(PathBuf::from(cap_str.trim())) };
         }
         if ui.button("Browse...").clicked()
-            && let Some(file) = rfd::FileDialog::new().add_filter("Captions", &["srt", "vtt", "scc", "ttml"]).pick_file()
+            && let Some(file) =
+                rfd::FileDialog::new().add_filter("Captions", &["srt", "vtt", "scc", "mcc", "ttml", "dfxp", "ass", "ssa", "stl"]).pick_file()
         {
             target.caption_path = Some(file);
         }
@@ -1385,12 +1386,24 @@ fn render_captions_tab(ui: &mut Ui, target: &mut OutputTarget) {
         }
 
         if let Some(ref mut fmt) = target.caption_format {
-            egui::ComboBox::from_id_salt("caption_sidecar_format_combo").selected_text(format!("{:?}", fmt)).show_ui(ui, |ui| {
-                ui.selectable_value(fmt, CaptionExportFormat::WebVtt, "WebVTT (.vtt)");
-                ui.selectable_value(fmt, CaptionExportFormat::Srt, "SubRip (.srt)");
-                ui.selectable_value(fmt, CaptionExportFormat::Scc, "Scenarist SCC (.scc)");
-                ui.selectable_value(fmt, CaptionExportFormat::Ttml, "TTML IMSC1 (.ttml)");
+            egui::ComboBox::from_id_salt("caption_sidecar_format_combo").selected_text(fmt.display_name()).show_ui(ui, |ui| {
+                ui.selectable_value(fmt, CaptionExportFormat::WebVtt, CaptionExportFormat::WebVtt.display_name());
+                ui.selectable_value(fmt, CaptionExportFormat::Srt, CaptionExportFormat::Srt.display_name());
+                ui.selectable_value(fmt, CaptionExportFormat::Scc, CaptionExportFormat::Scc.display_name());
+                ui.selectable_value(fmt, CaptionExportFormat::Mcc, CaptionExportFormat::Mcc.display_name());
+                ui.selectable_value(fmt, CaptionExportFormat::Ttml, CaptionExportFormat::Ttml.display_name());
+                ui.selectable_value(fmt, CaptionExportFormat::Ass, CaptionExportFormat::Ass.display_name());
+                ui.selectable_value(fmt, CaptionExportFormat::Stl, CaptionExportFormat::Stl.display_name());
             });
+        }
+    });
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label("Time Offset:");
+        let mut offset = target.caption_offset_ms.unwrap_or(0);
+        if ui.add(egui::DragValue::new(&mut offset).speed(25.0).suffix(" ms")).changed() {
+            target.caption_offset_ms = if offset == 0 { None } else { Some(offset) };
         }
     });
 }
