@@ -289,6 +289,17 @@ Tracked under Milestone [M37 - Advanced Transforms, craft-libs Integration & Ind
 - [x] **M37.3: Full Architecture, UI Design & craft-libs Integration Review (#173)** – Authored `docs/architecture-and-parity-audit.md` comparing encoderCraft against Adobe Media Encoder 2026, mapping out upstream extraction for `craft-media`, `craft-ui`, `craft-window`, `craft-menu`, `craft-cms`, and `craft-text`, and formalizing the transform pipeline execution sequence.
 - [x] **M37.4: Exhaustive Industry-Grade End-to-End Integration Test Suite (#174)** – Created `crates/engine/tests/industry_e2e.rs` covering video transforms matrix, audio lip-sync delay offset and surround matrix routing, batch queue multi-target lifecycle and journal persistence, watch folder automation with settle-delay quiescence probing, and TCP IPC daemon dispatch.
 
+## Milestone 38: Queue Batch Multi-Selection, UI ID Clash Fixes, In/Out Trimming & Audio Metadata
+
+Tracked under Milestone [M38 - Queue Batch Multi-Selection, UI ID Clash Fixes, In/Out Trimming & Audio Metadata](https://github.com/el-j/encoderCraft/milestone/16).
+
+- [x] **M38.1: UI ID Clash Resolution & Preset Browser Horizontal Overflow Fix (#176)** – Resolved egui ID clashes (ID 8457 and 5517) in Media Browser sidebar/content ScrollAreas and Preset Browser rows using explicit `id_salt` and `ui.push_id`; unified preset table header into two-dimensional scrolling container to prevent table blowout.
+- [x] **M38.2: Multi-Item Queue Selection Batch Updates & Inline Dropdown Events (#177)** – Enabled simultaneous batch format and preset switching across all highlighted queue items upon modifying any selected item; replaced stale outer combo response checking with inner state comparison so dropdown selections immediately apply.
+- [x] **M38.3: Native Multi-File Selection & Recursive Folder Queue Addition (#178)** – Removed restrictive extension filters from the native OS file picker allowing standard Shift/Command range and disjoint selections; added recursive folder scanner (`add_folder_recursive`) and `AppCommand::AddFolder` menu command.
+- [x] **M38.4: Context-Aware Format Filtering & Essence Visual Badges (#179)** – Dynamically filtered format choices based on media stream essence kind (e.g. audio-only files only offer audio formats like WAV, FLAC, MP3, AAC, Ogg); added distinct color-coded chips (`[VID]`, `[AUD]`, `[IMG]`, `[DOC]`, `[3D]`, `[SEQ]`) to visually identify media types in queue table.
+- [x] **M38.5: In/Out Point Trimming in Inspector & Preview Panel (#180)** – Connected "Set In", "Set Out", and "Reset Range" buttons in the Inspector preview section with live range labels; synchronized Preview Monitor transport marks (`[` Set In, `]` Set Out, `I` / `O` shortcuts) directly to queue job specifications.
+- [x] **M38.6: Granular Rendering Preferences & Audio Metadata Tag Editor (#181)** – Added GPU/CPU renderer selection, parallel worker concurrency (1..=16), and GPU VRAM budget controls in Preferences dialog; expanded `XmpMetadata` with Title, Artist, Album, Track Number, Year, and Genre tags with live editing in the Inspector Metadata tab.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).

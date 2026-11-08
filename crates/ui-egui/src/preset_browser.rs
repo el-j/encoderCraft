@@ -146,11 +146,12 @@ pub fn render_preset_browser(
         };
 
         let cols = PresetColumnWidths::compute(ui.available_width());
-        render_preset_table_header(ui, state, tokens, cols);
-        ui.separator();
 
         // --- 4. Hierarchical Tree Scroll Area ---
-        egui::ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
+        egui::ScrollArea::both().id_salt("preset_browser_scroll").auto_shrink([false; 2]).show(ui, |ui| {
+            render_preset_table_header(ui, state, tokens, cols);
+            ui.separator();
+
             let is_searching = !state.search_query.trim().is_empty();
 
             if is_searching {
@@ -436,53 +437,55 @@ fn render_preset_row(ui: &mut Ui, row: &PresetRow, preset: &EncodingPreset, ctx:
     let mut chosen = None;
     let is_sel = ctx.state.selected_preset.as_ref().map(|p| &p.name) == Some(&row.name);
 
-    ui.horizontal(|ui| {
-        // Preset Name column (with internal tree indent)
-        let name_w = (ctx.cols.name - ctx.indent).max(40.0);
-        let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.name, ctx.tokens.row_height), egui::Sense::hover());
-        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(cell_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        cell_ui.set_clip_rect(cell_rect);
+    ui.push_id(&preset.name, |ui| {
+        ui.horizontal(|ui| {
+            // Preset Name column (with internal tree indent)
+            let name_w = (ctx.cols.name - ctx.indent).max(40.0);
+            let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.name, ctx.tokens.row_height), egui::Sense::hover());
+            let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(cell_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            cell_ui.set_clip_rect(cell_rect);
 
-        if ctx.indent > 0.0 {
-            cell_ui.add_space(ctx.indent);
-        }
-        let name_btn = egui::Button::new(RichText::new(&row.name).small()).truncate().selected(is_sel);
-        let name_resp = cell_ui.add_sized([name_w, ctx.tokens.row_height], name_btn);
-        if name_resp.clicked() {
-            ctx.state.selected_preset = Some(preset.clone());
-        }
-        if name_resp.double_clicked() {
-            ctx.state.selected_preset = Some(preset.clone());
-            chosen = Some(crate::commands::AppCommand::ApplyPreset);
-        }
-        name_resp.context_menu(|ui| {
-            ctx.state.selected_preset = Some(preset.clone());
-            let preset_deletable = preset.category == PresetCategory::Custom;
-            let applicable = !ctx.selected_job_ids.is_empty() && !preset_incompatible_with_jobs(preset, ctx.selected_job_ids, ctx.queue_mgr);
-            for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::Preset) {
-                let enabled = if info.command == crate::commands::AppCommand::DeletePreset { preset_deletable } else { applicable };
-                if ui.add_enabled(enabled, egui::Button::new(info.context_label(crate::commands::CommandContextMenu::Preset))).clicked() {
-                    chosen = Some(info.command);
-                    ui.close();
-                }
+            if ctx.indent > 0.0 {
+                cell_ui.add_space(ctx.indent);
             }
+            let name_btn = egui::Button::new(RichText::new(&row.name).small()).truncate().selected(is_sel);
+            let name_resp = cell_ui.add_sized([name_w, ctx.tokens.row_height], name_btn);
+            if name_resp.clicked() {
+                ctx.state.selected_preset = Some(preset.clone());
+            }
+            if name_resp.double_clicked() {
+                ctx.state.selected_preset = Some(preset.clone());
+                chosen = Some(crate::commands::AppCommand::ApplyPreset);
+            }
+            name_resp.context_menu(|ui| {
+                ctx.state.selected_preset = Some(preset.clone());
+                let preset_deletable = preset.category == PresetCategory::Custom;
+                let applicable = !ctx.selected_job_ids.is_empty() && !preset_incompatible_with_jobs(preset, ctx.selected_job_ids, ctx.queue_mgr);
+                for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::Preset) {
+                    let enabled = if info.command == crate::commands::AppCommand::DeletePreset { preset_deletable } else { applicable };
+                    if ui.add_enabled(enabled, egui::Button::new(info.context_label(crate::commands::CommandContextMenu::Preset))).clicked() {
+                        chosen = Some(info.command);
+                        ui.close();
+                    }
+                }
+            });
+
+            // Format column
+            let format_label = RichText::new(&row.format).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.format, ctx.tokens.row_height], egui::Label::new(format_label).truncate());
+
+            // Frame Size column
+            let size_label = RichText::new(&row.frame_size).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.frame_size, ctx.tokens.row_height], egui::Label::new(size_label).truncate());
+
+            // Frame Rate column
+            let rate_label = RichText::new(&row.frame_rate).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.frame_rate, ctx.tokens.row_height], egui::Label::new(rate_label).truncate());
+
+            // Target Rate column
+            let target_label = RichText::new(&row.target_rate).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.target_rate, ctx.tokens.row_height], egui::Label::new(target_label).truncate());
         });
-
-        // Format column
-        let format_label = RichText::new(&row.format).small().color(ctx.tokens.text_secondary);
-        ui.add_sized([ctx.cols.format, ctx.tokens.row_height], egui::Label::new(format_label).truncate());
-
-        // Frame Size column
-        let size_label = RichText::new(&row.frame_size).small().color(ctx.tokens.text_secondary);
-        ui.add_sized([ctx.cols.frame_size, ctx.tokens.row_height], egui::Label::new(size_label).truncate());
-
-        // Frame Rate column
-        let rate_label = RichText::new(&row.frame_rate).small().color(ctx.tokens.text_secondary);
-        ui.add_sized([ctx.cols.frame_rate, ctx.tokens.row_height], egui::Label::new(rate_label).truncate());
-
-        // Target Rate column
-        let target_label = RichText::new(&row.target_rate).small().color(ctx.tokens.text_secondary);
-        ui.add_sized([ctx.cols.target_rate, ctx.tokens.row_height], egui::Label::new(target_label).truncate());
     });
 
     chosen

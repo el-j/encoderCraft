@@ -79,11 +79,41 @@ pub fn render_prefs_dialog(
             ui.checkbox(&mut state.prefs.remove_finished_on_exit, "Remove completed items from queue on exit");
             ui.checkbox(&mut state.prefs.auto_encode_watch_folders, "Automatically encode watch folders");
             ui.checkbox(&mut state.prefs.auto_shutdown, "Shut down the computer when the queue finishes");
+        });
 
+        ui.add_space(8.0);
+
+        // 2. Rendering & Hardware Acceleration Section
+        egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
+            ui.label(RichText::new("Rendering & Hardware Acceleration").strong());
             ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.label("Renderer Backend:");
+                let current = if state.prefs.selected_renderer.is_empty() { "Pure-Rust Software (CPU)" } else { &state.prefs.selected_renderer };
+                egui::ComboBox::from_id_salt("prefs_renderer_combo").selected_text(current).show_ui(ui, |ui| {
+                    let renderers = [
+                        "Pure-Rust Software (CPU)",
+                        "Hardware: Apple VideoToolbox (Metal)",
+                        "Hardware: NVIDIA NVENC (CUDA)",
+                        "Hardware: Intel QuickSync (VAAPI)",
+                    ];
+                    for r in renderers {
+                        if ui.selectable_label(state.prefs.selected_renderer == r, r).clicked() {
+                            state.prefs.selected_renderer = r.to_string();
+                        }
+                    }
+                });
+            });
+
             ui.horizontal(|ui| {
                 ui.label("Parallel render concurrency:");
-                ui.add(egui::Slider::new(&mut state.prefs.max_parallel_jobs, 1..=8).text("workers"));
+                ui.add(egui::Slider::new(&mut state.prefs.max_parallel_jobs, 1..=16).text("workers"));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("GPU Memory / VRAM Budget:");
+                ui.add(egui::Slider::new(&mut state.prefs.vram_budget_percent, 10..=100).text("%"));
             });
         });
 

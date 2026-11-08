@@ -95,6 +95,9 @@ pub struct AppPreferences {
     /// Selected hardware / software renderer backend name.
     #[serde(default = "default_renderer")]
     pub selected_renderer: String,
+    /// Percentage of GPU VRAM allocated for hardware rendering and texture caching (10..=100).
+    #[serde(default = "default_vram_budget_percent")]
+    pub vram_budget_percent: u8,
     /// Use the operating system's title bar instead of the app-drawn one (takes effect on restart).
     #[serde(default)]
     pub system_title_bar: bool,
@@ -117,6 +120,10 @@ fn default_idle_timeout_minutes() -> u32 {
 
 fn default_theme() -> String {
     "Dark".into()
+}
+
+fn default_vram_budget_percent() -> u8 {
+    80
 }
 
 fn default_renderer() -> String {
@@ -151,7 +158,8 @@ impl AppPreferences {
         if self.schema_version < PREFERENCES_SCHEMA_VERSION {
             self.schema_version = PREFERENCES_SCHEMA_VERSION;
         }
-        self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 8);
+        self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 16);
+        self.vram_budget_percent = self.vram_budget_percent.clamp(10, 100);
         self.idle_timeout_minutes = self.idle_timeout_minutes.clamp(1, 60);
         if !matches!(self.theme.as_str(), "Dark" | "Medium Dark" | "Light" | "High Contrast") {
             self.theme = default_theme();
@@ -175,6 +183,7 @@ impl Default for AppPreferences {
             increment_output_filename: true,
             auto_encode_watch_folders: true,
             selected_renderer: default_renderer(),
+            vram_budget_percent: default_vram_budget_percent(),
             system_title_bar: false,
             lossy_conversion_decisions: Vec::new(),
         }
@@ -277,7 +286,7 @@ mod prefs_tests {
         std::fs::write(&path, r#"{"max_parallel_jobs":99,"theme":"Neon","auto_start_queue":false}"#).unwrap();
         let p = load_preferences(&path).unwrap();
         assert_eq!(p.schema_version, PREFERENCES_SCHEMA_VERSION);
-        assert_eq!(p.max_parallel_jobs, 8);
+        assert_eq!(p.max_parallel_jobs, 16);
         assert_eq!(p.theme, "Dark");
         assert!(!p.auto_start_queue);
         assert!(p.lossy_conversion_decisions.is_empty());
@@ -302,6 +311,14 @@ mod prefs_tests {
             assert_eq!(preferences.theme, theme);
             assert_eq!(preferences.schema_version, PREFERENCES_SCHEMA_VERSION);
         }
+    }
+
+    #[test]
+    fn preference_migration_clamps_vram_and_workers() {
+        let mut p = AppPreferences { max_parallel_jobs: 99, vram_budget_percent: 5, ..AppPreferences::default() };
+        p.migrate();
+        assert_eq!(p.max_parallel_jobs, 16);
+        assert_eq!(p.vram_budget_percent, 10);
     }
 }
 

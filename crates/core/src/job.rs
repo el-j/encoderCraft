@@ -144,6 +144,11 @@ impl MediaStreamKind {
         matches!(self, Self::AudioOnly)
     }
 
+    /// Returns true if this media kind is a still image or image sequence.
+    pub fn is_image(&self) -> bool {
+        matches!(self, Self::StillImage | Self::ImageSequence)
+    }
+
     /// Returns true if this media kind is a 2D vector asset.
     pub fn is_vector(&self) -> bool {
         matches!(self, Self::Vector2D)

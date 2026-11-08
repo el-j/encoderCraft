@@ -39,6 +39,7 @@ impl Menu {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppCommand {
     AddMedia,
+    AddFolder,
     AddMediaItem,
     OpenMediaFolder,
     ToggleMediaFavorite,
@@ -197,6 +198,7 @@ pub const COMMANDS: &[CommandInfo] = &[
         Some("queue.prepare_add_file"),
         false,
     ),
+    info(AppCommand::AddFolder, "file.add_folder", "Add Folder to Queue...", Menu::File, None, Some("queue.prepare_add_file"), false),
     context_info(AppCommand::AddMediaItem, "media.add_item", "Add Media to Queue", Menu::File, Some("queue.prepare_add_file")),
     context_info(AppCommand::OpenMediaFolder, "media.open_folder", "Open Folder", Menu::File, Some("media.open_folder")),
     context_info(AppCommand::ToggleMediaFavorite, "media.toggle_favorite", "Toggle Favorite", Menu::File, Some("media.toggle_favorite")),
@@ -394,8 +396,9 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const ALL: [AppCommand; 48] = [
+    const ALL: [AppCommand; 49] = [
         AppCommand::AddMedia,
+        AppCommand::AddFolder,
         AppCommand::AddMediaItem,
         AppCommand::OpenMediaFolder,
         AppCommand::ToggleMediaFavorite,
