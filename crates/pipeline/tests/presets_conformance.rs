@@ -435,3 +435,47 @@ fn mp3_and_ogg_vorbis_pipeline_transcode() {
     assert!(opus_data.windows(8).any(|w| w == b"OpusHead"));
     assert!(opus_data.windows(8).any(|w| w == b"OpusTags"));
 }
+
+#[test]
+fn dds_dpx_and_jxl_pipeline_transcode() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_png = dir.path().join("source.png");
+
+    let frame = test_frame(0);
+    let png_bytes = encodercraft_image_codecs::encode_still(
+        &frame,
+        encodercraft_image_codecs::StillFormat::Png,
+        &encodercraft_image_codecs::StillOptions::default(),
+    )
+    .unwrap();
+    std::fs::write(&src_png, png_bytes).unwrap();
+
+    let dds_path = dir.path().join("output.dds");
+    let dpx_path = dir.path().join("output.dpx");
+    let jxl_path = dir.path().join("output.jxl");
+    let dpx_seq_pattern = dir.path().join("seq_%04d.dpx");
+
+    let dds_target = small_target(&dds_path, ContainerType::Dds, "DirectDraw Surface DDS (BC3)");
+    let dpx_target = small_target(&dpx_path, ContainerType::Dpx, "SMPTE DPX 10-bit Film Scan");
+    let jxl_target = small_target(&jxl_path, ContainerType::Jxl, "JPEG XL Lossless Modular");
+    let dpx_seq_target = small_target(&dpx_seq_pattern, ContainerType::Dpx, "SMPTE DPX Sequence");
+
+    run(job(&src_png, dds_target)).unwrap();
+    run(job(&src_png, dpx_target)).unwrap();
+    run(job(&src_png, jxl_target)).unwrap();
+    run(job(&src_png, dpx_seq_target)).unwrap();
+
+    let dds_data = std::fs::read(&dds_path).unwrap();
+    assert_eq!(&dds_data[0..4], b"DDS ");
+
+    let dpx_data = std::fs::read(&dpx_path).unwrap();
+    assert!(dpx_data.starts_with(b"SDPX") || dpx_data.starts_with(b"XPDS"));
+
+    let jxl_data = std::fs::read(&jxl_path).unwrap();
+    assert_eq!(&jxl_data[0..2], &[0xFF, 0x0A]);
+
+    let seq_frame = dir.path().join("seq_0001.dpx");
+    assert!(seq_frame.exists());
+    let seq_data = std::fs::read(&seq_frame).unwrap();
+    assert!(seq_data.starts_with(b"SDPX") || seq_data.starts_with(b"XPDS"));
+}

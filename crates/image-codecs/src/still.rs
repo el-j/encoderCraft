@@ -5,7 +5,9 @@
 
 use encodercraft_color::PixelFormat;
 use encodercraft_core::{EncoderError, VideoFrame};
-use photocraft_codecs::{ChannelLayout, EncodeOptions, ExrCompression, Format, Image, JpegFormat, PngCompression, TiffCompression};
+use photocraft_codecs::{
+    ChannelLayout, DdsCompression, DdsOptions, DpxBits, EncodeOptions, ExrCompression, Format, Image, JpegFormat, PngCompression, TiffCompression,
+};
 
 /// Still formats the encoder can write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,11 +19,15 @@ pub enum StillFormat {
     Gif,
     Bmp,
     OpenExr,
+    Dds,
+    Dpx,
+    Jxl,
 }
 
 impl StillFormat {
     /// Every writable format.
-    pub const ALL: [StillFormat; 7] = [Self::Png, Self::Jpeg, Self::Tiff, Self::WebP, Self::Gif, Self::Bmp, Self::OpenExr];
+    pub const ALL: [StillFormat; 10] =
+        [Self::Png, Self::Jpeg, Self::Tiff, Self::WebP, Self::Gif, Self::Bmp, Self::OpenExr, Self::Dds, Self::Dpx, Self::Jxl];
 
     /// Canonical file extension.
     pub fn extension(self) -> &'static str {
@@ -33,12 +39,15 @@ impl StillFormat {
             Self::Gif => "gif",
             Self::Bmp => "bmp",
             Self::OpenExr => "exr",
+            Self::Dds => "dds",
+            Self::Dpx => "dpx",
+            Self::Jxl => "jxl",
         }
     }
 
     /// Whether the format can carry transparency.
     pub fn has_alpha(self) -> bool {
-        matches!(self, Self::Png | Self::Tiff | Self::WebP | Self::Gif | Self::OpenExr)
+        matches!(self, Self::Png | Self::Tiff | Self::WebP | Self::Gif | Self::OpenExr | Self::Dds | Self::Dpx | Self::Jxl)
     }
 
     fn codec_format(self) -> Format {
@@ -50,6 +59,9 @@ impl StillFormat {
             Self::Gif => Format::Gif,
             Self::Bmp => Format::Bmp,
             Self::OpenExr => Format::OpenExr,
+            Self::Dds => Format::Dds,
+            Self::Dpx => Format::Dpx,
+            Self::Jxl => Format::Jxl,
         }
     }
 }
@@ -67,6 +79,8 @@ pub struct StillOptions {
     pub png_compression: PngCompression,
     pub tiff_compression: TiffCompression,
     pub exr_compression: ExrCompression,
+    pub dds_compression: DdsCompression,
+    pub dpx_bits: Option<DpxBits>,
     /// Colour that transparent pixels are composited onto for formats without alpha.
     pub background: [u8; 3],
     /// Drop EXIF/XMP/ICC instead of embedding them.
@@ -83,6 +97,8 @@ impl Default for StillOptions {
             png_compression: PngCompression::Default,
             tiff_compression: TiffCompression::Deflate,
             exr_compression: ExrCompression::Zip16,
+            dds_compression: DdsCompression::None,
+            dpx_bits: None,
             background: [255, 255, 255],
             strip_metadata: false,
         }
@@ -124,6 +140,8 @@ pub fn encode_still(frame: &VideoFrame, format: StillFormat, options: &StillOpti
         webp_quality: options.quality.clamp(1, 100),
         tiff_compression: options.tiff_compression,
         exr_compression: options.exr_compression,
+        dpx_bits: options.dpx_bits,
+        dds: DdsOptions { compression: options.dds_compression, mipmaps: false },
         embed_icc: !options.strip_metadata,
         embed_metadata: !options.strip_metadata,
         ..EncodeOptions::default()
@@ -241,7 +259,7 @@ mod tests {
 
     #[test]
     fn every_format_has_a_matching_signature() {
-        let sigs: [(StillFormat, &[u8]); 7] = [
+        let sigs: [(StillFormat, &[u8]); 10] = [
             (StillFormat::Png, &[0x89, b'P', b'N', b'G']),
             (StillFormat::Jpeg, &[0xFF, 0xD8]),
             (StillFormat::Tiff, b"II"),
@@ -249,11 +267,41 @@ mod tests {
             (StillFormat::Gif, b"GIF8"),
             (StillFormat::Bmp, b"BM"),
             (StillFormat::OpenExr, &[0x76, 0x2F, 0x31, 0x01]),
+            (StillFormat::Dds, b"DDS "),
+            (StillFormat::Dpx, b"SDPX"),
+            (StillFormat::Jxl, &[0xFF, 0x0A]),
         ];
         for (format, sig) in sigs {
             let bytes = encode_still(&fixture(), format, &StillOptions::default()).unwrap();
-            assert!(bytes.starts_with(sig) || (format == StillFormat::Tiff && bytes.starts_with(b"MM")), "{format:?}");
+            assert!(
+                bytes.starts_with(sig)
+                    || (format == StillFormat::Tiff && bytes.starts_with(b"MM"))
+                    || (format == StillFormat::Dpx && bytes.starts_with(b"XPDS")),
+                "{format:?}"
+            );
         }
+    }
+
+    #[test]
+    fn dds_and_dpx_roundtrip() {
+        let source = fixture();
+        let expected = source.data().to_vec();
+
+        // DPX lossless roundtrip
+        let dpx_bytes = encode_still(&source, StillFormat::Dpx, &StillOptions::default()).unwrap();
+        assert!(dpx_bytes.starts_with(b"SDPX") || dpx_bytes.starts_with(b"XPDS"));
+        let got_dpx = decode(&dpx_bytes);
+        assert_eq!(got_dpx, expected);
+
+        // DDS uncompressed roundtrip
+        let dds_bytes = encode_still(&source, StillFormat::Dds, &StillOptions::default()).unwrap();
+        assert!(dds_bytes.starts_with(b"DDS "));
+        let got_dds = decode(&dds_bytes);
+        assert_eq!(got_dds, expected);
+
+        // JXL bare codestream signature check
+        let jxl_bytes = encode_still(&source, StillFormat::Jxl, &StillOptions::default()).unwrap();
+        assert_eq!(&jxl_bytes[..2], &[0xFF, 0x0A]);
     }
 
     #[test]

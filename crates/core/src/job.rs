@@ -231,6 +231,9 @@ pub enum ContainerType {
     Tiff,
     OpenExr,
     Bmp,
+    Dds,
+    Dpx,
+    Jxl,
     Svg,
     PostScriptEps,
     Gltf,
@@ -288,6 +291,9 @@ impl ContainerType {
         Self::Tiff,
         Self::OpenExr,
         Self::Bmp,
+        Self::Dds,
+        Self::Dpx,
+        Self::Jxl,
         Self::Svg,
         Self::PostScriptEps,
         Self::Gltf,
@@ -341,6 +347,9 @@ impl ContainerType {
             Self::Tiff => "tif",
             Self::OpenExr => "exr",
             Self::Bmp => "bmp",
+            Self::Dds => "dds",
+            Self::Dpx => "dpx",
+            Self::Jxl => "jxl",
             Self::Svg => "svg",
             Self::PostScriptEps => "eps",
             Self::Gltf => "glb",
@@ -427,6 +436,9 @@ impl ContainerType {
             Self::Tiff => "Tagged Image File Format (TIFF)",
             Self::OpenExr => "ILM OpenEXR (Float)",
             Self::Bmp => "Windows Bitmap (BMP)",
+            Self::Dds => "DirectDraw Surface Texture (DDS)",
+            Self::Dpx => "SMPTE 268M Digital Picture Exchange (DPX)",
+            Self::Jxl => "JPEG XL Image (JXL)",
             Self::Svg => "Scalable Vector Graphics (SVG)",
             Self::PostScriptEps => "Encapsulated PostScript (EPS)",
             Self::Gltf => "glTF 2.0 Binary (GLB)",
@@ -473,7 +485,9 @@ impl ContainerType {
             | Self::Opus
             | Self::AdobeAuditionSesx
             | Self::ArtcraftSoundcraft => MediaStreamKind::AudioOnly,
-            Self::Png | Self::Jpeg | Self::WebP | Self::Tiff | Self::OpenExr | Self::Bmp => MediaStreamKind::StillImage,
+            Self::Png | Self::Jpeg | Self::WebP | Self::Tiff | Self::OpenExr | Self::Bmp | Self::Dds | Self::Dpx | Self::Jxl => {
+                MediaStreamKind::StillImage
+            }
             Self::StillSequence | Self::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
             Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps => MediaStreamKind::Vector2D,
             Self::Pdf | Self::Docx | Self::Idml | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => MediaStreamKind::Document,
@@ -511,7 +525,19 @@ impl ContainerType {
                 Self::Opus,
             ],
             MediaStreamKind::StillImage => {
-                vec![Self::Png, Self::Jpeg, Self::WebP, Self::Tiff, Self::OpenExr, Self::Bmp, Self::AdobePhotoshopPsd, Self::ArtcraftPhotocraft]
+                vec![
+                    Self::Png,
+                    Self::Jpeg,
+                    Self::WebP,
+                    Self::Tiff,
+                    Self::OpenExr,
+                    Self::Bmp,
+                    Self::Dds,
+                    Self::Dpx,
+                    Self::Jxl,
+                    Self::AdobePhotoshopPsd,
+                    Self::ArtcraftPhotocraft,
+                ]
             }
             MediaStreamKind::LayeredComposite => vec![
                 Self::ArtcraftPhotocraft,
@@ -523,6 +549,9 @@ impl ContainerType {
                 Self::Jpeg,
                 Self::WebP,
                 Self::Bmp,
+                Self::Dds,
+                Self::Dpx,
+                Self::Jxl,
             ],
             MediaStreamKind::Vector2D => {
                 vec![Self::ArtcraftVectorcraft, Self::Svg, Self::Pdf, Self::PostScriptEps, Self::AutocadDxf, Self::Png, Self::AdobeIllustratorAi]

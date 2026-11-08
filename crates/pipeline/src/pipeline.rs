@@ -394,6 +394,9 @@ impl TranscodePipeline {
             | ContainerType::Tiff
             | ContainerType::OpenExr
             | ContainerType::Bmp
+            | ContainerType::Dds
+            | ContainerType::Dpx
+            | ContainerType::Jxl
             | ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
             ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => {
                 self.execute_layered_image(target, start_time)?
@@ -978,6 +981,9 @@ impl TranscodePipeline {
             ContainerType::Jpeg => (StillFormat::Jpeg, StillOptions::default()),
             ContainerType::WebP => (StillFormat::WebP, StillOptions { webp_lossless: target.image_quality.is_none(), ..StillOptions::default() }),
             ContainerType::AnimatedGif => (StillFormat::Gif, StillOptions::default()),
+            ContainerType::Dds => (StillFormat::Dds, StillOptions::default()),
+            ContainerType::Dpx => (StillFormat::Dpx, StillOptions::default()),
+            ContainerType::Jxl => (StillFormat::Jxl, StillOptions::default()),
             other => return Err(EncoderError::UnsupportedCodec(format!("{other:?} is not a still-image container"))),
         };
         if let Some(q) = target.image_quality {
