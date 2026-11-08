@@ -22,12 +22,28 @@ pub enum StillFormat {
     Dds,
     Dpx,
     Jxl,
+    RadianceHdr,
+    Dicom,
+    Fits,
 }
 
 impl StillFormat {
     /// Every writable format.
-    pub const ALL: [StillFormat; 10] =
-        [Self::Png, Self::Jpeg, Self::Tiff, Self::WebP, Self::Gif, Self::Bmp, Self::OpenExr, Self::Dds, Self::Dpx, Self::Jxl];
+    pub const ALL: [StillFormat; 13] = [
+        Self::Png,
+        Self::Jpeg,
+        Self::Tiff,
+        Self::WebP,
+        Self::Gif,
+        Self::Bmp,
+        Self::OpenExr,
+        Self::Dds,
+        Self::Dpx,
+        Self::Jxl,
+        Self::RadianceHdr,
+        Self::Dicom,
+        Self::Fits,
+    ];
 
     /// Canonical file extension.
     pub fn extension(self) -> &'static str {
@@ -42,6 +58,9 @@ impl StillFormat {
             Self::Dds => "dds",
             Self::Dpx => "dpx",
             Self::Jxl => "jxl",
+            Self::RadianceHdr => "hdr",
+            Self::Dicom => "dcm",
+            Self::Fits => "fits",
         }
     }
 
@@ -62,6 +81,9 @@ impl StillFormat {
             Self::Dds => Format::Dds,
             Self::Dpx => Format::Dpx,
             Self::Jxl => Format::Jxl,
+            Self::RadianceHdr => Format::Hdr,
+            Self::Dicom => Format::Dicom,
+            Self::Fits => Format::Fits,
         }
     }
 }
@@ -129,6 +151,10 @@ pub fn encode_still(frame: &VideoFrame, format: StillFormat, options: &StillOpti
     let (w, h) = (frame.dimensions.width, frame.dimensions.height);
     if w == 0 || h == 0 {
         return Err(EncoderError::InvalidJobSpec("cannot encode an image with zero dimensions".into()));
+    }
+
+    if format == StillFormat::Dicom {
+        return crate::dicom::encode_dicom(frame);
     }
 
     let opts = EncodeOptions {
@@ -259,7 +285,7 @@ mod tests {
 
     #[test]
     fn every_format_has_a_matching_signature() {
-        let sigs: [(StillFormat, &[u8]); 10] = [
+        let sigs: [(StillFormat, &[u8]); 12] = [
             (StillFormat::Png, &[0x89, b'P', b'N', b'G']),
             (StillFormat::Jpeg, &[0xFF, 0xD8]),
             (StillFormat::Tiff, b"II"),
@@ -270,16 +296,23 @@ mod tests {
             (StillFormat::Dds, b"DDS "),
             (StillFormat::Dpx, b"SDPX"),
             (StillFormat::Jxl, &[0xFF, 0x0A]),
+            (StillFormat::RadianceHdr, b"#?RADIANCE"),
+            (StillFormat::Fits, b"SIMPLE  ="),
         ];
         for (format, sig) in sigs {
             let bytes = encode_still(&fixture(), format, &StillOptions::default()).unwrap();
             assert!(
                 bytes.starts_with(sig)
                     || (format == StillFormat::Tiff && bytes.starts_with(b"MM"))
-                    || (format == StillFormat::Dpx && bytes.starts_with(b"XPDS")),
+                    || (format == StillFormat::Dpx && bytes.starts_with(b"XPDS"))
+                    || (format == StillFormat::RadianceHdr && bytes.starts_with(b"#?RGBE")),
                 "{format:?}"
             );
         }
+
+        // DICOM preamble check
+        let dcm = encode_still(&fixture(), StillFormat::Dicom, &StillOptions::default()).unwrap();
+        assert_eq!(&dcm[128..132], b"DICM");
     }
 
     #[test]
@@ -302,6 +335,18 @@ mod tests {
         // JXL bare codestream signature check
         let jxl_bytes = encode_still(&source, StillFormat::Jxl, &StillOptions::default()).unwrap();
         assert_eq!(&jxl_bytes[..2], &[0xFF, 0x0A]);
+
+        // FITS roundtrip
+        let fits_bytes = encode_still(&source, StillFormat::Fits, &StillOptions::default()).unwrap();
+        assert!(fits_bytes.starts_with(b"SIMPLE  ="));
+        let got_fits = decode(&fits_bytes);
+        assert_eq!(got_fits.len(), expected.len());
+
+        // DICOM roundtrip
+        let dcm_bytes = encode_still(&source, StillFormat::Dicom, &StillOptions::default()).unwrap();
+        assert_eq!(&dcm_bytes[128..132], b"DICM");
+        let got_dcm = decode(&dcm_bytes);
+        assert_eq!(got_dcm.len(), expected.len());
     }
 
     #[test]

@@ -478,4 +478,26 @@ fn dds_dpx_and_jxl_pipeline_transcode() {
     assert!(seq_frame.exists());
     let seq_data = std::fs::read(&seq_frame).unwrap();
     assert!(seq_data.starts_with(b"SDPX") || seq_data.starts_with(b"XPDS"));
+
+    // Radiance HDR, DICOM, and FITS pipeline transcode
+    let hdr_path = dir.path().join("output.hdr");
+    let dcm_path = dir.path().join("output.dcm");
+    let fits_path = dir.path().join("output.fits");
+
+    let hdr_target = small_target(&hdr_path, ContainerType::RadianceHdr, "Radiance HDR RGBE Environment");
+    let dcm_target = small_target(&dcm_path, ContainerType::Dicom, "Medical DICOM Image (Secondary Capture)");
+    let fits_target = small_target(&fits_path, ContainerType::Fits, "Astronomical FITS Scientific Data");
+
+    run(job(&src_png, hdr_target)).unwrap();
+    run(job(&src_png, dcm_target)).unwrap();
+    run(job(&src_png, fits_target)).unwrap();
+
+    let hdr_data = std::fs::read(&hdr_path).unwrap();
+    assert!(hdr_data.starts_with(b"#?RADIANCE") || hdr_data.starts_with(b"#?RGBE"));
+
+    let dcm_data = std::fs::read(&dcm_path).unwrap();
+    assert_eq!(&dcm_data[128..132], b"DICM");
+
+    let fits_data = std::fs::read(&fits_path).unwrap();
+    assert!(fits_data.starts_with(b"SIMPLE  ="));
 }
