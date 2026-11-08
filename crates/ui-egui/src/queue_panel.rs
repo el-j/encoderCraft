@@ -275,6 +275,8 @@ pub const INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
     (ContainerType::Aiff, "AIFF", "aif"),
     (ContainerType::Flac, "FLAC", "flac"),
     (ContainerType::Mp3, "MP3", "mp3"),
+    (ContainerType::Caf, "CAF", "caf"),
+    (ContainerType::Opus, "Opus", "opus"),
     (ContainerType::Png, "PNG", "png"),
     (ContainerType::Jpeg, "JPEG", "jpg"),
     (ContainerType::WebP, "WebP", "webp"),
@@ -289,6 +291,8 @@ pub const AUDIO_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
     (ContainerType::Flac, "FLAC", "flac"),
     (ContainerType::Mp3, "MP3", "mp3"),
     (ContainerType::OggAudio, "Ogg Vorbis", "ogg"),
+    (ContainerType::Caf, "Apple Core Audio (.caf)", "caf"),
+    (ContainerType::Opus, "Ogg Opus (.opus)", "opus"),
 ];
 
 pub const IMAGE_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
@@ -367,6 +371,8 @@ pub fn default_preset_for_container(c: ContainerType) -> &'static str {
         ContainerType::Aiff => "Lossless Audio Master (AIFF 24-bit)",
         ContainerType::Flac => "Archival Audio FLAC (Lossless 24-bit)",
         ContainerType::Mp3 => "Podcast MP3 (192 kbps)",
+        ContainerType::Caf => "Apple Core Audio CAF (24-bit PCM)",
+        ContainerType::Opus => "Voice & Streaming Opus (128 kbps)",
         ContainerType::Png => "Still Image PNG (Lossless)",
         ContainerType::Jpeg => "Still Image JPEG",
         ContainerType::WebP => "Still Image WebP (Lossless)",

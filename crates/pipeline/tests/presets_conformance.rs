@@ -398,4 +398,40 @@ fn mp3_and_ogg_vorbis_pipeline_transcode() {
     assert_eq!(ogg_reader.frame_count(), 0);
     let ogg_audio = ogg_reader.read_all_audio(44100).unwrap();
     assert!(ogg_audio.samples_per_channel() > 0);
+
+    // CAF (Apple Core Audio Format) pipeline execution
+    let caf_path = dir.path().join("output.caf");
+    let mut caf_target = small_target(&caf_path, ContainerType::Caf, "Apple CAF");
+    caf_target.audio = Some(encodercraft_core::AudioEncodeSettings {
+        codec: Some("lpcm".into()),
+        sample_rate: Some(44100),
+        layout: Some(encodercraft_core::ChannelLayout::Mono),
+        bitrate_kbps: None,
+        delay_ms: 0,
+    });
+    run(job(&wav_path, caf_target)).unwrap();
+    let caf_data = std::fs::read(&caf_path).unwrap();
+    assert!(!caf_data.is_empty());
+    assert_eq!(&caf_data[0..4], b"caff");
+    assert!(caf_data.windows(4).any(|w| w == b"desc"));
+    assert!(caf_data.windows(4).any(|w| w == b"data"));
+
+    // Opus (RFC 7845 Standalone Ogg Opus) pipeline execution
+    let opus_path = dir.path().join("output.opus");
+    let mut opus_target = small_target(&opus_path, ContainerType::Opus, "Opus Audio");
+    opus_target.audio = Some(encodercraft_core::AudioEncodeSettings {
+        codec: Some("opus".into()),
+        sample_rate: Some(48000),
+        layout: Some(encodercraft_core::ChannelLayout::Mono),
+        bitrate_kbps: Some(128),
+        delay_ms: 0,
+    });
+    opus_target.metadata =
+        Some(encodercraft_core::XmpMetadata { title: Some("Opus Pipeline Track".into()), creator: Some("ArtCraft".into()), ..Default::default() });
+    run(job(&wav_path, opus_target)).unwrap();
+    let opus_data = std::fs::read(&opus_path).unwrap();
+    assert!(!opus_data.is_empty());
+    assert_eq!(&opus_data[0..4], b"OggS");
+    assert!(opus_data.windows(8).any(|w| w == b"OpusHead"));
+    assert!(opus_data.windows(8).any(|w| w == b"OpusTags"));
 }

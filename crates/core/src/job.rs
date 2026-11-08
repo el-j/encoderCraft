@@ -221,6 +221,8 @@ pub enum ContainerType {
     Flac,
     OggAudio,
     Mp3,
+    Caf,
+    Opus,
     StillSequence,
     AnimatedGif,
     Png,
@@ -276,6 +278,8 @@ impl ContainerType {
         Self::Flac,
         Self::OggAudio,
         Self::Mp3,
+        Self::Caf,
+        Self::Opus,
         Self::StillSequence,
         Self::AnimatedGif,
         Self::Png,
@@ -327,6 +331,8 @@ impl ContainerType {
             Self::Flac => "flac",
             Self::OggAudio => "ogg",
             Self::Mp3 => "mp3",
+            Self::Caf => "caf",
+            Self::Opus => "opus",
             Self::StillSequence => "png",
             Self::AnimatedGif => "gif",
             Self::Png => "png",
@@ -375,7 +381,9 @@ impl ContainerType {
             "jpeg" => Some(Self::Jpeg),
             "tiff" => Some(Self::Tiff),
             "gltf" => Some(Self::Gltf),
-            "oga" | "ogg" | "opus" => Some(Self::OggAudio),
+            "oga" | "ogg" => Some(Self::OggAudio),
+            "opus" => Some(Self::Opus),
+            "caf" => Some(Self::Caf),
             "bwf" => Some(Self::Wave),
             "aif" => Some(Self::Aiff),
             "jpg" => Some(Self::Jpeg),
@@ -409,6 +417,8 @@ impl ContainerType {
             Self::Flac => "Free Lossless Audio Codec (FLAC)",
             Self::OggAudio => "Ogg Vorbis Audio",
             Self::Mp3 => "MPEG Audio Layer 3 (MP3)",
+            Self::Caf => "Apple Core Audio Format (CAF)",
+            Self::Opus => "Ogg Opus Audio (OPUS)",
             Self::StillSequence => "Numbered Image Sequence",
             Self::AnimatedGif => "Animated GIF",
             Self::Png => "Portable Network Graphics (PNG)",
@@ -454,9 +464,15 @@ impl ContainerType {
             Self::IsoBmffMp4 | Self::QuickTimeMov | Self::MatroskaMkv | Self::WebM | Self::MxfOp1a | Self::MxfOpAtom | Self::AnimatedGif => {
                 MediaStreamKind::VideoWithAudio
             }
-            Self::Wave | Self::Aiff | Self::Flac | Self::OggAudio | Self::Mp3 | Self::AdobeAuditionSesx | Self::ArtcraftSoundcraft => {
-                MediaStreamKind::AudioOnly
-            }
+            Self::Wave
+            | Self::Aiff
+            | Self::Flac
+            | Self::OggAudio
+            | Self::Mp3
+            | Self::Caf
+            | Self::Opus
+            | Self::AdobeAuditionSesx
+            | Self::ArtcraftSoundcraft => MediaStreamKind::AudioOnly,
             Self::Png | Self::Jpeg | Self::WebP | Self::Tiff | Self::OpenExr | Self::Bmp => MediaStreamKind::StillImage,
             Self::StillSequence | Self::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
             Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps => MediaStreamKind::Vector2D,
@@ -475,7 +491,9 @@ impl ContainerType {
             MediaStreamKind::AudioOnly if matches!(self, Self::AdobeAuditionSesx | Self::ArtcraftSoundcraft) => {
                 vec![Self::Wave, Self::Aiff, Self::Flac, Self::AdobeAuditionSesx, Self::ArtcraftSoundcraft]
             }
-            MediaStreamKind::AudioOnly => vec![Self::Wave, Self::Aiff, Self::Flac, Self::Mp3, Self::OggAudio, Self::ArtcraftSoundcraft],
+            MediaStreamKind::AudioOnly => {
+                vec![Self::Wave, Self::Aiff, Self::Flac, Self::Mp3, Self::OggAudio, Self::Caf, Self::Opus, Self::ArtcraftSoundcraft]
+            }
             MediaStreamKind::VideoWithAudio | MediaStreamKind::VideoOnly => vec![
                 Self::IsoBmffMp4,
                 Self::QuickTimeMov,
@@ -489,6 +507,8 @@ impl ContainerType {
                 Self::Aiff,
                 Self::Flac,
                 Self::Mp3,
+                Self::Caf,
+                Self::Opus,
             ],
             MediaStreamKind::StillImage => {
                 vec![Self::Png, Self::Jpeg, Self::WebP, Self::Tiff, Self::OpenExr, Self::Bmp, Self::AdobePhotoshopPsd, Self::ArtcraftPhotocraft]

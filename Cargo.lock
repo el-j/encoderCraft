@@ -1026,6 +1026,7 @@ name = "encodercraft-audio-dsp"
 version = "0.1.0-alpha.2"
 dependencies = [
  "audio2mp3-core",
+ "effectcraft-opusenc",
  "encodercraft-core",
  "filmcraft-aac",
  "miniz_oxide 0.9.1",
