@@ -2,13 +2,23 @@
 
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use encodercraft_core::{CraftJobSpec, EncoderError, JobStatus};
 use serde::{Deserialize, Serialize};
 
 use crate::conversion::ConversionDecision;
+
+static TMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn unique_temp_path(target_path: &Path) -> PathBuf {
+    let pid = std::process::id();
+    let counter = TMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let base_name = target_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    target_path.with_file_name(format!("{base_name}.{pid}.{counter}.tmp"))
+}
 
 /// Snapshot of an individual job in the encoding queue.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -224,20 +234,26 @@ impl Default for QueueJournal {
 
 /// Atomically saves the queue journal to disk using a temporary file and rename.
 pub fn save_journal_atomic(journal_path: &Path, journal: &QueueJournal) -> Result<(), EncoderError> {
-    if let Some(parent) = journal_path.parent() {
+    if let Some(parent) = journal_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| EncoderError::Io(format!("failed to create journal directory: {e}")))?;
     }
 
-    let tmp_path = journal_path.with_extension("tmp");
+    let tmp_path = unique_temp_path(journal_path);
     let json_bytes = serde_json::to_vec_pretty(journal).map_err(|e| EncoderError::Internal(format!("failed to serialize queue journal: {e}")))?;
 
-    let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp journal: {e}")))?;
-    tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp journal: {e}")))?;
-    tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp journal: {e}")))?;
+    let write_res = (|| -> Result<(), EncoderError> {
+        let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp journal: {e}")))?;
+        tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp journal: {e}")))?;
+        tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp journal: {e}")))?;
+        std::fs::rename(&tmp_path, journal_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit journal: {e}")))?;
+        Ok(())
+    })();
 
-    std::fs::rename(&tmp_path, journal_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit journal: {e}")))?;
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
 
-    Ok(())
+    write_res
 }
 
 /// Loads the queue journal from disk, recovering from interrupted jobs if necessary.
@@ -276,19 +292,26 @@ pub fn load_preferences(prefs_path: &Path) -> Result<AppPreferences, EncoderErro
 
 /// Atomically saves application preferences to disk.
 pub fn save_preferences_atomic(prefs_path: &Path, prefs: &AppPreferences) -> Result<(), EncoderError> {
-    if let Some(parent) = prefs_path.parent() {
+    if let Some(parent) = prefs_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| EncoderError::Io(format!("failed to create preferences directory: {e}")))?;
     }
 
-    let tmp_path = prefs_path.with_extension("tmp");
+    let tmp_path = unique_temp_path(prefs_path);
     let json_bytes = serde_json::to_vec_pretty(prefs).map_err(|e| EncoderError::Internal(format!("failed to serialize preferences: {e}")))?;
 
-    let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp preferences: {e}")))?;
-    tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp preferences: {e}")))?;
-    tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp preferences: {e}")))?;
+    let write_res = (|| -> Result<(), EncoderError> {
+        let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp preferences: {e}")))?;
+        tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp preferences: {e}")))?;
+        tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp preferences: {e}")))?;
+        std::fs::rename(&tmp_path, prefs_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit preferences: {e}")))?;
+        Ok(())
+    })();
 
-    std::fs::rename(&tmp_path, prefs_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit preferences: {e}")))?;
-    Ok(())
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
+    write_res
 }
 
 #[cfg(test)]
