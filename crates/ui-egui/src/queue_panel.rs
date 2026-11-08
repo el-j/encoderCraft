@@ -283,6 +283,77 @@ pub const INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
     (ContainerType::AnimatedGif, "GIF", "gif"),
 ];
 
+pub const AUDIO_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::Wave, "WAV (BWF)", "wav"),
+    (ContainerType::Aiff, "AIFF", "aif"),
+    (ContainerType::Flac, "FLAC", "flac"),
+    (ContainerType::Mp3, "MP3", "mp3"),
+];
+
+pub const IMAGE_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::Png, "PNG", "png"),
+    (ContainerType::Jpeg, "JPEG", "jpg"),
+    (ContainerType::WebP, "WebP", "webp"),
+    (ContainerType::Tiff, "TIFF", "tif"),
+    (ContainerType::OpenExr, "OpenEXR", "exr"),
+    (ContainerType::AnimatedGif, "GIF", "gif"),
+];
+
+pub const VIDEO_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::IsoBmffMp4, "MP4", "mp4"),
+    (ContainerType::QuickTimeMov, "MOV (QuickTime)", "mov"),
+    (ContainerType::WebM, "WebM", "webm"),
+    (ContainerType::MatroskaMkv, "MKV", "mkv"),
+    (ContainerType::MxfOp1a, "MXF OP1a", "mxf"),
+    (ContainerType::Wave, "WAV (BWF Audio)", "wav"),
+    (ContainerType::Mp3, "MP3 (Audio Extract)", "mp3"),
+    (ContainerType::Png, "PNG (Image Sequence)", "png"),
+    (ContainerType::AnimatedGif, "GIF Animation", "gif"),
+];
+
+/// Returns context-aware candidate containers appropriate for the source stream type.
+pub fn candidate_containers_for_job(job: &QueuedJob) -> &'static [(ContainerType, &'static str, &'static str)] {
+    let stream_kind = match &job.spec.source {
+        encodercraft_core::SourceDescriptor::File { path, .. } => encodercraft_demux::classify_stream_kind(path),
+        _ => encodercraft_core::MediaStreamKind::VideoWithAudio,
+    };
+    if stream_kind.is_audio_only() {
+        AUDIO_INLINE_CONTAINERS
+    } else if stream_kind.is_image() {
+        IMAGE_INLINE_CONTAINERS
+    } else {
+        VIDEO_INLINE_CONTAINERS
+    }
+}
+
+/// Renders a distinctive, color-coded essence chip indicating media type (Video, Audio, Image, 3D, Stitched).
+fn render_media_kind_chip(ui: &mut egui::Ui, job: &QueuedJob, tokens: &Tokens) {
+    let (tag, bg, fg) = match &job.spec.source {
+        encodercraft_core::SourceDescriptor::StitchedClips { .. } => ("SEQ", egui::Color32::from_rgb(180, 60, 180), egui::Color32::WHITE),
+        encodercraft_core::SourceDescriptor::File { path, .. } => {
+            let kind = encodercraft_demux::classify_stream_kind(path);
+            if kind.is_audio_only() {
+                ("AUD", egui::Color32::from_rgb(35, 134, 54), egui::Color32::WHITE)
+            } else if kind.is_image() {
+                ("IMG", egui::Color32::from_rgb(187, 128, 9), egui::Color32::WHITE)
+            } else if kind.is_document() {
+                ("DOC", egui::Color32::from_rgb(137, 87, 229), egui::Color32::WHITE)
+            } else if kind.is_spatial_3d() {
+                ("3D", egui::Color32::from_rgb(41, 140, 150), egui::Color32::WHITE)
+            } else {
+                ("VID", tokens.accent_primary, egui::Color32::WHITE)
+            }
+        }
+        _ => ("VID", tokens.accent_primary, egui::Color32::WHITE),
+    };
+
+    let chip_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(28.0, 14.0));
+    ui.allocate_exact_size(egui::vec2(28.0, 14.0), egui::Sense::hover());
+    ui.painter().rect_filled(chip_rect, 2.0, bg.gamma_multiply(0.25));
+    ui.painter().rect_stroke(chip_rect, 2.0, egui::Stroke::new(1.0, bg), egui::StrokeKind::Inside);
+    ui.painter().text(chip_rect.center(), egui::Align2::CENTER_CENTER, tag, egui::FontId::monospace(9.0), fg);
+}
+
 /// Returns the default preset name for a given container format.
 pub fn default_preset_for_container(c: ContainerType) -> &'static str {
     match c {
@@ -771,6 +842,9 @@ fn render_grouped_job_row(
                     }
                 }
 
+                // Media Kind Chip (VID, AUD, IMG, DOC, 3D, SEQ)
+                render_media_kind_chip(ui, job, tokens);
+
                 // Origin Chip (ArtCraft siblings)
                 render_client_origin_chip(ui, &job.spec.client_info.app_name, tokens);
 
@@ -814,34 +888,47 @@ fn render_grouped_job_row(
             render_column_cell(ui, cols.format, tokens.row_height, |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
+                        let candidate_containers = candidate_containers_for_job(job);
                         let mut current_container = t.container;
                         let combo_text =
-                            INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
-                        let combo = egui::ComboBox::from_id_salt(format!("summary_fmt_{job_id}"))
+                            candidate_containers.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
+                        let _combo = egui::ComboBox::from_id_salt(format!("summary_fmt_{job_id}"))
                             .selected_text(RichText::new(combo_text).small())
                             .width(cols.format - 12.0)
                             .show_ui(ui, |ui| {
-                                for (c, name, _) in INLINE_CONTAINERS {
+                                for (c, name, _) in candidate_containers {
                                     ui.selectable_value(&mut current_container, *c, *name);
                                 }
                             });
 
-                        if combo.response.changed() && current_container != t.container {
-                            let mut updated = t.clone();
-                            updated.container = current_container;
-                            if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
-                                let mut p = updated.output_path.clone();
-                                p.set_extension(ext);
-                                updated.output_path = p;
+                        if current_container != t.container {
+                            let jobs_to_update: Vec<String> = if state.selected_job_ids.contains(&job_id) {
+                                state.selected_job_ids.iter().cloned().collect()
+                            } else {
+                                vec![job_id.clone()]
+                            };
+
+                            for target_job_id in jobs_to_update {
+                                if let Some(target_job) = all_jobs.iter().find(|j| j.spec.job_id == target_job_id)
+                                    && let Some(target_t) = target_job.spec.targets.first()
+                                {
+                                    let mut updated = target_t.clone();
+                                    updated.container = current_container;
+                                    if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
+                                        let mut p = updated.output_path.clone();
+                                        p.set_extension(ext);
+                                        updated.output_path = p;
+                                    }
+                                    updated.preset_name = default_preset_for_container(current_container).to_string();
+                                    execute_queue_command(
+                                        state,
+                                        commands,
+                                        queue_mgr,
+                                        "queue.update_output_target",
+                                        serde_json::json!({ "jobId": target_job_id, "targetIndex": 0, "target": updated }),
+                                    );
+                                }
                             }
-                            updated.preset_name = default_preset_for_container(current_container).to_string();
-                            execute_queue_command(
-                                state,
-                                commands,
-                                queue_mgr,
-                                "queue.update_output_target",
-                                serde_json::json!({ "jobId": job_id, "targetIndex": 0, "target": updated }),
-                            );
                         }
                     }
                 } else {
@@ -871,15 +958,26 @@ fn render_grouped_job_row(
                                 }
                             });
                         if chosen_preset != t.preset_name {
-                            let mut updated = t.clone();
-                            updated.preset_name = chosen_preset;
-                            execute_queue_command(
-                                state,
-                                commands,
-                                queue_mgr,
-                                "queue.update_output_target",
-                                serde_json::json!({ "jobId": job_id, "targetIndex": 0, "target": updated }),
-                            );
+                            let jobs_to_update: Vec<String> = if state.selected_job_ids.contains(&job_id) {
+                                state.selected_job_ids.iter().cloned().collect()
+                            } else {
+                                vec![job_id.clone()]
+                            };
+                            for target_job_id in jobs_to_update {
+                                if let Some(target_job) = all_jobs.iter().find(|j| j.spec.job_id == target_job_id)
+                                    && let Some(target_t) = target_job.spec.targets.first()
+                                {
+                                    let mut updated = target_t.clone();
+                                    updated.preset_name = chosen_preset.clone();
+                                    execute_queue_command(
+                                        state,
+                                        commands,
+                                        queue_mgr,
+                                        "queue.update_output_target",
+                                        serde_json::json!({ "jobId": target_job_id, "targetIndex": 0, "target": updated }),
+                                    );
+                                }
+                            }
                         }
                     }
                 } else {
@@ -957,34 +1055,48 @@ fn render_grouped_job_row(
 
                     // Format Dropdown Column
                     render_column_cell(ui, cols.format, tokens.row_height, |ui| {
+                        let candidate_containers = candidate_containers_for_job(job);
                         let mut current_container = target.container;
                         let combo_text =
-                            INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
-                        let combo = egui::ComboBox::from_id_salt(format!("target_fmt_{job_id}_{idx}"))
+                            candidate_containers.iter().find(|(c, _, _)| *c == current_container).map(|(_, name, _)| *name).unwrap_or("Custom");
+                        let _combo = egui::ComboBox::from_id_salt(format!("target_fmt_{job_id}_{idx}"))
                             .selected_text(RichText::new(combo_text).small())
                             .width(cols.format - 12.0)
                             .show_ui(ui, |ui| {
-                                for (c, name, _) in INLINE_CONTAINERS {
+                                for (c, name, _) in candidate_containers {
                                     ui.selectable_value(&mut current_container, *c, *name);
                                 }
                             });
 
-                        if combo.response.changed() && current_container != target.container {
-                            let mut updated = target.clone();
-                            updated.container = current_container;
-                            if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
-                                let mut p = updated.output_path.clone();
-                                p.set_extension(ext);
-                                updated.output_path = p;
+                        if current_container != target.container {
+                            let jobs_to_update: Vec<String> = if state.selected_job_ids.contains(&job_id) {
+                                state.selected_job_ids.iter().cloned().collect()
+                            } else {
+                                vec![job_id.clone()]
+                            };
+
+                            for sel_id in jobs_to_update {
+                                if let Some(sel_job) = all_jobs.iter().find(|j| j.spec.job_id == sel_id) {
+                                    let target_idx = if sel_id == job_id { idx } else { 0 };
+                                    if let Some(target_t) = sel_job.spec.targets.get(target_idx) {
+                                        let mut updated = target_t.clone();
+                                        updated.container = current_container;
+                                        if let Some((_, _, ext)) = INLINE_CONTAINERS.iter().find(|(c, _, _)| *c == current_container) {
+                                            let mut p = updated.output_path.clone();
+                                            p.set_extension(ext);
+                                            updated.output_path = p;
+                                        }
+                                        updated.preset_name = default_preset_for_container(current_container).to_string();
+                                        execute_queue_command(
+                                            state,
+                                            commands,
+                                            queue_mgr,
+                                            "queue.update_output_target",
+                                            serde_json::json!({ "jobId": sel_id, "targetIndex": target_idx, "target": updated }),
+                                        );
+                                    }
+                                }
                             }
-                            updated.preset_name = default_preset_for_container(current_container).to_string();
-                            execute_queue_command(
-                                state,
-                                commands,
-                                queue_mgr,
-                                "queue.update_output_target",
-                                serde_json::json!({ "jobId": job_id, "targetIndex": idx, "target": updated }),
-                            );
                         }
                     });
 
@@ -1013,15 +1125,27 @@ fn render_grouped_job_row(
                             egui::Frame::popup(ui.style()).show(ui, |ui| {
                                 for preset_name in presets_for_container(target.container) {
                                     if ui.button(preset_name).clicked() {
-                                        let mut updated = target.clone();
-                                        updated.preset_name = preset_name.to_string();
-                                        execute_queue_command(
-                                            state,
-                                            commands,
-                                            queue_mgr,
-                                            "queue.update_output_target",
-                                            serde_json::json!({ "jobId": job_id, "targetIndex": idx, "target": updated }),
-                                        );
+                                        let jobs_to_update: Vec<String> = if state.selected_job_ids.contains(&job_id) {
+                                            state.selected_job_ids.iter().cloned().collect()
+                                        } else {
+                                            vec![job_id.clone()]
+                                        };
+                                        for sel_id in jobs_to_update {
+                                            if let Some(sel_job) = all_jobs.iter().find(|j| j.spec.job_id == sel_id) {
+                                                let target_idx = if sel_id == job_id { idx } else { 0 };
+                                                if let Some(target_t) = sel_job.spec.targets.get(target_idx) {
+                                                    let mut updated = target_t.clone();
+                                                    updated.preset_name = preset_name.to_string();
+                                                    execute_queue_command(
+                                                        state,
+                                                        commands,
+                                                        queue_mgr,
+                                                        "queue.update_output_target",
+                                                        serde_json::json!({ "jobId": sel_id, "targetIndex": target_idx, "target": updated }),
+                                                    );
+                                                }
+                                            }
+                                        }
                                         state.active_preset_menu = None;
                                     }
                                 }
@@ -1522,5 +1646,56 @@ mod tests {
 
         assert!(!selected_renderer.is_empty());
         assert!(selected_renderer.contains("Hardware") || selected_renderer.contains("Software"));
+    }
+
+    #[test]
+    fn test_candidate_containers_by_source_kind() {
+        // Audio job
+        let audio_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "audio-1".into(),
+            client_info: ClientInfo { app_name: "t".into(), app_version: "1".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "podcast.mp3".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget::default()],
+        };
+        let audio_job = QueuedJob::new(audio_spec);
+        let audio_containers = candidate_containers_for_job(&audio_job);
+        assert!(audio_containers.iter().any(|(c, _, _)| *c == ContainerType::Wave));
+        assert!(audio_containers.iter().any(|(c, _, _)| *c == ContainerType::Mp3));
+        assert!(!audio_containers.iter().any(|(c, _, _)| *c == ContainerType::Png));
+        assert!(!audio_containers.iter().any(|(c, _, _)| *c == ContainerType::IsoBmffMp4));
+
+        // Image job
+        let img_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "img-1".into(),
+            client_info: ClientInfo { app_name: "t".into(), app_version: "1".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "photo.png".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget::default()],
+        };
+        let img_job = QueuedJob::new(img_spec);
+        let img_containers = candidate_containers_for_job(&img_job);
+        assert!(img_containers.iter().any(|(c, _, _)| *c == ContainerType::Png));
+        assert!(img_containers.iter().any(|(c, _, _)| *c == ContainerType::Jpeg));
+        assert!(!img_containers.iter().any(|(c, _, _)| *c == ContainerType::IsoBmffMp4));
+
+        // Video job
+        let vid_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "vid-1".into(),
+            client_info: ClientInfo { app_name: "t".into(), app_version: "1".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: "clip.mov".into(), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget::default()],
+        };
+        let vid_job = QueuedJob::new(vid_spec);
+        let vid_containers = candidate_containers_for_job(&vid_job);
+        assert!(vid_containers.iter().any(|(c, _, _)| *c == ContainerType::IsoBmffMp4));
+        assert!(vid_containers.iter().any(|(c, _, _)| *c == ContainerType::QuickTimeMov));
     }
 }

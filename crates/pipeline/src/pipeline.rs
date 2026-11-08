@@ -2249,6 +2249,7 @@ mod tests {
             create_date: Some("2026-11-02T12:00:00Z".into()),
             start_timecode: Some("01:00:00:00".into()),
             export_sidecar_xmp: true,
+            ..Default::default()
         };
 
         let spec = CraftJobSpec {

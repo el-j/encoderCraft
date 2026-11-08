@@ -693,6 +693,31 @@ flowchart LR
 
 ---
 
+### Milestone 38: Queue Batch Multi-Selection, UI ID Clash Fixes, In/Out Trimming & Audio Metadata
+**Objective:** Deliver production-ready UX enhancements resolving UI scroll and widget ID clashes, enabling multi-selection batch format/preset propagation, unconstrained multi-file picking and recursive folder ingestion, media-kind context-aware format choices and visual essence chips, In/Out point trimming synchronization, granular GPU/CPU hardware rendering preferences, and audio metadata tagging. Tracked under Milestone [M38 - Queue Batch Multi-Selection, UI ID Clash Fixes, In/Out Trimming & Audio Metadata](https://github.com/el-j/encoderCraft/milestone/16).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **UI ID Clash Resolution & Preset Browser Horizontal Overflow Fix ([#176](https://github.com/el-j/encoderCraft/issues/176)):**
+   - Eliminated egui ID clashes (ID 8457 and 5517) across Media Browser navigation sidebars and Preset Browser table rows by applying explicit `id_salt` and `ui.push_id` scopes.
+   - Enclosed preset table header within the two-dimensional `ScrollArea` container, preventing horizontal blowout and scroll misalignment.
+2. [x] **Multi-Item Queue Selection Batch Updates & Inline Dropdown Events ([#177](https://github.com/el-j/encoderCraft/issues/177)):**
+   - Enabled simultaneous batch format and preset switching across all highlighted queue items when any item in the selection is updated.
+   - Fixed inline dropdown change event handling by evaluating inner selection state changes rather than relying on outer ComboBox response.
+3. [x] **Native Multi-File Selection & Recursive Folder Queue Addition ([#178](https://github.com/el-j/encoderCraft/issues/178)):**
+   - Removed restrictive file extension filters from OS file pickers, enabling native Shift/Command range and disjoint multi-selection.
+   - Implemented recursive directory scanning (`add_folder_recursive`) and added `AppCommand::AddFolder` ("Add Folder to Queue...").
+4. [x] **Context-Aware Format Filtering & Essence Visual Badges ([#179](https://github.com/el-j/encoderCraft/issues/179)):**
+   - Dynamically filtered inline format dropdowns by media stream kind (e.g. audio-only streams only expose audio formats).
+   - Added color-coded chips (`[VID]`, `[AUD]`, `[IMG]`, `[DOC]`, `[3D]`, `[SEQ]`) next to source filenames in the Queue table.
+5. [x] **In/Out Point Trimming in Inspector & Preview Panel ([#180](https://github.com/el-j/encoderCraft/issues/180)):**
+   - Implemented "Set In", "Set Out", and "Reset Range" buttons in the Inspector preview section with live timecode/frame range labels.
+   - Synchronized Preview Monitor transport controls and keyboard shortcuts (`I`, `O`) directly to the active queue job's trim range.
+6. [x] **Granular Rendering Preferences & Audio Metadata Tag Editor ([#181](https://github.com/el-j/encoderCraft/issues/181)):**
+   - Added GPU/CPU renderer selection, worker concurrency slider (1..=16), and GPU VRAM budget controls in Preferences dialog.
+   - Extended `XmpMetadata` with Title, Artist, Album, Track Number, Year, and Genre tags with interactive editing in the Inspector Metadata tab.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

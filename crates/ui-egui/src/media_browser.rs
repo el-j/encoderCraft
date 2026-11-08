@@ -206,93 +206,95 @@ fn tree_item(ui: &mut Ui, label: &str, path: &Path, is_active: bool, tokens: &To
 }
 
 fn render_sidebar(ui: &mut Ui, state: &mut MediaBrowserState, tokens: &Tokens) {
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        // 1. Favorites Group
-        collapsible_tree_header(ui, "Favorites", &mut state.tree_state.favorites_expanded, tokens);
-        if state.tree_state.favorites_expanded {
-            let favs = state.model.favorites.clone();
-            if favs.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.add_space(14.0);
-                    ui.label(RichText::new("None yet").small().color(tokens.text_dim));
-                });
-            } else {
-                for f in favs {
-                    let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string());
-                    let is_active = state.model.location() == f;
-                    let mut navigate_to = None;
-                    let mut remove_fav = false;
+    ui.push_id("media_browser_sidebar_inner", |ui| {
+        egui::ScrollArea::vertical().id_salt("media_browser_sidebar_scroll").auto_shrink([false, false]).show(ui, |ui| {
+            // 1. Favorites Group
+            collapsible_tree_header(ui, "Favorites", &mut state.tree_state.favorites_expanded, tokens);
+            if state.tree_state.favorites_expanded {
+                let favs = state.model.favorites.clone();
+                if favs.is_empty() {
                     ui.horizontal(|ui| {
                         ui.add_space(14.0);
-                        let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), egui::Sense::hover());
-                        icons::paint(ui.painter(), rect, Icon::Folder, if is_active { tokens.accent_primary } else { tokens.text_dim });
-                        let resp = ui
-                            .add(
-                                egui::Label::new(RichText::new(&name).small().color(if is_active {
-                                    tokens.accent_primary
-                                } else {
-                                    tokens.text_primary
-                                }))
-                                .sense(egui::Sense::click()),
-                            )
-                            .on_hover_text(f.display().to_string());
-                        if resp.clicked() {
-                            navigate_to = Some(f.clone());
-                        }
-                        resp.context_menu(|ui| {
-                            if ui.button("Remove from Favorites").clicked() {
-                                remove_fav = true;
-                                ui.close();
-                            }
-                        });
+                        ui.label(RichText::new("None yet").small().color(tokens.text_dim));
                     });
-                    if remove_fav {
-                        state.model.favorites.retain(|p| p != &f);
-                    }
-                    if let Some(target) = navigate_to {
-                        state.go(target);
-                    }
-                }
-            }
-        }
-
-        ui.add_space(6.0);
-
-        // 2. Local Storage / User Folders Group
-        collapsible_tree_header(ui, "Local Storage", &mut state.tree_state.user_folders_expanded, tokens);
-        if state.tree_state.user_folders_expanded {
-            let mut navigate_to = None;
-            for (label, p) in state.locations.clone() {
-                if !is_drive_or_volume(&label, &p) {
-                    let is_active = state.model.location() == p;
-                    if tree_item(ui, &label, &p, is_active, tokens) {
-                        navigate_to = Some(p);
-                    }
-                }
-            }
-            if let Some(target) = navigate_to {
-                state.go(target);
-            }
-        }
-
-        ui.add_space(6.0);
-
-        // 3. Drives & Volumes Group
-        collapsible_tree_header(ui, "Drives & Volumes", &mut state.tree_state.drives_expanded, tokens);
-        if state.tree_state.drives_expanded {
-            let mut navigate_to = None;
-            for (label, p) in state.locations.clone() {
-                if is_drive_or_volume(&label, &p) {
-                    let is_active = state.model.location() == p;
-                    if tree_item(ui, &label, &p, is_active, tokens) {
-                        navigate_to = Some(p);
+                } else {
+                    for f in favs {
+                        let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string());
+                        let is_active = state.model.location() == f;
+                        let mut navigate_to = None;
+                        let mut remove_fav = false;
+                        ui.horizontal(|ui| {
+                            ui.add_space(14.0);
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), egui::Sense::hover());
+                            icons::paint(ui.painter(), rect, Icon::Folder, if is_active { tokens.accent_primary } else { tokens.text_dim });
+                            let resp = ui
+                                .add(
+                                    egui::Label::new(RichText::new(&name).small().color(if is_active {
+                                        tokens.accent_primary
+                                    } else {
+                                        tokens.text_primary
+                                    }))
+                                    .sense(egui::Sense::click()),
+                                )
+                                .on_hover_text(f.display().to_string());
+                            if resp.clicked() {
+                                navigate_to = Some(f.clone());
+                            }
+                            resp.context_menu(|ui| {
+                                if ui.button("Remove from Favorites").clicked() {
+                                    remove_fav = true;
+                                    ui.close();
+                                }
+                            });
+                        });
+                        if remove_fav {
+                            state.model.favorites.retain(|p| p != &f);
+                        }
+                        if let Some(target) = navigate_to {
+                            state.go(target);
+                        }
                     }
                 }
             }
-            if let Some(target) = navigate_to {
-                state.go(target);
+
+            ui.add_space(6.0);
+
+            // 2. Local Storage / User Folders Group
+            collapsible_tree_header(ui, "Local Storage", &mut state.tree_state.user_folders_expanded, tokens);
+            if state.tree_state.user_folders_expanded {
+                let mut navigate_to = None;
+                for (label, p) in state.locations.clone() {
+                    if !is_drive_or_volume(&label, &p) {
+                        let is_active = state.model.location() == p;
+                        if tree_item(ui, &label, &p, is_active, tokens) {
+                            navigate_to = Some(p);
+                        }
+                    }
+                }
+                if let Some(target) = navigate_to {
+                    state.go(target);
+                }
             }
-        }
+
+            ui.add_space(6.0);
+
+            // 3. Drives & Volumes Group
+            collapsible_tree_header(ui, "Drives & Volumes", &mut state.tree_state.drives_expanded, tokens);
+            if state.tree_state.drives_expanded {
+                let mut navigate_to = None;
+                for (label, p) in state.locations.clone() {
+                    if is_drive_or_volume(&label, &p) {
+                        let is_active = state.model.location() == p;
+                        if tree_item(ui, &label, &p, is_active, tokens) {
+                            navigate_to = Some(p);
+                        }
+                    }
+                }
+                if let Some(target) = navigate_to {
+                    state.go(target);
+                }
+            }
+        });
     });
 }
 
@@ -366,25 +368,29 @@ pub fn render_media_browser(
     ui.horizontal(|ui| {
         // Left sidebar
         let sidebar_w = 160.0;
-        ui.allocate_ui_with_layout(Vec2::new(sidebar_w, available_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-            render_sidebar(ui, state, tokens);
+        ui.push_id("media_sidebar_wrap", |ui| {
+            ui.allocate_ui_with_layout(Vec2::new(sidebar_w, available_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                render_sidebar(ui, state, tokens);
+            });
         });
 
         ui.separator();
 
         // Right content pane
-        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), available_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-            if let Some(err) = &state.model.error {
-                ui.label(RichText::new(err).color(tokens.status_failed));
-            }
-            if state.model.truncated() {
-                ui.label(RichText::new("Showing the first 20000 items of this folder").small().color(tokens.text_dim));
-            }
+        ui.push_id("media_content_wrap", |ui| {
+            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), available_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                if let Some(err) = &state.model.error {
+                    ui.label(RichText::new(err).color(tokens.status_failed));
+                }
+                if state.model.truncated() {
+                    ui.label(RichText::new("Showing the first 20000 items of this folder").small().color(tokens.text_dim));
+                }
 
-            match state.view {
-                BrowserView::List => list_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
-                BrowserView::Thumbnails => thumbnail_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
-            }
+                match state.view {
+                    BrowserView::List => list_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
+                    BrowserView::Thumbnails => thumbnail_view(ui, state, &entries, tokens, &mut to_add, commands, queue_mgr),
+                }
+            });
         });
     });
 
@@ -533,43 +539,45 @@ fn list_view(
     });
 
     let row_h = 20.0;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_h, entries.len(), |ui, range| {
+    egui::ScrollArea::vertical().id_salt("media_browser_list_scroll").auto_shrink([false, false]).show_rows(ui, row_h, entries.len(), |ui, range| {
         for e in entries.iter().skip(range.start).take(range.len()) {
-            let selected = state.selected.as_ref() == Some(&e.path);
-            let row_start_y = ui.cursor().min.y;
+            ui.push_id(&e.path, |ui| {
+                let selected = state.selected.as_ref() == Some(&e.path);
+                let row_start_y = ui.cursor().min.y;
 
-            ui.horizontal(|ui| {
-                if selected {
-                    let hl_rect = egui::Rect::from_min_size(egui::pos2(ui.cursor().min.x, row_start_y), Vec2::new(total_w, row_h));
-                    ui.painter().rect_filled(hl_rect, 2.0, tokens.accent_primary.gamma_multiply(0.20));
-                }
+                ui.horizontal(|ui| {
+                    if selected {
+                        let hl_rect = egui::Rect::from_min_size(egui::pos2(ui.cursor().min.x, row_start_y), Vec2::new(total_w, row_h));
+                        ui.painter().rect_filled(hl_rect, 2.0, tokens.accent_primary.gamma_multiply(0.20));
+                    }
 
-                // Icon + Name
-                let icon = if e.kind == EntryKind::Folder { Icon::Folder } else { Icon::Preset };
-                let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());
-                icons::paint(ui.painter(), icon_rect, icon, if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary });
+                    // Icon + Name
+                    let icon = if e.kind == EntryKind::Folder { Icon::Folder } else { Icon::Preset };
+                    let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());
+                    icons::paint(ui.painter(), icon_rect, icon, if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary });
 
-                let name_label = RichText::new(&e.name).small().color(tokens.text_primary);
-                let resp = ui.add_sized([cols.name - 18.0, 18.0], egui::Label::new(name_label).sense(egui::Sense::click()).truncate());
+                    let name_label = RichText::new(&e.name).small().color(tokens.text_primary);
+                    let resp = ui.add_sized([cols.name - 18.0, 18.0], egui::Label::new(name_label).sense(egui::Sense::click()).truncate());
 
-                // Type
-                ui.add_sized([cols.kind, 18.0], egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)).truncate());
+                    // Type
+                    ui.add_sized([cols.kind, 18.0], egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)).truncate());
 
-                // Size
-                let size_str = if e.kind == EntryKind::Folder { "--".to_string() } else { format_size(e.size) };
-                ui.add_sized([cols.size, 18.0], egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)).truncate());
+                    // Size
+                    let size_str = if e.kind == EntryKind::Folder { "--".to_string() } else { format_size(e.size) };
+                    ui.add_sized([cols.size, 18.0], egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)).truncate());
 
-                // Modified
-                let date_str = format_age(e.modified, now);
-                ui.add_sized([cols.date, 18.0], egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
+                    // Modified
+                    let date_str = format_age(e.modified, now);
+                    ui.add_sized([cols.date, 18.0], egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
 
-                if resp.clicked() {
-                    state.selected = Some(e.path.clone());
-                }
-                if resp.double_clicked() {
-                    activate(state, e, to_add);
-                }
-                resp.context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
+                    if resp.clicked() {
+                        state.selected = Some(e.path.clone());
+                    }
+                    if resp.double_clicked() {
+                        activate(state, e, to_add);
+                    }
+                    resp.context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
+                });
             });
         }
     });
@@ -594,50 +602,57 @@ fn thumbnail_view(
     let cell = Vec2::new(state.thumb_size, state.thumb_size * 0.65 + 28.0);
     let cols = ((ui.available_width() / (cell.x + 8.0)).floor() as usize).max(1);
     let rows = entries.len().div_ceil(cols);
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, cell.y + 8.0, rows, |ui, range| {
+    egui::ScrollArea::vertical().id_salt("media_browser_thumb_scroll").auto_shrink([false, false]).show_rows(ui, cell.y + 8.0, rows, |ui, range| {
         for row in range {
             ui.horizontal(|ui| {
                 for e in entries.iter().skip(row * cols).take(cols) {
-                    state.want_thumb(e);
-                    let selected = state.selected.as_ref() == Some(&e.path);
-                    let (rect, resp) = ui.allocate_exact_size(cell, egui::Sense::click());
-                    let painter = ui.painter_at(rect);
-                    if selected {
-                        painter.rect_filled(rect, 3.0, tokens.accent_primary.gamma_multiply(0.25));
-                    }
-                    let img_rect = egui::Rect::from_min_size(rect.min, Vec2::new(cell.x, cell.y - 28.0));
-                    painter.rect_filled(img_rect.shrink(2.0), 2.0, tokens.bg_panel_darker);
-                    if let Some(tex) = state.thumbs.get(&e.path) {
-                        let size = tex.size_vec2();
-                        let fitted = crate::monitor_geom::fit_rect(img_rect.shrink(2.0), size.x / size.y.max(1.0));
-                        painter.image(tex.id(), fitted, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)), egui::Color32::WHITE);
-                    } else {
+                    ui.push_id(&e.path, |ui| {
+                        state.want_thumb(e);
+                        let selected = state.selected.as_ref() == Some(&e.path);
+                        let (rect, resp) = ui.allocate_exact_size(cell, egui::Sense::click());
+                        let painter = ui.painter_at(rect);
+                        if selected {
+                            painter.rect_filled(rect, 3.0, tokens.accent_primary.gamma_multiply(0.25));
+                        }
+                        let img_rect = egui::Rect::from_min_size(rect.min, Vec2::new(cell.x, cell.y - 28.0));
+                        painter.rect_filled(img_rect.shrink(2.0), 2.0, tokens.bg_panel_darker);
+                        if let Some(tex) = state.thumbs.get(&e.path) {
+                            let size = tex.size_vec2();
+                            let fitted = crate::monitor_geom::fit_rect(img_rect.shrink(2.0), size.x / size.y.max(1.0));
+                            painter.image(
+                                tex.id(),
+                                fitted,
+                                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        } else {
+                            painter.text(
+                                img_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                e.kind.label(),
+                                egui::FontId::proportional(11.0),
+                                tokens.text_dim,
+                            );
+                        }
+                        let mut name = e.name.clone();
+                        if name.chars().count() > 18 {
+                            name = format!("{}...", name.chars().take(15).collect::<String>());
+                        }
                         painter.text(
-                            img_rect.center(),
+                            egui::Pos2::new(rect.center().x, rect.max.y - 14.0),
                             egui::Align2::CENTER_CENTER,
-                            e.kind.label(),
+                            name,
                             egui::FontId::proportional(11.0),
-                            tokens.text_dim,
+                            tokens.text_primary,
                         );
-                    }
-                    let mut name = e.name.clone();
-                    if name.chars().count() > 18 {
-                        name = format!("{}...", name.chars().take(15).collect::<String>());
-                    }
-                    painter.text(
-                        egui::Pos2::new(rect.center().x, rect.max.y - 14.0),
-                        egui::Align2::CENTER_CENTER,
-                        name,
-                        egui::FontId::proportional(11.0),
-                        tokens.text_primary,
-                    );
-                    if resp.clicked() {
-                        state.selected = Some(e.path.clone());
-                    }
-                    if resp.double_clicked() {
-                        activate(state, e, to_add);
-                    }
-                    resp.on_hover_text(&e.name).context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
+                        if resp.clicked() {
+                            state.selected = Some(e.path.clone());
+                        }
+                        if resp.double_clicked() {
+                            activate(state, e, to_add);
+                        }
+                        resp.on_hover_text(&e.name).context_menu(|ui| entry_menu(ui, state, e, to_add, commands, queue_mgr));
+                    });
                 }
             });
         }

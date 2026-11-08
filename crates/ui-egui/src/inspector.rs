@@ -339,7 +339,7 @@ pub fn render_inspector_modal(ctx: &egui::Context, state: &mut InspectorState, t
     }
 }
 
-fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &CraftJobSpec, tokens: &Tokens) {
+fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut CraftJobSpec, tokens: &Tokens) {
     ui.horizontal(|ui| {
         ui.selectable_value(&mut state.preview_tab, PreviewTabMode::Source, "Source");
         ui.selectable_value(&mut state.preview_tab, PreviewTabMode::Output, "Output");
@@ -500,13 +500,53 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &CraftJ
 
     // In / Out range controls
     ui.horizontal(|ui| {
-        if ui.button("Set In").on_hover_text("Mark in-point for transcode range").clicked() {
-            // Can update start_tick
+        let fps_int = fps.round().max(1.0) as i64;
+        let mut in_tick = None;
+        let mut dur_tick = None;
+        if let SourceDescriptor::File { start_tick, duration_ticks, .. } = &spec.source {
+            in_tick = *start_tick;
+            dur_tick = *duration_ticks;
         }
-        if ui.button("Set Out").on_hover_text("Mark out-point for transcode range").clicked() {
-            // Can update duration_ticks
+
+        if ui.button("Set In").on_hover_text("Mark in-point for transcode range").clicked()
+            && let SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut spec.source
+        {
+            let current_tick = i64::try_from(current_frame).unwrap_or(0);
+            *start_tick = Some(current_tick);
+            if timebase.is_none() {
+                *timebase = encodercraft_core::Rational64::new(1, fps_int).ok();
+            }
+            if let Some(dur) = *duration_ticks
+                && dur <= 0
+            {
+                *duration_ticks = None;
+            }
         }
-        ui.label(RichText::new("Range: Entire Sequence").small().color(tokens.text_dim));
+        if ui.button("Set Out").on_hover_text("Mark out-point for transcode range").clicked()
+            && let SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = &mut spec.source
+        {
+            let current_tick = i64::try_from(current_frame).unwrap_or(0);
+            let start = start_tick.unwrap_or(0);
+            let dur = current_tick.saturating_sub(start).max(1);
+            *duration_ticks = Some(dur);
+            if timebase.is_none() {
+                *timebase = encodercraft_core::Rational64::new(1, fps_int).ok();
+            }
+        }
+        if ui.button("Reset Range").on_hover_text("Clear In/Out mark points").clicked()
+            && let SourceDescriptor::File { start_tick, duration_ticks, .. } = &mut spec.source
+        {
+            *start_tick = None;
+            *duration_ticks = None;
+        }
+
+        let range_label = match (in_tick, dur_tick) {
+            (None, None) => "Range: Entire Sequence".to_string(),
+            (Some(s), None) => format!("Range: In @ frame {s}"),
+            (None, Some(d)) => format!("Range: 0 – frame {}", d.saturating_sub(1)),
+            (Some(s), Some(d)) => format!("Range: Frame {s} – Frame {}", s.saturating_add(d.saturating_sub(1))),
+        };
+        ui.label(RichText::new(range_label).small().color(tokens.text_dim));
     });
 }
 
@@ -1416,9 +1456,45 @@ fn render_metadata_tab(ui: &mut Ui, client_info: &mut encodercraft_core::ClientI
 
     let mut creator = meta.creator.clone().unwrap_or_default();
     ui.horizontal(|ui| {
-        ui.label("Creator / Author (dc:creator):");
+        ui.label("Artist / Creator (dc:creator):");
         if ui.text_edit_singleline(&mut creator).changed() {
             meta.creator = if creator.trim().is_empty() { None } else { Some(creator) };
+            changed = true;
+        }
+    });
+
+    let mut album = meta.album.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Album (xmpDM:album):");
+        if ui.text_edit_singleline(&mut album).changed() {
+            meta.album = if album.trim().is_empty() { None } else { Some(album) };
+            changed = true;
+        }
+    });
+
+    let mut track_str = meta.track_number.map(|t| t.to_string()).unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Track Number (xmpDM:trackNumber):");
+        if ui.add(egui::TextEdit::singleline(&mut track_str).desired_width(60.0)).changed() {
+            meta.track_number = track_str.trim().parse::<u32>().ok();
+            changed = true;
+        }
+    });
+
+    let mut year_str = meta.year.map(|y| y.to_string()).unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Year (xmpDM:releaseDate):");
+        if ui.add(egui::TextEdit::singleline(&mut year_str).desired_width(80.0)).changed() {
+            meta.year = year_str.trim().parse::<u32>().ok();
+            changed = true;
+        }
+    });
+
+    let mut genre = meta.genre.clone().unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label("Genre (xmpDM:genre):");
+        if ui.text_edit_singleline(&mut genre).changed() {
+            meta.genre = if genre.trim().is_empty() { None } else { Some(genre) };
             changed = true;
         }
     });
@@ -1634,5 +1710,64 @@ mod tests {
         let m = target.audio_mapping.as_ref().unwrap();
         assert_eq!(m.output_channels, 8);
         assert_eq!(m.track_layout, encodercraft_core::AudioTrackLayout::DiscreteMono);
+    }
+
+    #[test]
+    fn test_render_metadata_tab_updates() {
+        let mut target = OutputTarget::default();
+        let mut client_info = encodercraft_core::ClientInfo { app_name: "test-app".into(), app_version: "1.0".into(), pid: 1, user_notes: None };
+        target.metadata = Some(encodercraft_core::XmpMetadata {
+            title: Some("Song Title".into()),
+            creator: Some("Band Name".into()),
+            album: Some("Album Name".into()),
+            track_number: Some(2),
+            year: Some(2026),
+            genre: Some("Synthwave".into()),
+            ..Default::default()
+        });
+
+        egui::__run_test_ui(|ui| {
+            render_metadata_tab(ui, &mut client_info, &mut target);
+        });
+
+        let meta = target.metadata.as_ref().unwrap();
+        assert_eq!(meta.title.as_deref(), Some("Song Title"));
+        assert_eq!(meta.creator.as_deref(), Some("Band Name"));
+        assert_eq!(meta.album.as_deref(), Some("Album Name"));
+        assert_eq!(meta.track_number, Some(2));
+        assert_eq!(meta.year, Some(2026));
+        assert_eq!(meta.genre.as_deref(), Some("Synthwave"));
+    }
+
+    #[test]
+    fn test_inspector_preview_in_out_range() {
+        let mut spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-range-test".into(),
+            client_info: encodercraft_core::ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1, user_notes: None },
+            priority: encodercraft_core::JobPriority::Normal,
+            start_policy: encodercraft_core::StartPolicy::AutoStart,
+            source: SourceDescriptor::File {
+                path: std::path::PathBuf::from("video.mp4"),
+                start_tick: Some(10),
+                duration_ticks: Some(50),
+                timebase: Some(encodercraft_core::Rational64::new(1, 30).unwrap()),
+            },
+            targets: vec![OutputTarget::default()],
+        };
+
+        let mut state = InspectorState::default();
+        let tokens = Tokens::dark();
+
+        egui::__run_test_ui(|ui| {
+            render_preview_section(ui, &mut state, &mut spec, &tokens);
+        });
+
+        if let SourceDescriptor::File { start_tick, duration_ticks, .. } = &spec.source {
+            assert_eq!(*start_tick, Some(10));
+            assert_eq!(*duration_ticks, Some(50));
+        } else {
+            panic!("expected file source");
+        }
     }
 }

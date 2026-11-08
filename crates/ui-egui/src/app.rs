@@ -207,20 +207,16 @@ impl EncoderCraftApp {
     }
 
     fn pick_media(&mut self) {
-        if let Some(files) = rfd::FileDialog::new()
-            .set_title("Select Media Files")
-            .add_filter(
-                "Media Files",
-                &[
-                    "mov", "mp4", "mkv", "avi", "webm", "mxf", "wav", "aiff", "flac", "mp3", "ogg", "opus", "png", "jpg", "jpeg", "webp", "exr",
-                    "tiff", "bmp", "gif", "svg", "pdf", "docx", "idml", "gltf", "glb", "usdz", "obj", "stl", "ply",
-                ],
-            )
-            .pick_files()
-        {
+        if let Some(files) = rfd::FileDialog::new().set_title("Select Media Files").pick_files() {
             for path in files {
                 self.add_file_job(path);
             }
+        }
+    }
+
+    fn pick_folder(&mut self) {
+        if let Some(folder) = rfd::FileDialog::new().set_title("Select Folder to Add to Queue").pick_folder() {
+            self.add_file_job(folder);
         }
     }
 
@@ -233,6 +229,7 @@ impl EncoderCraftApp {
         let ids = self.queue_state.selected_ids_list();
         match cmd {
             C::AddMedia => self.pick_media(),
+            C::AddFolder => self.pick_folder(),
             C::AddMediaItem => {
                 if let Some(path) = self.pending_media_item.take() {
                     self.add_file_job(path);
@@ -1394,12 +1391,31 @@ impl EncoderCraftApp {
     }
 
     /// Builds a local-file job through the shared engine command and submits it for review.
+    /// If `path` is a directory, recursively scans and queues all contained media files.
     pub fn add_file_job(&mut self, path: std::path::PathBuf) {
+        if path.is_dir() {
+            self.add_folder_recursive(&path);
+            return;
+        }
         if let Some(spec) = self.dispatch_prepared_app_job_spec(
             crate::commands::AppCommand::AddMedia,
             serde_json::json!({ "path": path, "clientApp": "encoderCraft GUI" }),
         ) {
             self.submit_job_for_review(spec);
+        }
+    }
+
+    fn add_folder_recursive(&mut self, dir: &std::path::Path) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+            paths.sort();
+            for p in paths {
+                if p.is_dir() {
+                    self.add_folder_recursive(&p);
+                } else if encodercraft_demux::classify_stream_kind(&p) != encodercraft_core::MediaStreamKind::Unknown {
+                    self.add_file_job(p);
+                }
+            }
         }
     }
 
@@ -1741,5 +1757,26 @@ mod tests {
         let persisted = app.engine_commands.dispatch(&app.queue_mgr, "workspace.get", serde_json::json!({})).unwrap();
         assert_eq!(persisted["active"], crate::workspace::DEFAULT_WORKSPACE);
         assert_eq!(persisted["workspaces"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_add_folder_recursive_queues_all_contained_media() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let audio1 = dir.path().join("clip1.mp3");
+        let audio2 = sub.join("track1.wav");
+        let text = sub.join("notes.txt");
+
+        std::fs::write(&audio1, b"fake mp3 audio content").unwrap();
+        std::fs::write(&audio2, b"fake wav audio content").unwrap();
+        std::fs::write(&text, b"plain notes").unwrap();
+
+        let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+        app.add_file_job(dir.path().to_path_buf());
+
+        let jobs = app.queue_mgr.list_jobs();
+        assert_eq!(jobs.len(), 2, "Should have queued both clip1.mp3 and track1.wav, ignoring notes.txt");
     }
 }
