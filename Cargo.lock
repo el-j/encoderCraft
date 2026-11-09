@@ -605,7 +605,7 @@ dependencies = [
 [[package]]
 name = "craft-jpeg"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=c5a1cbfb5f9049f9270955caffb5bee5997aebf7#c5a1cbfb5f9049f9270955caffb5bee5997aebf7"
+source = "git+https://github.com/storytold/craft-libs?rev=1b34eba41e62138fc2438d2734523b302840b45d#1b34eba41e62138fc2438d2734523b302840b45d"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -3824,7 +3824,7 @@ dependencies = [
 [[package]]
 name = "photocraft-codecs"
 version = "0.20.1"
-source = "git+https://github.com/storytold/photocraft#27ea4eddbc3db4898f3e03e8402a2f74268d2677"
+source = "git+https://github.com/storytold/photocraft#885a6ddf27cc58c07faf1722e5c327cd38953657"
 dependencies = [
  "craft-jpeg",
  "exr",
