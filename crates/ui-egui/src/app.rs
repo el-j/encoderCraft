@@ -1035,7 +1035,14 @@ impl EncoderCraftApp {
             if native {
                 // The menus are in the system menu bar; the strip only names the window.
                 let title = format!("encoderCraft — {}", self.workspaces.active);
-                ui.centered_and_justified(|ui| ui.label(RichText::new(title).small().color(self.tokens.text_dim)));
+                let title_resp = ui
+                    .centered_and_justified(|ui| {
+                        ui.add(egui::Label::new(RichText::new(title).small().color(self.tokens.text_dim)).sense(egui::Sense::click()))
+                    })
+                    .inner;
+                if title_resp.double_clicked() {
+                    crate::titlebar::toggle_maximize(ui.ctx());
+                }
                 return bar_rect;
             }
             ui.horizontal_centered(|ui| {
