@@ -793,6 +793,69 @@ flowchart LR
 
 ---
 
+### Milestone 42: Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews
+**Objective:** Enhance the Media Browser with production desktop file management (rename, new folder, move), interactive resizable table columns, strictly left-aligned filenames in list view, table header column chooser, and rich thumbnail cards with folder visuals, media previews, audio waveforms, and corner format badges. Tracked under Milestone [M42 - Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews](https://github.com/el-j/encoderCraft/milestone/20).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **File & Folder Operations in Media Browser ([#216](https://github.com/el-j/encoderCraft/issues/216)):**
+   - Context menus and keyboard shortcuts for renaming files and folders (`Cmd+R` / Enter).
+   - "New Folder" creation action (`Cmd+Shift+N` / toolbar button).
+   - Move files and folders via drag-and-drop or clipboard cut/paste.
+2. [ ] **Resizable Columns, Left-Aligned Names & Header Column Picker ([#217](https://github.com/el-j/encoderCraft/issues/217)):**
+   - Column boundary drag handles with min/max bounds for responsive resizing.
+   - Left-aligned filenames in list view table.
+   - Right-click column show/hide selector: Name, Type, Size, Date Modified, Date Created, Duration, Codec, Bitrate.
+3. [ ] **Rich Thumbnail View with Folder Cards & Format Badges ([#218](https://github.com/el-j/encoderCraft/issues/218)):**
+   - Dedicated folder card geometry and icons with child counters.
+   - Cached thumbnail textures for video and still image formats.
+   - Waveform/audio visualizer for audio files.
+   - Small format badge pill in the bottom-right corner of each thumbnail card.
+
+---
+
+### Milestone 43: Desktop Shell, Window Behavior & Settings Parity
+**Objective:** Fix desktop window maximization on titlebar double-click, eliminate Preset Browser overscroll/detached popup clipping, make Settings dialog resizable in height, filter options by active hardware, and ensure atomic journal parent directories exist. Tracked under Milestone [M43 - Desktop Shell, Window Behavior & Settings Parity](https://github.com/el-j/encoderCraft/milestone/21).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **Preset Browser Overscroll & Detached Item Popup Fix ([#219](https://github.com/el-j/encoderCraft/issues/219)):**
+   - Clip preset rows strictly within dock pane boundaries and eliminate floating items over the toolbar and Media Browser.
+2. [ ] **Resizable Settings Window Height & Hardware-Relevant Filtering ([#220](https://github.com/el-j/encoderCraft/issues/220)):**
+   - Enable vertical/horizontal resizing for the Settings modal dialog.
+   - Filter hardware accelerators based on host discovery (`available_renderers()`).
+3. [ ] **Automatic Parent Directory Creation on State Journal Commit ([#221](https://github.com/el-j/encoderCraft/issues/221)):**
+   - Ensure parent directory exists before atomic rename in `encodercraft-engine` state journaling.
+4. [ ] **Window Maximize / Restore Toggle on Title Bar Double-Click ([#222](https://github.com/el-j/encoderCraft/issues/222)):**
+   - Double-clicking empty areas of the custom header bar toggles window maximize and restore across desktop platforms.
+
+---
+
+### Milestone 44: Universal Preview Engine for All Media Domains
+**Objective:** Expand Preview panel to display and play all ArtCraft media domains: paginated documents, vector graphics, interactive 3D spatial viewports, and audio waveforms with playback transport. Tracked under Milestone [M44 - Universal Preview Engine for All Media Domains](https://github.com/el-j/encoderCraft/milestone/22).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **Universal Preview for Documents, Vector Graphics, 3D & Audio ([#223](https://github.com/el-j/encoderCraft/issues/223)):**
+   - Document preview: DOCX, PDF, IDML, text, Markdown.
+   - Vector preview: SVG, EPS, WMF with zoom and pan.
+   - 3D spatial preview: interactive orbit/pan/zoom viewport for STL, OBJ, GLB, USDZ.
+   - Audio preview: waveform scrubber with audio playback and timecode.
+
+---
+
+### Milestone 45: Queue In/Out Display, Table Customization & 3D/Document Presets
+**Objective:** Display In/Out trim markers and trimmed duration directly in queue rows, provide right-click table header column toggles, audit 3D mesh conversions and add STEP/STP CAD ingestion, and add one-click document/publishing presets. Tracked under Milestone [M45 - Queue In/Out Display, Table Customization & 3D/Document Presets](https://github.com/el-j/encoderCraft/milestone/23).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **Queue In/Out Point & Trimmed Duration Display ([#224](https://github.com/el-j/encoderCraft/issues/224)):**
+   - Display In/Out timecodes and active trimmed duration in queue items.
+   - Right-click column show/hide selector on queue table header.
+2. [ ] **3D Conversion Pipeline Audit & STEP/STP CAD Ingestion ([#225](https://github.com/el-j/encoderCraft/issues/225)):**
+   - Ensure robust conversion across STL, OBJ, GLB, and USDZ.
+   - Ingest ISO 10303 STEP/STP CAD solids and tessellate to standard 3D meshes.
+3. [ ] **Document & Publishing Conversion Presets ([#226](https://github.com/el-j/encoderCraft/issues/226)):**
+   - Factory presets for DOCX to Markdown, DOCX to HTML5, PDF to PNG sequence, Markdown to PDF, and Document to EPUB 3.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |
