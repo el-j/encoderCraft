@@ -2,6 +2,7 @@
 
 use egui::RichText;
 use encodercraft_engine::AppPreferences;
+use encodercraft_platform::{HardwareBackend, HardwareCapabilities};
 
 use crate::icons;
 use crate::theme::Tokens;
@@ -39,6 +40,39 @@ pub struct PrefsDialogState {
     pub shortcut_recording: Option<crate::commands::AppCommand>,
     pub shortcut_message: Option<String>,
     pub selected_category: PrefsCategory,
+    hardware: Option<DetectedHardware>,
+}
+
+struct DetectedHardware {
+    capabilities: HardwareCapabilities,
+    renderers: Vec<&'static str>,
+}
+
+impl DetectedHardware {
+    fn new(capabilities: HardwareCapabilities) -> Self {
+        let renderers = renderer_options(capabilities.backend);
+        Self { capabilities, renderers }
+    }
+}
+
+fn cached_hardware(cache: &mut Option<DetectedHardware>, detect: impl FnOnce() -> HardwareCapabilities) -> &DetectedHardware {
+    cache.get_or_insert_with(|| DetectedHardware::new(detect()))
+}
+
+fn renderer_options(backend: HardwareBackend) -> Vec<&'static str> {
+    let mut options = vec!["Pure-Rust Software (CPU)"];
+    let hardware = match backend {
+        HardwareBackend::VideoToolbox => Some("Hardware: Apple VideoToolbox (Metal)"),
+        HardwareBackend::Nvenc => Some("Hardware: NVIDIA NVENC (CUDA)"),
+        HardwareBackend::Vaapi => Some("Hardware: Linux VA-API (VAAPI)"),
+        HardwareBackend::Amf => Some("Hardware: AMD AMF"),
+        HardwareBackend::MediaFoundation => Some("Hardware: Windows Media Foundation (MF)"),
+        HardwareBackend::SoftwareOnly => None,
+    };
+    if let Some(label) = hardware {
+        options.push(label);
+    }
+    options
 }
 
 /// Renders the Preferences modal window.
@@ -50,6 +84,7 @@ pub fn render_prefs_dialog(
     on_theme_change: &mut Option<String>,
 ) {
     if !state.is_open {
+        state.hardware = None;
         return;
     }
 
@@ -212,32 +247,14 @@ pub fn render_prefs_dialog(
                                     ui.label(RichText::new("Rendering & Hardware Acceleration").strong());
                                     ui.add_space(6.0);
 
-                                    let hw = encodercraft_platform::detect_hardware();
-                                    let mut available_renderers = vec!["Pure-Rust Software (CPU)".to_string()];
-                                    if hw.backend != encodercraft_platform::HardwareBackend::SoftwareOnly {
-                                        let label = match hw.backend {
-                                            encodercraft_platform::HardwareBackend::VideoToolbox => {
-                                                "Hardware: Apple VideoToolbox (Metal)".to_string()
-                                            }
-                                            encodercraft_platform::HardwareBackend::Nvenc => "Hardware: NVIDIA NVENC (CUDA)".to_string(),
-                                            encodercraft_platform::HardwareBackend::Vaapi => "Hardware: Linux VA-API (VAAPI)".to_string(),
-                                            encodercraft_platform::HardwareBackend::Amf => "Hardware: AMD AMF".to_string(),
-                                            encodercraft_platform::HardwareBackend::MediaFoundation => {
-                                                "Hardware: Windows Media Foundation (MF)".to_string()
-                                            }
-                                            encodercraft_platform::HardwareBackend::SoftwareOnly => String::new(),
-                                        };
-                                        if !label.is_empty() {
-                                            available_renderers.push(label);
-                                        }
-                                    }
+                                    let detected = cached_hardware(&mut state.hardware, encodercraft_platform::detect_hardware);
+                                    let available_renderers = &detected.renderers;
 
                                     // Ensure current selection is valid for active hardware
                                     if !state.prefs.selected_renderer.is_empty()
-                                        && !available_renderers.iter().any(|r| r == &state.prefs.selected_renderer)
+                                        && !available_renderers.contains(&state.prefs.selected_renderer.as_str())
                                     {
-                                        state.prefs.selected_renderer =
-                                            available_renderers.first().cloned().unwrap_or_else(|| "Pure-Rust Software (CPU)".to_string());
+                                        state.prefs.selected_renderer = "Pure-Rust Software (CPU)".to_string();
                                     }
 
                                     ui.horizontal(|ui| {
@@ -248,9 +265,9 @@ pub fn render_prefs_dialog(
                                             &state.prefs.selected_renderer
                                         };
                                         egui::ComboBox::from_id_salt("prefs_renderer_combo").selected_text(current).show_ui(ui, |ui| {
-                                            for r in &available_renderers {
-                                                if ui.selectable_label(state.prefs.selected_renderer == *r, r).clicked() {
-                                                    state.prefs.selected_renderer = r.clone();
+                                            for &r in available_renderers {
+                                                if ui.selectable_label(state.prefs.selected_renderer == r, r).clicked() {
+                                                    state.prefs.selected_renderer = r.to_owned();
                                                 }
                                             }
                                         });
@@ -259,7 +276,11 @@ pub fn render_prefs_dialog(
                                     ui.add_space(2.0);
                                     ui.horizontal(|ui| {
                                         icons::icon_label(ui, icons::Icon::Info, 13.0, tokens.text_dim);
-                                        ui.label(RichText::new(format!("Detected Device: {}", hw.device_name)).small().color(tokens.text_dim));
+                                        ui.label(
+                                            RichText::new(format!("Detected Device: {}", detected.capabilities.device_name))
+                                                .small()
+                                                .color(tokens.text_dim),
+                                        );
                                     });
 
                                     ui.add_space(4.0);
@@ -372,6 +393,9 @@ pub fn render_prefs_dialog(
         is_open = false;
     }
     state.is_open = is_open;
+    if !is_open {
+        state.hardware = None;
+    }
 }
 
 #[cfg(test)]
@@ -400,23 +424,39 @@ mod tests {
     }
 
     #[test]
-    fn test_hardware_renderer_detection_contains_software_and_valid_backend() {
-        let hw = encodercraft_platform::detect_hardware();
-        let mut available = vec!["Pure-Rust Software (CPU)".to_string()];
-        if hw.backend != encodercraft_platform::HardwareBackend::SoftwareOnly {
-            let label = match hw.backend {
-                encodercraft_platform::HardwareBackend::VideoToolbox => "Hardware: Apple VideoToolbox (Metal)".to_string(),
-                encodercraft_platform::HardwareBackend::Nvenc => "Hardware: NVIDIA NVENC (CUDA)".to_string(),
-                encodercraft_platform::HardwareBackend::Vaapi => "Hardware: Linux VA-API (VAAPI)".to_string(),
-                encodercraft_platform::HardwareBackend::Amf => "Hardware: AMD AMF".to_string(),
-                encodercraft_platform::HardwareBackend::MediaFoundation => "Hardware: Windows Media Foundation (MF)".to_string(),
-                encodercraft_platform::HardwareBackend::SoftwareOnly => String::new(),
-            };
-            if !label.is_empty() {
-                available.push(label);
-            }
+    fn renderer_options_cover_every_backend() {
+        for (backend, expected) in [
+            (HardwareBackend::SoftwareOnly, None),
+            (HardwareBackend::VideoToolbox, Some("Hardware: Apple VideoToolbox (Metal)")),
+            (HardwareBackend::Nvenc, Some("Hardware: NVIDIA NVENC (CUDA)")),
+            (HardwareBackend::Vaapi, Some("Hardware: Linux VA-API (VAAPI)")),
+            (HardwareBackend::Amf, Some("Hardware: AMD AMF")),
+            (HardwareBackend::MediaFoundation, Some("Hardware: Windows Media Foundation (MF)")),
+        ] {
+            let mut expected_options = vec!["Pure-Rust Software (CPU)"];
+            expected_options.extend(expected);
+            assert_eq!(renderer_options(backend), expected_options);
         }
-        assert!(available.contains(&"Pure-Rust Software (CPU)".to_string()));
-        assert!(!available.is_empty());
+    }
+
+    #[test]
+    fn hardware_detection_is_cached_and_refreshed_after_close() {
+        let mut state = PrefsDialogState::default();
+        let mut calls = 0;
+        for _ in 0..2 {
+            let detected = cached_hardware(&mut state.hardware, || {
+                calls += 1;
+                HardwareCapabilities { backend: HardwareBackend::Vaapi, ..Default::default() }
+            });
+            assert_eq!(detected.renderers, renderer_options(HardwareBackend::Vaapi));
+        }
+        assert_eq!(calls, 1);
+        render_prefs_dialog(&egui::Context::default(), &mut state, &mut crate::settings::WorkspaceShortcuts::default(), &Tokens::dark(), &mut None);
+        assert!(state.hardware.is_none());
+        cached_hardware(&mut state.hardware, || {
+            calls += 1;
+            HardwareCapabilities::default()
+        });
+        assert_eq!(calls, 2);
     }
 }

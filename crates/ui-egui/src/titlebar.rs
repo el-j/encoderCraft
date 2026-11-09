@@ -69,8 +69,12 @@ const CAPTIONS: [Caption; 3] = [Caption::Minimize, Caption::Maximize, Caption::C
 
 pub fn maximized(ctx: &egui::Context) -> bool {
     let id = Id::NULL.with("app_window_maximized_cached");
-    let cur = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
-    ctx.input(|i| i.viewport().maximized.unwrap_or(cur))
+    if let Some(value) = ctx.input(|i| i.viewport().maximized) {
+        ctx.data_mut(|d| d.insert_temp(id, value));
+        value
+    } else {
+        ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false)
+    }
 }
 
 pub fn toggle_maximize(ctx: &egui::Context) {
@@ -193,9 +197,9 @@ pub fn resize_zones(ui: &mut Ui) {
     }
     let w = ctx.content_rect();
     let layer = LayerId::new(Order::Foreground, ui.make_persistent_id("titlebar-resize"));
-    let zone_ui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
+    let zone_ui = ui.new_child(egui::UiBuilder::new().id_salt("titlebar-resize-zones").layer_id(layer).max_rect(w));
     for (i, (r, dir, cursor)) in zones(w).into_iter().enumerate() {
-        let resp = zone_ui.interact(r, ui.make_persistent_id(("titlebar-resize", i)), Sense::DRAG).on_hover_cursor(cursor);
+        let resp = zone_ui.interact(r, zone_ui.make_persistent_id(("titlebar-resize", i)), Sense::DRAG).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
             ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
             handed_to_os(&ctx);
@@ -227,6 +231,17 @@ mod tests {
         assert!(maximized(&ctx));
         toggle_maximize(&ctx);
         assert!(!maximized(&ctx));
+    }
+
+    #[test]
+    fn observed_maximize_changes_update_the_fallback() {
+        let ctx = egui::Context::default();
+        for (observed, expected) in [(Some(true), true), (None, true), (Some(false), false), (None, false)] {
+            let mut input = egui::RawInput::default();
+            input.viewports.entry(input.viewport_id).or_default().maximized = observed;
+            let mut output = ctx.run_ui(input, |ui| assert_eq!(maximized(ui.ctx()), expected));
+            output.textures_delta.clear();
+        }
     }
 
     #[test]
