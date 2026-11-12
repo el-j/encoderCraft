@@ -2,11 +2,13 @@
 
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/release-v0.1.0--alpha.2%20(Complete%20Implementation)-brightgreen.svg)](https://github.com/el-j/encoderCraft/releases)
+[![Latest release](https://img.shields.io/github/v/release/el-j/encoderCraft?include_prereleases&label=latest%20release)](https://github.com/el-j/encoderCraft/releases)
 [![Parity Target](https://img.shields.io/badge/parity%20target-Adobe%20Media%20Encoder%202026-purple.svg)](docs/target-app-parity.md)
 [![Tests](https://img.shields.io/badge/tests->150%20passed-brightgreen.svg)](docs/implementation-milestones.md)
 [![Safety](https://img.shields.io/badge/unsafe_code-forbid-brightgreen.svg)](docs/architecture.md)
 [![ArtCraft Ecosystem](https://img.shields.io/badge/artcraft-storytold-red.svg)](https://github.com/storytold)
+
+**[⬇️ Download the latest release](https://github.com/el-j/encoderCraft/releases)** — the newest version and its downloadable files are at the top of the releases page.
 
 **encoderCraft** is an open-source, clean-room, pure-Rust universal media transcoding, batch queue, and watch folder automation system. Designed for full parity with—and architectural superiority over—**Adobe Media Encoder**, `encoderCraft` serves as the universal export and transformation powerhouse for the entire **ArtCraft** creative ecosystem.
 
