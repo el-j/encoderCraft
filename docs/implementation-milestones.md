@@ -2,8 +2,8 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** M0–M41 implementation documented; GitHub milestones M39–M45 are open (M39–M41 are locally documented as complete); M46 is planned
-> **Verification:** 100% CI compliance via `cargo xtask ci` (>150 unit, fuzz, layout, and integration tests passed; strict L0–L7 layers enforced)
+> **Status:** M0–M49 implementation complete; v0.1.0 first stable release ready  
+> **Verification:** 100% CI compliance via `cargo xtask ci` (>300 unit, fuzz, layout, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
 
@@ -935,6 +935,23 @@ Guarantee that every transcode target across video, audio, image, CAD, and docum
 5. [x] **M48.5: Media Browser Polish: Left-Aligned Filenames & Resizable Headers ([#279](https://github.com/el-j/encoderCraft/issues/279))** — Synchronized `cols.name` with `settings.name`, drew visual column divider lines, and strictly left-aligned filename cells in list view.
 6. [x] **M48.6: Window Maximize / Restore on Header Double-Click ([#280](https://github.com/el-j/encoderCraft/issues/280))** — Protected egui's double-click pointer state in `titlebar::drag_area` so double-clicking anywhere on the top menu bar or header bar toggles window maximize and restore across desktop platforms.
 7. [x] **M48.7: Upstream craft-libs Codec Ecosystem Expansion & End-to-End Tests ([#281](https://github.com/el-j/encoderCraft/issues/281))** — Eliminated dummy fallback projects in motion and timeline project executors in favor of typed errors, added comprehensive integration tests for DOCX, EPUB, and PPTX conversions in `presets_conformance.rs`.
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
+### Milestone 49: v0.1.0 First Stable Release Readiness & Final Gap Closure
+Tracked under Milestone [M49 - v0.1.0 First Stable Release Readiness & Final Gap Closure](https://github.com/el-j/encoderCraft/milestone/27) addressing issues [#1](https://github.com/el-j/encoderCraft/issues/1) and [#283](https://github.com/el-j/encoderCraft/issues/283)–[#286](https://github.com/el-j/encoderCraft/issues/286).
+
+#### Objective & Context
+Achieve full completion of all remaining release blockers for the v0.1.0 First Stable Release. Implement sibling application job ingestion and headless project rendering listener (Unix socket and TCP daemon), preview monitor real-time audio controls with mute/unmute and volume slider, bump workspace to 0.1.0 stable, refresh all documentation and project parity matrices, and pass full multi-platform release verification.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **M49.1: Sibling App Job Ingestion Listener & Headless Rendering ([#1](https://github.com/el-j/encoderCraft/issues/1))** — Production Unix domain socket and TCP daemon endpoints for seamless zero-copy batch job submission from FilmCraft, EffectCraft, SoundCraft, DesignCraft, and CadCraft.
+2. [x] **M49.2: Synchronized Preview Monitor Audio Controls ([#283](https://github.com/el-j/encoderCraft/issues/283))** — Integrated real-time volume slider (0.0 to 1.0) and instant mute/unmute toggle in the preview monitor transport toolbar.
+3. [x] **M49.3: Workspace Version Bump to 0.1.0 Stable & Release Packaging Verification ([#284](https://github.com/el-j/encoderCraft/issues/284))** — Promoted entire workspace to official 0.1.0 stable release and verified package build metadata and smoke test harnesses.
+4. [x] **M49.4: Parity Documentation Refresh & Cross-Repository Project Linking ([#285](https://github.com/el-j/encoderCraft/issues/285))** — Complete refresh of README, ROADMAP, target app parity, and implementation milestones.
+5. [x] **M49.5: Multi-Platform Release Smoke & Zero-Panic Stress Verification Gate ([#286](https://github.com/el-j/encoderCraft/issues/286))** — Full clean-room audit, xtask CI validation (>300 tests passed, strict layering, clippy clean).
 
 **Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
 

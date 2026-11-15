@@ -17,6 +17,8 @@ pub struct Transport {
     rate: f64,
     clock: Option<Clock>,
     pub loop_range: bool,
+    pub volume: f32,
+    pub muted: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +29,18 @@ struct Clock {
 
 impl Default for Transport {
     fn default() -> Self {
-        Self { fps: 30.0, frame_count: 0, position: 0, in_point: None, out_point: None, rate: 0.0, clock: None, loop_range: false }
+        Self {
+            fps: 30.0,
+            frame_count: 0,
+            position: 0,
+            in_point: None,
+            out_point: None,
+            rate: 0.0,
+            clock: None,
+            loop_range: false,
+            volume: 1.0,
+            muted: false,
+        }
     }
 }
 
@@ -36,6 +49,14 @@ impl Transport {
         self.fps = if fps.is_finite() && fps > 0.0 { fps } else { 30.0 };
         self.frame_count = frame_count;
         self.position = self.position.min(self.last_frame());
+    }
+
+    pub fn toggle_mute(&mut self) {
+        self.muted = !self.muted;
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
     }
 
     pub fn fps(&self) -> f64 {
@@ -308,5 +329,22 @@ mod tests {
         assert_eq!(timecode(1799, ntsc), "00:00:59;29");
         assert_eq!(timecode(1800, ntsc), "00:01:00;02");
         assert_eq!(timecode(17_982, ntsc), "00:10:00;00");
+    }
+
+    #[test]
+    fn volume_and_mute_controls() {
+        let mut t = Transport::default();
+        assert_eq!(t.volume, 1.0);
+        assert!(!t.muted);
+        t.toggle_mute();
+        assert!(t.muted);
+        t.toggle_mute();
+        assert!(!t.muted);
+        t.set_volume(0.5);
+        assert_eq!(t.volume, 0.5);
+        t.set_volume(1.5);
+        assert_eq!(t.volume, 1.0);
+        t.set_volume(-0.5);
+        assert_eq!(t.volume, 0.0);
     }
 }
