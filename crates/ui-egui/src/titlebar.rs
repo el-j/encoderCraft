@@ -98,7 +98,10 @@ pub fn drag_area(ui: &Ui, rect: Rect) {
     }
     if resp.double_clicked() {
         toggle_maximize(ctx);
-    } else if resp.drag_started_by(PointerButton::Primary) && ctx.data(|d| d.get_temp(resp.id).unwrap_or(false)) {
+    } else if resp.drag_started_by(PointerButton::Primary)
+        && ctx.input(|i| i.pointer.is_decidedly_dragging())
+        && ctx.data(|d| d.get_temp(resp.id).unwrap_or(false))
+    {
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         handed_to_os(ctx);
     }
@@ -108,7 +111,6 @@ pub fn drag_area(ui: &Ui, rect: Rect) {
 /// drag in egui now; otherwise the next press would start no drag.
 fn handed_to_os(ctx: &egui::Context) {
     ctx.stop_dragging();
-    ctx.input_mut(|i| i.pointer = Default::default());
 }
 
 /// Minimize, Maximize/Restore and Close at the right end of `bar`, flush with the window's edge so

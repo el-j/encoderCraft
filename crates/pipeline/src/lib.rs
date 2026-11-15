@@ -24,7 +24,7 @@ pub mod transform;
 
 pub use captions::{CaptionBurner, CaptionTrack, NativeCaptionFormat};
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
-pub use document::{DocumentCanvas, DocumentItem, DocumentPage};
+pub use document::{DocumentCanvas, DocumentItem, DocumentPage, create_zip_archive, extract_zip_entry, list_zip_entries};
 pub use inventory::{SequenceInfo, SourceInventory, inspect_bytes, inspect_source};
 pub use lut::{InterpolationMode, Lut1D, Lut3D, LutError, LutVideoFrameExt};
 pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output_path};

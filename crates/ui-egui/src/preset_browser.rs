@@ -155,6 +155,7 @@ pub fn render_preset_browser(
         egui::ScrollArea::both().id_salt("preset_browser_scroll").max_height(ui.available_height().max(60.0)).auto_shrink([false, false]).show(
             ui,
             |ui| {
+                ui.set_clip_rect(ui.clip_rect());
                 let is_searching = !state.search_query.trim().is_empty();
 
                 if is_searching {
@@ -399,6 +400,10 @@ impl PresetColumnWidths {
         let name = (available_width - fixed).max(110.0);
         Self { name, format: Self::FORMAT, frame_size: Self::FRAME_SIZE, frame_rate: Self::FRAME_RATE, target_rate: Self::TARGET_RATE }
     }
+
+    pub fn total_width(&self) -> f32 {
+        self.name + self.format + self.frame_size + self.frame_rate + self.target_rate
+    }
 }
 
 fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, tokens: &Tokens, cols: PresetColumnWidths) {
@@ -436,6 +441,14 @@ struct PresetRowContext<'a> {
 }
 
 fn render_preset_row(ui: &mut Ui, row: &PresetRow, preset: &EncodingPreset, ctx: &mut PresetRowContext<'_>) -> Option<crate::commands::AppCommand> {
+    let row_height = ctx.tokens.row_height;
+    let total_w = ctx.cols.total_width().max(ui.available_width());
+    let row_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(total_w, row_height));
+    if !ui.is_rect_visible(row_rect) {
+        ui.allocate_space(egui::vec2(total_w, row_height));
+        return None;
+    }
+
     let mut chosen = None;
     let is_sel = ctx.state.selected_preset.as_ref().map(|p| &p.name) == Some(&row.name);
 

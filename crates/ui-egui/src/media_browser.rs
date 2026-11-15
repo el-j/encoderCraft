@@ -83,15 +83,14 @@ impl MediaBrowserColumnWidths {
         Self { name, kind, size, date, created: 0.0, format: 0.0 }
     }
 
-    pub fn compute_with_settings(total_width: f32, settings: &MediaBrowserColumnSettings) -> Self {
+    pub fn compute_with_settings(_total_width: f32, settings: &MediaBrowserColumnSettings) -> Self {
         let is_vis = |id: &str| settings.visible.iter().any(|v| v == id);
+        let name = settings.name.max(80.0);
         let kind = if is_vis("kind") { settings.kind } else { 0.0 };
         let size = if is_vis("size") { settings.size } else { 0.0 };
         let date = if is_vis("modified") { settings.modified } else { 0.0 };
         let created = if is_vis("created") { settings.created } else { 0.0 };
         let format = if is_vis("format") { settings.format } else { 0.0 };
-        let fixed = kind + size + date + created + format;
-        let name = (total_width - fixed - 24.0).max(120.0);
         Self { name, kind, size, date, created, format }
     }
 }
@@ -738,6 +737,9 @@ fn media_column_header(ui: &mut Ui, label: &str, sort_by: SortBy, model: &mut Br
     }
     if handle_resp.hovered() || handle_resp.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+        ui.painter().vline(rect.max.x, rect.min.y..=rect.max.y, egui::Stroke::new(1.0, tokens.accent_primary));
+    } else {
+        ui.painter().vline(rect.max.x, rect.min.y + 3.0..=rect.max.y - 3.0, egui::Stroke::new(1.0, tokens.border_subtle));
     }
 }
 
@@ -1121,6 +1123,7 @@ mod tests {
     fn column_settings_and_visibility() {
         let mut settings = MediaBrowserColumnSettings::default();
         let cols = MediaBrowserColumnWidths::compute_with_settings(800.0, &settings);
+        assert_eq!(cols.name, 240.0);
         assert_eq!(cols.kind, 80.0);
         assert_eq!(cols.created, 0.0);
 

@@ -490,8 +490,13 @@ impl TranscodePipeline {
             ContainerType::AutocadDxf | ContainerType::AutocadDwg | ContainerType::HpglPlotter | ContainerType::ArtcraftCadcraft => {
                 self.execute_cad_transcode(target, start_time)?
             }
-            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft | ContainerType::LottieJson => {
-                self.execute_motion_project(target, start_time)?
+            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => self.execute_motion_project(target, start_time)?,
+            ContainerType::LottieJson => {
+                if self.is_vector_source() {
+                    self.execute_vector_transcode(target, start_time)?
+                } else {
+                    self.execute_motion_project(target, start_time)?
+                }
             }
             ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_timeline_project(target, start_time)?,
             ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => self.execute_daw_session(target, start_time)?,
@@ -531,6 +536,19 @@ impl TranscodePipeline {
                     }
                 }
                 false
+            }
+            _ => false,
+        }
+    }
+
+    fn is_vector_source(&self) -> bool {
+        match &self.spec.source {
+            SourceDescriptor::File { path, .. } => {
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    matches!(ext.to_ascii_lowercase().as_str(), "vectorcraft" | "svg" | "ai" | "eps" | "wmf")
+                } else {
+                    false
+                }
             }
             _ => false,
         }
@@ -1440,7 +1458,7 @@ impl TranscodePipeline {
 
     fn execute_motion_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
         let mut project = match &self.spec.source {
-            SourceDescriptor::File { path, .. } if path.exists() => {
+            SourceDescriptor::File { path, .. } => {
                 let bytes =
                     std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source motion file `{}`: {e}", path.display())))?;
                 if bytes.starts_with(b"\x89CRAFT\x00\x01E") {
@@ -1448,15 +1466,11 @@ impl TranscodePipeline {
                 } else if bytes.starts_with(b"RIFX") {
                     crate::project::MotionProject::from_aep(&bytes)?
                 } else {
-                    let mut proj = crate::project::MotionProject::new("Default Motion Project");
-                    proj.add_comp(crate::project::MotionComp::new("Comp 1", 1920, 1080, 24.0, 120));
-                    proj
+                    return Err(EncoderError::InvalidContainer(format!("unrecognized motion graphics format in `{}`", path.display())));
                 }
             }
             _ => {
-                let mut proj = crate::project::MotionProject::new("Default Motion Project");
-                proj.add_comp(crate::project::MotionComp::new("Comp 1", 1920, 1080, 24.0, 120));
-                proj
+                return Err(EncoderError::UnsupportedCodec("motion graphics projects require a file source".into()));
             }
         };
 
@@ -1502,22 +1516,18 @@ impl TranscodePipeline {
 
     fn execute_timeline_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
         let mut project = match &self.spec.source {
-            SourceDescriptor::File { path, .. } if path.exists() => {
+            SourceDescriptor::File { path, .. } => {
                 let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source NLE file `{}`: {e}", path.display())))?;
                 if bytes.starts_with(b"\x89CRAFT\x00\x01F") {
                     crate::project::TimelineProject::from_filmcraft_binary(&bytes)?
                 } else if bytes.starts_with(&[0x1f, 0x8b]) || bytes.windows(13).any(|w| w == b"<PremiereData") {
                     crate::project::TimelineProject::from_prproj(&bytes)?
                 } else {
-                    let mut proj = crate::project::TimelineProject::new("Default Timeline");
-                    proj.add_sequence(crate::project::TimelineSequence::new("Sequence 1", 1920, 1080, 24.0));
-                    proj
+                    return Err(EncoderError::InvalidContainer(format!("unrecognized timeline project format in `{}`", path.display())));
                 }
             }
             _ => {
-                let mut proj = crate::project::TimelineProject::new("Default Timeline");
-                proj.add_sequence(crate::project::TimelineSequence::new("Sequence 1", 1920, 1080, 24.0));
-                proj
+                return Err(EncoderError::UnsupportedCodec("timeline projects require a file source".into()));
             }
         };
 
