@@ -373,7 +373,7 @@ Open GitHub issues and milestones were reviewed on 2026-11-13. GitHub currently 
 
 - **Goal:** Let users install compatible codecs absent from a release without rebuilding encoderCraft.
 - **Proposed design:** Local, versioned provider manifests and explicitly enabled, out-of-process workers; keep shipped codecs in-process and unchanged.
-- **Planned tasks:** [M46.1–M46.9](https://github.com/el-j/encoderCraft/milestone/24) cover the threat model/API, manifest/discovery, runtime registry, worker protocol, supervision, video vertical slice, audio/decode support, command/CLI/GUI management, and conformance/packaging/documentation.
+- **Tasks & Status:** [M46.1–M46.9](https://github.com/el-j/encoderCraft/milestone/24) cover the threat model/API (ADR 0002 completed), manifest/discovery schema and validation (`crates/core/src/provider.rs` completed), runtime registry & non-shadowing resolution (`crates/engine/src/provider/registry.rs` completed), worker protocol, supervision, video vertical slice, audio/decode support, command/CLI/GUI management, and conformance/packaging/documentation.
 - **Scope guardrails:** No in-process Rust dynamic-library ABI, marketplace, auto-download, auto-enable, arbitrary engine replacement, or bundled third-party providers in v1. An enabled provider runs with the user's permissions; subprocess execution is not a security sandbox.
 - **Plan:** [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) contains the detailed architecture proposal, task definitions, completion gate, and open risks.
 

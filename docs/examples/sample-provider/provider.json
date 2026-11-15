@@ -1,0 +1,72 @@
+{
+  "id": "org.artcraft.sample-x264",
+  "name": "Sample Out-of-Process H.264 Encoder",
+  "version": "1.0.0",
+  "protocolVersion": 1,
+  "encodercraftVersion": ">=0.1.0",
+  "description": "Demonstration out-of-process video encoder provider for encoderCraft",
+  "author": "ArtCraft Contributors",
+  "license": "BSD-3-Clause",
+  "homepage": "https://github.com/storytold/encodercraft",
+  "executable": "bin/x264_worker",
+  "operations": [
+    {
+      "operationKind": "videoEncode",
+      "codecId": "external-h264",
+      "displayName": "External x264 Worker",
+      "aliases": [
+        "x264-worker"
+      ],
+      "profiles": [
+        "baseline",
+        "main",
+        "high"
+      ],
+      "pixelFormats": [
+        "yuv420p",
+        "yuv422p"
+      ],
+      "sampleFormats": [],
+      "sampleRates": [],
+      "containers": [
+        "mp4",
+        "mkv",
+        "mov",
+        "ts"
+      ],
+      "parameters": [
+        {
+          "name": "crf",
+          "label": "Constant Rate Factor",
+          "paramType": {
+            "type": "integer",
+            "min": 0,
+            "max": 51,
+            "default": 23
+          },
+          "description": "Quality control (0=lossless, 23=default, 51=worst)"
+        },
+        {
+          "name": "preset",
+          "label": "Speed / Efficiency Preset",
+          "paramType": {
+            "type": "string",
+            "default": "medium",
+            "choices": [
+              "ultrafast",
+              "superfast",
+              "veryfast",
+              "faster",
+              "fast",
+              "medium",
+              "slow",
+              "slower",
+              "veryslow"
+            ]
+          },
+          "description": "Encoding efficiency tradeoff"
+        }
+      ]
+    }
+  ]
+}

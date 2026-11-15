@@ -135,6 +135,9 @@ pub struct AppPreferences {
     /// Default audio master channels (1 = Mono, 2 = Stereo, 6 = 5.1 Surround).
     #[serde(default = "default_audio_channels")]
     pub default_audio_channels: u8,
+    /// Explicitly enabled out-of-process codec provider identifiers (ADR 0002).
+    #[serde(default)]
+    pub enabled_providers: std::collections::HashSet<String>,
 }
 
 fn default_true() -> bool {
@@ -232,6 +235,7 @@ impl Default for AppPreferences {
             lossy_conversion_decisions: Vec::new(),
             default_audio_sample_rate: default_audio_sample_rate(),
             default_audio_channels: default_audio_channels(),
+            enabled_providers: std::collections::HashSet::new(),
         }
     }
 }

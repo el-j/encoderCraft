@@ -10,6 +10,7 @@ pub mod automation;
 pub mod cmd;
 pub mod conversion;
 pub mod ipc;
+pub mod provider;
 pub mod queue;
 pub mod state;
 
@@ -17,6 +18,7 @@ pub use automation::{play_completion_chime, resolve_unique_output_path, should_i
 pub use cmd::{CommandRegistry, CommandSpec};
 pub use conversion::{ConversionDecision, LossyConversion, LossyConversionChange, LossyConversionKey, assess_lossy_conversions};
 pub use ipc::EngineIpcHandler;
+pub use provider::{CodecResolutionError, ProviderRecord, ProviderRegistry, ResolvedCodec};
 pub use queue::{QueueManager, increment_id, increment_path_stem};
 pub use state::{
     AppPreferences, LogEntry, QueueJournal, QueuedJob, default_config_dir, default_preferences_path, load_journal, load_preferences,
