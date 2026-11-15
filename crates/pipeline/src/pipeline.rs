@@ -3,7 +3,7 @@
 //! Orchestrates demuxing, video scaling, audio DSP normalization, encoding, and muxing.
 
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
@@ -19,6 +19,10 @@ use encodercraft_muxers::{
 };
 use encodercraft_video_codecs::capabilities::container_accepts;
 use encodercraft_video_codecs::{EncodeParams, VideoCodecKind, create_video_encoder_with};
+use hayro::hayro_interpret::InterpreterSettings;
+use hayro::hayro_syntax::Pdf;
+use hayro::{RenderCache, RenderSettings, render};
+use image::ImageEncoder;
 
 use crate::input::{VideoInput, load_audio_required};
 use crate::progress::JobProgress;
@@ -52,6 +56,35 @@ impl Drop for PipeStreamGuard {
             encodercraft_source::pipe::release(endpoint);
         }
     }
+}
+
+fn import_texturecraft_mesh(path: &Path) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
+    let imported = texturecraft_formats::import_mesh(path)
+        .map_err(|error| EncoderError::InvalidContainer(format!("failed to import 3D mesh `{}`: {error}", path.display())))?;
+    let source_mesh = imported.mesh;
+    if source_mesh.indices.len() % 3 != 0 {
+        return Err(EncoderError::InvalidContainer("imported 3D mesh has an incomplete triangle".into()));
+    }
+
+    let mut mesh = encodercraft_spatial_io::TriangleMesh::new(path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("ImportedMesh"));
+    mesh.vertices = source_mesh.positions.iter().map(|point| [point.x, point.y, point.z]).collect();
+    mesh.indices = source_mesh.indices.as_chunks::<3>().0.to_vec();
+    mesh.generate_flat_normals();
+    Ok(mesh)
+}
+
+fn to_texturecraft_mesh(mesh: &encodercraft_spatial_io::TriangleMesh) -> Result<texturecraft_geom::Mesh, EncoderError> {
+    let mut indices = Vec::with_capacity(mesh.indices.len().saturating_mul(3));
+    for triangle in &mesh.indices {
+        for &index in triangle {
+            if mesh.vertices.get(index as usize).is_none() {
+                return Err(EncoderError::InvalidContainer("3D mesh triangle references a missing vertex".into()));
+            }
+            indices.push(index);
+        }
+    }
+    let positions = mesh.vertices.iter().map(|point| texturecraft_geom::glam::Vec3::new(point[0], point[1], point[2])).collect();
+    Ok(texturecraft_geom::Mesh { positions, indices, ..Default::default() })
 }
 
 fn prepare_audio_for_target(mut audio: AudioSampleBuffer, target: &OutputTarget) -> Result<AudioSampleBuffer, EncoderError> {
@@ -384,7 +417,9 @@ impl TranscodePipeline {
             | ContainerType::AdobeIllustratorAi
             | ContainerType::ArtcraftVectorcraft
             | ContainerType::WindowsMetafile => self.execute_vector_transcode(target, start_time)?,
-            ContainerType::Pdf | ContainerType::Docx => self.execute_document_pdf(target, start_time)?,
+            ContainerType::Pdf | ContainerType::Docx | ContainerType::Markdown | ContainerType::Html => {
+                self.execute_document_pdf(target, start_time)?
+            }
             ContainerType::Idml
             | ContainerType::AdobeInDesignIndd
             | ContainerType::ArtcraftDesigncraft
@@ -399,9 +434,10 @@ impl TranscodePipeline {
             | ContainerType::Fbx
             | ContainerType::Alembic
             | ContainerType::Collada
-            | ContainerType::Splat => self.execute_spatial_3d(target, start_time)?,
-            ContainerType::Png
-            | ContainerType::Jpeg
+            | ContainerType::Splat
+            | ContainerType::Step => self.execute_spatial_3d(target, start_time)?,
+            ContainerType::Png => self.execute_pdf_or_image_transcode(target, start_time)?,
+            ContainerType::Jpeg
             | ContainerType::WebP
             | ContainerType::Tiff
             | ContainerType::OpenExr
@@ -446,6 +482,7 @@ impl TranscodePipeline {
                 {
                     return true;
                 }
+
                 let mut head = Vec::with_capacity(512);
                 if let Ok(file) = File::open(path)
                     && std::io::Read::read_to_end(&mut std::io::Read::take(file, 512), &mut head).is_ok()
@@ -466,6 +503,114 @@ impl TranscodePipeline {
 
     fn load_source_audio(&self, target: &OutputTarget) -> Result<AudioSampleBuffer, EncoderError> {
         load_audio_required(&self.spec.source, target)
+    }
+
+    fn execute_pdf_or_image_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let is_pdf = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let mut file = File::open(path).map_err(|error| EncoderError::Io(format!("failed to open source `{}`: {error}", path.display())))?;
+                let mut header = [0u8; 5];
+                let read =
+                    file.read(&mut header).map_err(|error| EncoderError::Io(format!("failed to inspect source `{}`: {error}", path.display())))?;
+                header.get(..read) == Some(b"%PDF-".as_slice())
+            }
+            _ => false,
+        };
+        if is_pdf { self.execute_pdf_png_sequence(target, start_time) } else { self.execute_image_transcode(target, start_time) }
+    }
+
+    fn execute_pdf_png_sequence(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
+        const MAX_PDF_PAGES: usize = 10_000;
+        let path = match &self.spec.source {
+            SourceDescriptor::File { path, .. } => path,
+            _ => return Err(EncoderError::InvalidJobSpec("PDF raster export requires a file source".into())),
+        };
+        let bytes = std::fs::read(path).map_err(|error| EncoderError::Io(format!("failed to read PDF `{}`: {error}", path.display())))?;
+        if bytes.len() > MAX_PDF_BYTES {
+            return Err(EncoderError::InvalidContainer(format!("PDF exceeds the {MAX_PDF_BYTES}-byte raster limit")));
+        }
+        if !bytes.starts_with(b"%PDF-") {
+            return Err(EncoderError::InvalidContainer("not a PDF file".into()));
+        }
+        let pdf = Pdf::new(bytes).map_err(|error| EncoderError::InvalidContainer(format!("failed to open PDF for rasterization: {error:?}")))?;
+        let pages = pdf.pages();
+        let page_count = pages.len();
+        if page_count == 0 {
+            return Err(EncoderError::InvalidContainer("PDF contains no pages".into()));
+        }
+        if page_count > MAX_PDF_PAGES {
+            return Err(EncoderError::InvalidContainer(format!("PDF exceeds the {MAX_PDF_PAGES}-page raster limit")));
+        }
+        let (first_page, last_page) = match target.selection.pages {
+            Some((first, last)) if first > 0 && last >= first && first as usize <= page_count => (first as usize, (last as usize).min(page_count)),
+            Some((first, last)) => return Err(EncoderError::InvalidJobSpec(format!("invalid PDF page range {first}-{last} for {page_count} pages"))),
+            None => (1, page_count),
+        };
+        let selected_page_count = last_page - first_page + 1;
+        let total_frames = u64::try_from(selected_page_count)
+            .map_err(|_| EncoderError::InvalidJobSpec("PDF page count exceeds the progress counter range".into()))?;
+        self.progress.set_total_frames(total_frames);
+
+        for page_number in first_page..=last_page {
+            const MAX_RENDER_SIDE: f32 = 8192.0;
+            const MAX_RENDER_PIXELS: u64 = 32_000_000;
+            let page = pages.get(page_number - 1).ok_or_else(|| EncoderError::InvalidContainer(format!("PDF page {page_number} is unavailable")))?;
+            let scale = 300.0 / 72.0;
+            let (page_width, page_height) = page.render_dimensions();
+            let width_px = page_width * scale;
+            let height_px = page_height * scale;
+            if !width_px.is_finite()
+                || !height_px.is_finite()
+                || width_px <= 0.0
+                || height_px <= 0.0
+                || width_px > MAX_RENDER_SIDE
+                || height_px > MAX_RENDER_SIDE
+            {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} exceeds the 300-DPI raster dimension limit")));
+            }
+            let pixel_count = (width_px.ceil() as u64)
+                .checked_mul(height_px.ceil() as u64)
+                .ok_or_else(|| EncoderError::InvalidContainer(format!("PDF page {page_number} raster size overflowed")))?;
+            if pixel_count > MAX_RENDER_PIXELS {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} exceeds the {MAX_RENDER_PIXELS}-pixel raster limit")));
+            }
+            let cache = RenderCache::new();
+            let rendered = render(
+                page,
+                &cache,
+                &InterpreterSettings::default(),
+                &RenderSettings { x_scale: scale, y_scale: scale, ..RenderSettings::default() },
+            );
+            let width = u32::from(rendered.width());
+            let height = u32::from(rendered.height());
+            if width == 0 || height == 0 {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} produced an empty raster")));
+            }
+            let expected_bytes = usize::try_from(width)
+                .ok()
+                .and_then(|width| usize::try_from(height).ok().and_then(|height| width.checked_mul(height)))
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| EncoderError::InvalidContainer(format!("PDF page {page_number} raster buffer size overflowed")))?;
+            if rendered.data_as_u8_slice().len() != expected_bytes {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} renderer returned an invalid RGBA buffer")));
+            }
+            let mut png_bytes = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut png_bytes)
+                .write_image(rendered.data_as_u8_slice(), width, height, image::ExtendedColorType::Rgba8)
+                .map_err(|error| EncoderError::InvalidContainer(format!("failed to encode PDF page {page_number} as PNG: {error}")))?;
+            let output_path = pdf_page_output_path(&target.output_path, page_number, selected_page_count)?;
+            if let Some(parent) = output_path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| EncoderError::Io(format!("failed to create output directory `{}`: {error}", parent.display())))?;
+            }
+            std::fs::write(&output_path, png_bytes)
+                .map_err(|error| EncoderError::Io(format!("failed to write PDF page PNG `{}`: {error}", output_path.display())))?;
+            self.progress.advance_frame(start_time);
+        }
+        Ok(())
     }
 
     fn execute_audio_flac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
@@ -866,75 +1011,61 @@ impl TranscodePipeline {
     fn execute_spatial_3d(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
         let mesh = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
-                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source 3D file `{}`: {e}", path.display())))?;
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                 match ext.as_str() {
-                    "obj" => {
-                        let text = std::str::from_utf8(&bytes).map_err(|e| EncoderError::InvalidContainer(format!("invalid OBJ text: {e}")))?;
-                        encodercraft_spatial_io::parse_obj(text)?
+                    "obj" | "stl" | "ply" | "glb" | "gltf" | "usdz" | "dae" | "fbx" | "abc" | "usdc" | "usd" | "usda" => {
+                        import_texturecraft_mesh(path)?
                     }
-                    "stl" => encodercraft_spatial_io::parse_stl_binary(&bytes)?,
-                    "ply" => encodercraft_spatial_io::parse_ply_binary(&bytes)?,
-                    "glb" | "gltf" => encodercraft_spatial_io::parse_glb(&bytes)?,
-                    "fbx" => encodercraft_spatial_io::parse_fbx(&bytes)?,
-                    "dae" => encodercraft_spatial_io::parse_collada(std::str::from_utf8(&bytes).unwrap_or(""))?,
-                    "abc" => encodercraft_spatial_io::parse_alembic(&bytes)?,
-                    "usdc" => encodercraft_spatial_io::parse_usdc(&bytes)?,
-                    "splat" => encodercraft_spatial_io::parse_splat(&bytes)?,
-                    _ => {
-                        if bytes.starts_with(b"glTF") {
-                            encodercraft_spatial_io::parse_glb(&bytes)?
-                        } else if bytes.starts_with(b"ply\n") || bytes.starts_with(b"ply\r\n") {
-                            encodercraft_spatial_io::parse_ply_binary(&bytes)?
-                        } else if let Ok(text) = std::str::from_utf8(&bytes)
-                            && (text.starts_with("v ") || text.starts_with('#') || text.starts_with("o "))
-                        {
-                            encodercraft_spatial_io::parse_obj(text)?
-                        } else {
-                            encodercraft_spatial_io::parse_stl_binary(&bytes)?
+                    "step" | "stp" | "splat" => {
+                        let metadata = std::fs::metadata(path)
+                            .map_err(|error| EncoderError::Io(format!("failed to inspect source 3D file `{}`: {error}", path.display())))?;
+                        const MAX_SPATIAL_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
+                        if metadata.len() > MAX_SPATIAL_SOURCE_BYTES {
+                            return Err(EncoderError::InvalidContainer(format!(
+                                "source 3D file `{}` exceeds the {MAX_SPATIAL_SOURCE_BYTES}-byte limit",
+                                path.display()
+                            )));
+                        }
+                        let bytes = std::fs::read(path)
+                            .map_err(|error| EncoderError::Io(format!("failed to read source 3D file `{}`: {error}", path.display())))?;
+                        match ext.as_str() {
+                            "step" | "stp" => {
+                                let text = std::str::from_utf8(&bytes)
+                                    .map_err(|error| EncoderError::InvalidContainer(format!("invalid STEP text: {error}")))?;
+                                encodercraft_spatial_io::parse_step(text)?
+                            }
+                            "splat" => encodercraft_spatial_io::parse_splat(&bytes)?,
+                            _ => return Err(EncoderError::InvalidContainer(format!("unsupported 3D source extension: {ext}"))),
                         }
                     }
+                    _ => return Err(EncoderError::InvalidContainer(format!("unsupported 3D source extension: {ext}"))),
                 }
             }
-            _ => {
-                let mut m = encodercraft_spatial_io::TriangleMesh::new("UnitCube");
-                m.vertices = vec![
-                    [-0.5, -0.5, -0.5],
-                    [0.5, -0.5, -0.5],
-                    [0.5, 0.5, -0.5],
-                    [-0.5, 0.5, -0.5],
-                    [-0.5, -0.5, 0.5],
-                    [0.5, -0.5, 0.5],
-                    [0.5, 0.5, 0.5],
-                    [-0.5, 0.5, 0.5],
-                ];
-                m.indices = vec![
-                    [0, 1, 2],
-                    [0, 2, 3],
-                    [4, 6, 5],
-                    [4, 7, 6],
-                    [0, 4, 5],
-                    [0, 5, 1],
-                    [2, 6, 7],
-                    [2, 7, 3],
-                    [0, 3, 7],
-                    [0, 7, 4],
-                    [1, 5, 6],
-                    [1, 6, 2],
-                ];
-                m.generate_flat_normals();
-                m
+            SourceDescriptor::File { path, .. } => {
+                return Err(EncoderError::Io(format!("source 3D file does not exist: {}", path.display())));
             }
+            _ => return Err(EncoderError::InvalidJobSpec("3D conversion requires a file source".into())),
         };
 
+        let target_ext = target.output_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if target_ext == "step" || target_ext == "stp" {
+            let step_text = encodercraft_spatial_io::write_step(&mesh);
+            std::fs::write(&target.output_path, step_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write STEP file: {e}")))?;
+            self.progress.advance_frame(start_time);
+            self.progress.set_total_frames(1);
+            return Ok(());
+        }
+
+        let texturecraft_mesh = to_texturecraft_mesh(&mesh)?;
         match target.container {
             ContainerType::Gltf => {
-                let glb_bytes = encodercraft_spatial_io::write_glb(&mesh)?;
+                let glb_bytes = texturecraft_formats::glb_bytes(&texturecraft_mesh, &mesh.name, &[])
+                    .map_err(|error| EncoderError::UnsupportedCodec(format!("failed to export GLB: {error}")))?;
                 std::fs::write(&target.output_path, glb_bytes).map_err(|e| EncoderError::Io(format!("failed to write GLB file: {e}")))?;
             }
             ContainerType::Obj => {
-                let obj_text = encodercraft_spatial_io::write_obj(&mesh);
-                std::fs::write(&target.output_path, obj_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OBJ file: {e}")))?;
+                let obj_bytes = texturecraft_formats::obj_bytes(&texturecraft_mesh, &mesh.name);
+                std::fs::write(&target.output_path, obj_bytes).map_err(|e| EncoderError::Io(format!("failed to write OBJ file: {e}")))?;
             }
             ContainerType::Stl => {
                 let stl_bytes = encodercraft_spatial_io::write_stl_binary(&mesh);
@@ -945,8 +1076,9 @@ impl TranscodePipeline {
                 std::fs::write(&target.output_path, ply_bytes).map_err(|e| EncoderError::Io(format!("failed to write PLY file: {e}")))?;
             }
             ContainerType::Usdz => {
-                let usdz_bytes = encodercraft_spatial_io::write_usdz(&mesh)?;
-                std::fs::write(&target.output_path, usdz_bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
+                let usdz = texturecraft_formats::usd_bytes(&texturecraft_mesh, &mesh.name, &[], texturecraft_formats::UsdFormat::Usdz)
+                    .map_err(|error| EncoderError::UnsupportedCodec(format!("failed to export USDZ: {error}")))?;
+                std::fs::write(&target.output_path, usdz.bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
             }
             ContainerType::Usdc => {
                 let usdc_bytes = encodercraft_spatial_io::write_usdc(&mesh);
@@ -967,6 +1099,10 @@ impl TranscodePipeline {
             ContainerType::Splat => {
                 let splat_bytes = encodercraft_spatial_io::write_splat(&mesh);
                 std::fs::write(&target.output_path, splat_bytes).map_err(|e| EncoderError::Io(format!("failed to write SPLAT file: {e}")))?;
+            }
+            ContainerType::Step => {
+                let step_text = encodercraft_spatial_io::write_step(&mesh);
+                std::fs::write(&target.output_path, step_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write STEP file: {e}")))?;
             }
             _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported 3D container: {:?}", target.container))),
         }
@@ -1048,39 +1184,89 @@ impl TranscodePipeline {
 
     fn execute_document_pdf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
         let pages = target.selection.pages;
-        let no_pages = |what: &str| -> Result<(), EncoderError> {
-            if pages.is_some() {
-                return Err(EncoderError::InvalidJobSpec(format!("a page range cannot be applied to {what}; it has no selectable pages")));
-            }
-            Ok(())
-        };
-        let pdf_bytes = match &self.spec.source {
-            SourceDescriptor::File { path, .. } if path.exists() => {
-                let bytes =
-                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
-                if bytes.starts_with(b"%PDF-") {
-                    no_pages("a PDF source")?;
-                    bytes
-                } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
-                    no_pages("a CAD drawing")?;
-                    cad.to_pdf_bytes()?
-                } else if let Ok(mut doc) = crate::document::DocumentCanvas::from_bytes_auto(&bytes) {
-                    if let Some((first, last)) = pages {
-                        doc.select_pages(first, last)?;
-                    }
-                    doc.to_pdf_x4_bytes()?
-                } else {
-                    no_pages("this source")?;
-                    generate_minimal_pdf(&format!("Document export: {}", path.file_name().and_then(|n| n.to_str()).unwrap_or("document")))
-                }
-            }
-            _ => {
-                no_pages("a missing source")?;
-                generate_minimal_pdf("Exported Document")
-            }
-        };
+        let is_docx_target = target.container == ContainerType::Docx;
+        let is_md_target = target.container == ContainerType::Markdown;
+        let is_html_target = target.container == ContainerType::Html;
 
-        std::fs::write(&target.output_path, &pdf_bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+        let mut doc =
+            match &self.spec.source {
+                SourceDescriptor::File { path, .. } if path.exists() => {
+                    let bytes = std::fs::read(path)
+                        .map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
+                    if bytes.starts_with(b"%PDF-") {
+                        if !is_docx_target && !is_md_target && !is_html_target && pages.is_none() {
+                            std::fs::write(&target.output_path, &bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+                            self.progress.advance_frame(start_time);
+                            self.progress.set_total_frames(1);
+                            return Ok(());
+                        }
+                        if !is_docx_target && !is_md_target && !is_html_target {
+                            return Err(EncoderError::UnsupportedCodec(
+                                "PDF page selection requires a lossless page-copy operation, which is not supported".into(),
+                            ));
+                        }
+                        crate::document::DocumentCanvas::from_pdf_bytes(&bytes)?
+                    } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                        if !is_docx_target && !is_md_target && !is_html_target {
+                            if pages.is_some() {
+                                return Err(EncoderError::InvalidJobSpec("a page range cannot be applied to a CAD drawing".into()));
+                            }
+                            let pdf = cad.to_pdf_bytes()?;
+                            std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write PDF blueprint: {e}")))?;
+                            self.progress.advance_frame(start_time);
+                            self.progress.set_total_frames(1);
+                            return Ok(());
+                        }
+                        return Err(EncoderError::UnsupportedCodec("CAD-to-document conversion is not supported for this target".into()));
+                    } else if path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+                        ["txt", "md", "markdown", "html", "htm"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed))
+                    }) {
+                        let text =
+                            std::str::from_utf8(&bytes).map_err(|e| EncoderError::InvalidContainer(format!("document is not valid UTF-8: {e}")))?;
+                        let title = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("Document");
+                        if path
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| ["html", "htm"].iter().any(|ext| extension.eq_ignore_ascii_case(ext)))
+                        {
+                            crate::document::DocumentCanvas::from_html(title, text)?
+                        } else {
+                            let is_markdown = path
+                                .extension()
+                                .and_then(|extension| extension.to_str())
+                                .is_some_and(|extension| ["md", "markdown"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed)));
+                            crate::document::DocumentCanvas::from_text(title, text, is_markdown)?
+                        }
+                    } else {
+                        crate::document::DocumentCanvas::from_bytes_auto(&bytes)
+                            .map_err(|error| EncoderError::InvalidContainer(format!("failed to import document `{}`: {error}", path.display())))?
+                    }
+                }
+                SourceDescriptor::File { path, .. } => {
+                    return Err(EncoderError::Io(format!("source document file does not exist: {}", path.display())));
+                }
+                _ => {
+                    return Err(EncoderError::InvalidJobSpec("document export requires a valid file source".into()));
+                }
+            };
+
+        if let Some((first, last)) = pages {
+            doc.select_pages(first, last)?;
+        }
+
+        if is_md_target {
+            let md_str = doc.to_markdown();
+            std::fs::write(&target.output_path, md_str.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write Markdown file: {e}")))?;
+        } else if is_html_target {
+            let html_str = doc.to_html();
+            std::fs::write(&target.output_path, html_str.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write HTML file: {e}")))?;
+        } else if is_docx_target {
+            let docx_bytes = doc.to_docx_bytes()?;
+            std::fs::write(&target.output_path, &docx_bytes).map_err(|e| EncoderError::Io(format!("failed to write DOCX file: {e}")))?;
+        } else {
+            let pdf_bytes = doc.to_pdf_x4_bytes()?;
+            std::fs::write(&target.output_path, &pdf_bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+        }
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
@@ -1088,22 +1274,42 @@ impl TranscodePipeline {
     }
 
     fn execute_document_publication(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let mut doc = match &self.spec.source {
-            SourceDescriptor::File { path, .. } if path.exists() => {
-                let bytes =
-                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
-                if let Ok(canvas) = crate::document::DocumentCanvas::from_bytes_auto(&bytes) {
-                    canvas
-                } else {
-                    let mut canvas = crate::document::DocumentCanvas::new(path.file_stem().and_then(|s| s.to_str()).unwrap_or("Document"));
-                    if let Ok(text) = std::str::from_utf8(&bytes) {
-                        canvas.pages[0].add_text(54.0, 720.0, 500.0, 20.0, text.lines().next().unwrap_or("Document Item"), 14.0);
+        let mut doc =
+            match &self.spec.source {
+                SourceDescriptor::File { path, .. } if path.exists() => {
+                    let bytes = std::fs::read(path)
+                        .map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
+                    if bytes.starts_with(b"%PDF-") {
+                        crate::document::DocumentCanvas::from_pdf_bytes(&bytes)?
+                    } else if path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+                        ["txt", "md", "markdown", "html", "htm"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed))
+                    }) {
+                        let text = std::str::from_utf8(&bytes)
+                            .map_err(|error| EncoderError::InvalidContainer(format!("document is not valid UTF-8: {error}")))?;
+                        let title = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("Document");
+                        if path
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| ["html", "htm"].iter().any(|ext| extension.eq_ignore_ascii_case(ext)))
+                        {
+                            crate::document::DocumentCanvas::from_html(title, text)?
+                        } else {
+                            let is_markdown = path
+                                .extension()
+                                .and_then(|extension| extension.to_str())
+                                .is_some_and(|extension| ["md", "markdown"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed)));
+                            crate::document::DocumentCanvas::from_text(title, text, is_markdown)?
+                        }
+                    } else {
+                        crate::document::DocumentCanvas::from_bytes_auto(&bytes)
+                            .map_err(|error| EncoderError::InvalidContainer(format!("failed to import document `{}`: {error}", path.display())))?
                     }
-                    canvas
                 }
-            }
-            _ => crate::document::DocumentCanvas::new("Exported Document"),
-        };
+                SourceDescriptor::File { path, .. } => {
+                    return Err(EncoderError::Io(format!("source document file does not exist: {}", path.display())));
+                }
+                _ => return Err(EncoderError::InvalidJobSpec("document publication export requires a file source".into())),
+            };
         if let Some((first, last)) = target.selection.pages {
             doc.select_pages(first, last)?;
         }
@@ -2042,35 +2248,6 @@ impl TranscodePipeline {
     }
 }
 
-fn generate_minimal_pdf(title: &str) -> Vec<u8> {
-    let safe_title = title.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
-    let content_stream = format!("BT\n/F1 18 Tf\n50 750 Td\n({}) Tj\nET\n", safe_title);
-    let stream_len = content_stream.len();
-
-    let mut pdf = Vec::new();
-    pdf.extend_from_slice(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
-    let o1 = pdf.len();
-    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-    let o2 = pdf.len();
-    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-    let o3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
-    );
-    let o4 = pdf.len();
-    let stream_obj = format!("4 0 obj\n<< /Length {} >>\nstream\n{}endstream\nendobj\n", stream_len, content_stream);
-    pdf.extend_from_slice(stream_obj.as_bytes());
-    let o5 = pdf.len();
-    pdf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
-    let xref_pos = pdf.len();
-    let xref = format!(
-        "xref\n0 6\n0000000000 65535 f \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
-        o1, o2, o3, o4, o5, xref_pos
-    );
-    pdf.extend_from_slice(xref.as_bytes());
-    pdf
-}
-
 /// An output written beside its destination and moved into place only when complete, so a failed
 /// or cancelled job never leaves a truncated file (nor replaces an existing one).
 struct StagedOutput {
@@ -2937,7 +3114,15 @@ mod tests {
     #[test]
     fn test_execute_document_pdf_transcode() {
         let dir = tempdir().unwrap();
+        let docx_src = dir.path().join("sample.docx");
         let pdf_out = dir.path().join("output.pdf");
+        let md_out = dir.path().join("output.md");
+
+        let mut doc = crate::document::DocumentCanvas::new("Sample Report");
+        doc.pages[0].add_text(54.0, 720.0, 500.0, 24.0, "Quarterly Results", 18.0);
+        doc.pages[0].add_text(54.0, 680.0, 500.0, 16.0, "All metrics exceeded expectations.", 12.0);
+        doc.add_page().add_text(54.0, 720.0, 500.0, 20.0, "Second page content survives import", 12.0);
+        std::fs::write(&docx_src, doc.to_docx_bytes().unwrap()).unwrap();
 
         let spec = CraftJobSpec {
             version: "1.0".into(),
@@ -2945,21 +3130,189 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: dir.path().join("sample.docx"), start_tick: None, duration_ticks: None, timebase: None },
-            targets: vec![OutputTarget {
-                target_id: "t_pdf".into(),
-                output_path: pdf_out.clone(),
-                preset_name: "Print-Ready PDF/X-4".into(),
-                container: ContainerType::Pdf,
-                ..Default::default()
-            }],
+            source: SourceDescriptor::File { path: docx_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_pdf".into(),
+                    output_path: pdf_out.clone(),
+                    preset_name: "Print-Ready PDF/X-4".into(),
+                    container: ContainerType::Pdf,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_md".into(),
+                    output_path: md_out.clone(),
+                    preset_name: "Markdown".into(),
+                    container: ContainerType::Markdown,
+                    ..Default::default()
+                },
+            ],
         };
 
         let pipeline = TranscodePipeline::new(spec);
         pipeline.execute().unwrap();
         assert!(pdf_out.exists());
         let pdf_bytes = std::fs::read(pdf_out).unwrap();
-        assert!(pdf_bytes.starts_with(b"%PDF-1.7"));
+        assert!(pdf_bytes.starts_with(b"%PDF-"));
+        assert!(String::from_utf8_lossy(&pdf_bytes).contains("/Count 2"));
+        assert!(String::from_utf8_lossy(&pdf_bytes).contains("Second page content survives import"));
+
+        assert!(md_out.exists());
+        let md_str = std::fs::read_to_string(md_out).unwrap();
+        assert!(md_str.contains("Quarterly Results"));
+    }
+
+    #[test]
+    fn document_conversion_preserves_long_text_and_extracts_pdf_text() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("long.txt");
+        let output = dir.path().join("long.md");
+        let text = (0..80).map(|i| format!("line-{i:03}\n")).collect::<String>();
+        std::fs::write(&source, text).unwrap();
+        TranscodePipeline::new(selection_spec(source, output.clone(), ContainerType::Markdown, Default::default())).execute().unwrap();
+        let result = std::fs::read_to_string(output).unwrap();
+        for i in 0..80 {
+            assert!(result.contains(&format!("line-{i:03}")), "missing line {i}");
+        }
+
+        let source = dir.path().join("source.pdf");
+        let output = dir.path().join("result.md");
+        let mut pdf_doc = crate::document::DocumentCanvas::new("Source PDF");
+        pdf_doc.pages[0].add_text(54.0, 720.0, 500.0, 20.0, "Extracted from a real PDF page", 12.0);
+        std::fs::write(&source, pdf_doc.to_pdf_x4_bytes().unwrap()).unwrap();
+        TranscodePipeline::new(selection_spec(source, output.clone(), ContainerType::Markdown, Default::default())).execute().unwrap();
+        let result = std::fs::read_to_string(output).unwrap();
+        assert!(result.contains("Extracted from a real PDF page"));
+    }
+
+    #[test]
+    fn pdf_to_png_renders_a_300_dpi_page_sequence() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source.pdf");
+        let output = dir.path().join("rendered.png");
+        let mut pdf_doc = crate::document::DocumentCanvas::new("Two-page PDF");
+        pdf_doc.pages[0].add_text(54.0, 720.0, 500.0, 20.0, "Page one", 12.0);
+        pdf_doc.add_page().add_text(54.0, 720.0, 500.0, 20.0, "Page two", 12.0);
+        std::fs::write(&source, pdf_doc.to_pdf_x4_bytes().unwrap()).unwrap();
+
+        TranscodePipeline::new(selection_spec(source, output.clone(), ContainerType::Png, Default::default())).execute().unwrap();
+        let first = std::fs::read(dir.path().join("rendered_0001.png")).unwrap();
+        let second = std::fs::read(dir.path().join("rendered_0002.png")).unwrap();
+        assert!(first.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(second.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(u32::from_be_bytes(first[16..20].try_into().unwrap()), 2625);
+        assert!(u32::from_be_bytes(first[20..24].try_into().unwrap()).abs_diff(3375) <= 1);
+    }
+
+    #[test]
+    fn test_execute_spatial_3d_ascii_stl_and_step_to_glb() {
+        let dir = tempdir().unwrap();
+
+        // 1. ASCII STL source
+        let ascii_stl = dir.path().join("triangle.stl");
+        let glb_from_stl = dir.path().join("from_stl.glb");
+        let mut stl_mesh = encodercraft_spatial_io::TriangleMesh::new("TestTriangle");
+        stl_mesh.vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        stl_mesh.indices = vec![[0, 1, 2]];
+        std::fs::write(&ascii_stl, encodercraft_spatial_io::write_stl_ascii(&stl_mesh)).unwrap();
+
+        let stl_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "stl-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: ascii_stl, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_glb1".into(),
+                output_path: glb_from_stl.clone(),
+                preset_name: "glTF 2.0 Binary (.glb)".into(),
+                container: ContainerType::Gltf,
+                ..Default::default()
+            }],
+        };
+        TranscodePipeline::new(stl_spec).execute().unwrap();
+        assert!(glb_from_stl.exists());
+        let glb_bytes = std::fs::read(&glb_from_stl).unwrap();
+        assert!(glb_bytes.starts_with(b"glTF"));
+
+        // 2. STEP CAD source
+        let step_src = dir.path().join("part.step");
+        let glb_from_step = dir.path().join("from_step.glb");
+        let step_out = dir.path().join("converted.step");
+        let stl_from_step = dir.path().join("from_step.stl");
+        let usdz_from_step = dir.path().join("from_step.usdz");
+        let obj_from_step = dir.path().join("from_step.obj");
+        let step_bytes = encodercraft_spatial_io::write_step(&stl_mesh);
+        std::fs::write(&step_src, &step_bytes).unwrap();
+
+        let step_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "step-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: step_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_glb2".into(),
+                    output_path: glb_from_step.clone(),
+                    preset_name: "glTF 2.0 Binary (.glb)".into(),
+                    container: ContainerType::Gltf,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_step".into(),
+                    output_path: step_out.clone(),
+                    preset_name: "STEP CAD".into(),
+                    container: ContainerType::Step,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_stl".into(),
+                    output_path: stl_from_step.clone(),
+                    preset_name: "STL".into(),
+                    container: ContainerType::Stl,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_usdz".into(),
+                    output_path: usdz_from_step.clone(),
+                    preset_name: "USDZ".into(),
+                    container: ContainerType::Usdz,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_obj".into(),
+                    output_path: obj_from_step.clone(),
+                    preset_name: "OBJ".into(),
+                    container: ContainerType::Obj,
+                    ..Default::default()
+                },
+            ],
+        };
+        TranscodePipeline::new(step_spec).execute().unwrap();
+        assert!(glb_from_step.exists());
+        assert!(step_out.exists());
+        assert!(stl_from_step.exists());
+        assert!(usdz_from_step.exists());
+        assert!(obj_from_step.exists());
+        let step_str = std::fs::read_to_string(step_out).unwrap();
+        assert!(step_str.starts_with("ISO-10303-21;"));
+        for (name, output) in
+            [("from_step.stl", stl_from_step), ("from_step.glb", glb_from_step), ("from_step.usdz", usdz_from_step), ("from_step.obj", obj_from_step)]
+        {
+            let bytes = std::fs::read(output).unwrap();
+            let imported = texturecraft_formats::import_mesh_bytes(name, &bytes).unwrap();
+            assert_eq!(imported.mesh.indices.len(), 3, "{name}");
+        }
+
+        let stp_src = dir.path().join("part.stp");
+        let stp_glb = dir.path().join("from_stp.glb");
+        std::fs::write(&stp_src, step_bytes).unwrap();
+        TranscodePipeline::new(selection_spec(stp_src, stp_glb.clone(), ContainerType::Gltf, Default::default())).execute().unwrap();
+        let stp_mesh = texturecraft_formats::import_mesh_bytes("from_stp.glb", &std::fs::read(stp_glb).unwrap()).unwrap();
+        assert_eq!(stp_mesh.mesh.indices.len(), 3);
     }
 
     #[test]
@@ -3111,7 +3464,67 @@ mod tests {
         assert!(usdz_out.exists());
         let usdz_bytes = std::fs::read(&usdz_out).unwrap();
         assert!(usdz_bytes.starts_with(b"PK\x03\x04"));
-        assert!(usdz_bytes.windows(10).any(|w| w == b"model.usda"));
+        let imported = texturecraft_formats::import_mesh_bytes("pyramid.usdz", &usdz_bytes).unwrap();
+        assert_eq!(imported.mesh.positions.len(), 3);
+        assert_eq!(imported.mesh.indices.len(), 3);
+    }
+
+    #[test]
+    fn mesh_formats_roundtrip_through_each_supported_exporter() {
+        let dir = tempdir().unwrap();
+        let mut mesh = encodercraft_spatial_io::TriangleMesh::new("RoundTrip");
+        mesh.vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        mesh.indices = vec![[0, 1, 2]];
+        mesh.generate_flat_normals();
+        let texture_mesh = to_texturecraft_mesh(&mesh).unwrap();
+        let sources = [
+            ("obj", texturecraft_formats::obj_bytes(&texture_mesh, "RoundTrip")),
+            ("stl", encodercraft_spatial_io::write_stl_binary(&mesh)),
+            ("ply", encodercraft_spatial_io::write_ply_binary(&mesh)),
+            ("glb", texturecraft_formats::glb_bytes(&texture_mesh, "RoundTrip", &[]).unwrap()),
+            ("usdz", texturecraft_formats::usd_bytes(&texture_mesh, "RoundTrip", &[], texturecraft_formats::UsdFormat::Usdz).unwrap().bytes),
+        ];
+        let output_formats = [
+            ("obj", ContainerType::Obj),
+            ("stl", ContainerType::Stl),
+            ("ply", ContainerType::Ply),
+            ("glb", ContainerType::Gltf),
+            ("usdz", ContainerType::Usdz),
+        ];
+
+        for (source_extension, source_bytes) in sources {
+            let source = dir.path().join(format!("source.{source_extension}"));
+            std::fs::write(&source, source_bytes).unwrap();
+            let targets = output_formats
+                .iter()
+                .map(|(output_extension, container)| {
+                    let output_path = dir.path().join(format!("{source_extension}_to_{output_extension}.{output_extension}"));
+                    OutputTarget {
+                        target_id: format!("{source_extension}-{output_extension}"),
+                        output_path,
+                        preset_name: format!("Test {output_extension}"),
+                        container: *container,
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            let spec = CraftJobSpec {
+                version: "1.0".into(),
+                job_id: format!("mesh-roundtrip-{source_extension}"),
+                client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+                priority: JobPriority::Normal,
+                start_policy: StartPolicy::AutoStart,
+                source: SourceDescriptor::File { path: source, start_tick: None, duration_ticks: None, timebase: None },
+                targets,
+            };
+            TranscodePipeline::new(spec).execute().unwrap();
+            for (output_extension, _) in output_formats {
+                let path = dir.path().join(format!("{source_extension}_to_{output_extension}.{output_extension}"));
+                let bytes = std::fs::read(&path).unwrap();
+                let imported = texturecraft_formats::import_mesh_bytes(path.file_name().unwrap().to_str().unwrap(), &bytes).unwrap();
+                assert_eq!(imported.mesh.indices.len(), 3, "{} -> {output_extension}", source_extension);
+            }
+        }
     }
 
     #[test]
@@ -3620,6 +4033,21 @@ mod tests {
         assert!(err.is_err());
         assert!(!dir.path().join("x.wav").exists(), "a failed render must not leave a partial output file");
     }
+}
+
+fn pdf_page_output_path(path: &Path, page_number: usize, selected_page_count: usize) -> Result<PathBuf, EncoderError> {
+    if let Some(naming) = FrameNaming::parse(path) {
+        let frame_number =
+            u64::try_from(page_number).map_err(|_| EncoderError::InvalidJobSpec("PDF page number exceeds the frame path range".into()))?;
+        return Ok(naming.path(frame_number));
+    }
+    if selected_page_count == 1 {
+        return Ok(path.to_path_buf());
+    }
+    let stem =
+        path.file_stem().and_then(|stem| stem.to_str()).ok_or_else(|| EncoderError::InvalidJobSpec("PDF PNG output path has no file name".into()))?;
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    Ok(parent.join(format!("{stem}_{page_number:04}.png")))
 }
 
 /// An output path with a printf-style frame number field, e.g. `out/shot_%04d.png`.

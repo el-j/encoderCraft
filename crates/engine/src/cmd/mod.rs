@@ -1328,12 +1328,13 @@ mod tests {
 
         // queue.duplicate
         let dup_res = registry.dispatch(&queue, "queue.duplicate", serde_json::json!({ "jobId": "cmd-test-1" })).unwrap();
-        assert_eq!(dup_res.get("jobId").unwrap().as_str().unwrap(), "cmd-test-1-copy");
+        let dup_id = dup_res.get("jobId").unwrap().as_str().unwrap();
+        assert_eq!(dup_id, "cmd-test-1_1");
 
         // queue.move_up & move_down
-        let up_res = registry.dispatch(&queue, "queue.move_up", serde_json::json!({ "jobId": "cmd-test-1-copy" })).unwrap();
+        let up_res = registry.dispatch(&queue, "queue.move_up", serde_json::json!({ "jobId": dup_id })).unwrap();
         assert!(up_res.get("success").unwrap().as_bool().unwrap());
-        let down_res = registry.dispatch(&queue, "queue.move_down", serde_json::json!({ "jobId": "cmd-test-1-copy" })).unwrap();
+        let down_res = registry.dispatch(&queue, "queue.move_down", serde_json::json!({ "jobId": dup_id })).unwrap();
         assert!(down_res.get("success").unwrap().as_bool().unwrap());
 
         // queue.reset

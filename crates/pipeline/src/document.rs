@@ -144,6 +144,9 @@ impl DocumentCanvas {
         if bytes.starts_with(b"PK\x03\x04") {
             let sample_len = bytes.len().min(4096);
             if let Some(slice) = bytes.get(0..sample_len) {
+                if contains_subslice(slice, b"word/") || contains_subslice(slice, b"word/document.xml") {
+                    return Self::from_docx_bytes(bytes);
+                }
                 if contains_subslice(slice, b"designmap.xml") || contains_subslice(slice, b"application/x-designcraft") {
                     return Self::from_idml_bytes(bytes);
                 }
@@ -153,12 +156,244 @@ impl DocumentCanvas {
                 {
                     return Self::from_epub_bytes(bytes);
                 }
-                if contains_subslice(slice, b"ppt/") || contains_subslice(slice, b"[Content_Types].xml") {
+                if contains_subslice(slice, b"ppt/") {
                     return Self::from_pptx_bytes(bytes);
                 }
             }
+            return Self::from_docx_bytes(bytes);
         }
         Err(EncoderError::InvalidContainer("unrecognized prepress document format".to_string()))
+    }
+
+    /// Imports Microsoft Word OpenXML through DesignCraft's bounded DOCX reader.
+    pub fn from_docx_bytes(bytes: &[u8]) -> Result<Self, EncoderError> {
+        if bytes.len() > 50 * 1024 * 1024 {
+            return Err(EncoderError::InvalidContainer("DOCX exceeds the 50 MiB import limit".into()));
+        }
+        let imported = designcraft_textimport::import("document.docx", bytes)
+            .map_err(|error| EncoderError::InvalidContainer(format!("failed to import DOCX OpenXML: {error}")))?;
+        if !imported.warnings.is_empty() {
+            return Err(EncoderError::UnsupportedCodec(format!("DOCX contains unsupported content: {}", imported.warnings.join("; "))));
+        }
+
+        let story = imported.story;
+        let mut doc = Self::new("Imported Word Document");
+        let mut cur_page_idx = 0;
+        let mut cur_y = 720.0;
+        for (paragraph_index, raw_text) in story.text.split('\n').enumerate() {
+            let paragraph = story.paras.get(paragraph_index);
+            let style = paragraph.map(|paragraph| paragraph.style.to_ascii_lowercase()).unwrap_or_default();
+            let font_size = if style == "title" {
+                24.0
+            } else if style.starts_with("heading") {
+                18.0
+            } else {
+                12.0
+            };
+            if let Some(table_id) = paragraph.and_then(|paragraph| paragraph.table)
+                && let Some(table) = story.tables.get(&table_id)
+                && raw_text.contains('\u{E009}')
+            {
+                for row_index in 0..table.rows.len() {
+                    let mut row = Vec::new();
+                    for column_index in 0..table.columns.len() {
+                        let cell_index = row_index.saturating_mul(table.columns.len()).saturating_add(column_index);
+                        if let Some(cell) = table.cells.get(cell_index) {
+                            row.push(cell.text.text.replace('\n', " "));
+                        }
+                    }
+                    append_document_text(&mut doc, &row.join(" | "), 12.0, &mut cur_page_idx, &mut cur_y);
+                }
+                continue;
+            }
+
+            let page_break = raw_text.chars().any(|character| matches!(character, '\u{E004}' | '\u{E011}' | '\u{E012}'));
+            let text = raw_text.chars().filter(|character| !('\u{E000}'..='\u{E1FF}').contains(character)).collect::<String>();
+            append_document_text(&mut doc, &text, font_size, &mut cur_page_idx, &mut cur_y);
+            if page_break {
+                doc.add_page();
+                cur_page_idx = doc.pages.len().saturating_sub(1);
+                cur_y = 720.0;
+            }
+        }
+        Ok(doc)
+    }
+
+    /// Extracts text from a PDF into editable document pages using PdfCraft.
+    pub fn from_pdf_bytes(bytes: &[u8]) -> Result<Self, EncoderError> {
+        const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
+        const MAX_PDF_PAGES: usize = 10_000;
+        if bytes.len() > MAX_PDF_BYTES {
+            return Err(EncoderError::InvalidContainer(format!("PDF exceeds the {MAX_PDF_BYTES}-byte import limit")));
+        }
+
+        if !bytes.starts_with(b"%PDF-") {
+            return Err(EncoderError::InvalidContainer("not a PDF file".into()));
+        }
+        let pdf = lopdf::Document::load_mem(bytes).map_err(|error| EncoderError::InvalidContainer(format!("failed to open PDF: {error}")))?;
+        let page_numbers: Vec<u32> = pdf.get_pages().keys().copied().collect();
+        let page_count = page_numbers.len();
+        if page_count == 0 {
+            return Err(EncoderError::InvalidContainer("PDF could not be opened or contains no pages".into()));
+        }
+        if page_count > MAX_PDF_PAGES {
+            return Err(EncoderError::InvalidContainer(format!("PDF exceeds the {MAX_PDF_PAGES}-page import limit")));
+        }
+
+        let mut doc = Self::new("Imported PDF Document");
+        let mut cur_page_idx = 0;
+        let mut cur_y = 720.0;
+        let mut remaining_text_bytes = MAX_PDF_BYTES;
+        for (page_index, page_number) in page_numbers.iter().enumerate() {
+            if page_index > 0 {
+                doc.add_page();
+                cur_page_idx = doc.pages.len().saturating_sub(1);
+                cur_y = 720.0;
+            }
+            let page_text = pdf
+                .extract_text_with_limit(&[*page_number], remaining_text_bytes)
+                .map_err(|error| EncoderError::InvalidContainer(format!("failed to extract PDF page {}: {error}", page_index + 1)))?;
+            remaining_text_bytes = remaining_text_bytes
+                .checked_sub(page_text.len())
+                .ok_or_else(|| EncoderError::InvalidContainer(format!("PDF text exceeds the {MAX_PDF_BYTES}-byte extraction limit")))?;
+            append_document_text(&mut doc, &page_text, 12.0, &mut cur_page_idx, &mut cur_y);
+        }
+        Ok(doc)
+    }
+
+    /// Imports UTF-8 plain text or Markdown while retaining paragraphs and heading levels.
+    pub fn from_text(title: &str, text: &str, markdown: bool) -> Result<Self, EncoderError> {
+        const MAX_TEXT_BYTES: usize = 50 * 1024 * 1024;
+        if text.len() > MAX_TEXT_BYTES {
+            return Err(EncoderError::InvalidContainer(format!("document text exceeds the {MAX_TEXT_BYTES}-byte import limit")));
+        }
+        let mut doc = Self::new(title);
+        let mut page_index = 0;
+        let mut y = 720.0;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if markdown && trimmed == "---" {
+                doc.add_page();
+                page_index = doc.pages.len().saturating_sub(1);
+                y = 720.0;
+                continue;
+            }
+            if trimmed.is_empty() {
+                y -= 8.0;
+                continue;
+            }
+            let heading_prefix = if markdown {
+                (1..=6).find(|count| trimmed.starts_with(&"#".repeat(*count)) && trimmed.as_bytes().get(*count) == Some(&b' '))
+            } else {
+                None
+            };
+            let (line, font_size) = if let Some(level) = heading_prefix {
+                let heading = trimmed.get(level + 1..).unwrap_or_default();
+                let font_size = match level {
+                    1 => 24.0,
+                    2 => 18.0,
+                    _ => 16.0,
+                };
+                (heading, font_size)
+            } else {
+                (line, 12.0)
+            };
+            append_document_text(&mut doc, line, font_size, &mut page_index, &mut y);
+        }
+        Ok(doc)
+    }
+
+    /// Imports HTML text and block structure without preserving active content or markup.
+    pub fn from_html(title: &str, html: &str) -> Result<Self, EncoderError> {
+        const MAX_HTML_BYTES: usize = 50 * 1024 * 1024;
+        if html.len() > MAX_HTML_BYTES {
+            return Err(EncoderError::InvalidContainer(format!("HTML exceeds the {MAX_HTML_BYTES}-byte import limit")));
+        }
+        let text = html_to_text(html)?;
+        Self::from_text(title, &text, true)
+    }
+
+    /// Exports document canvas into a valid Microsoft Word OpenXML (.docx) zip package.
+    pub fn to_docx_bytes(&self) -> Result<Vec<u8>, EncoderError> {
+        let content_types = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/></Types>";
+        let rels = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>";
+        let document_rels = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>";
+        let styles_xml = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style><w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr></w:style></w:styles>";
+
+        let mut doc_xml = String::with_capacity(4096);
+        doc_xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\n  <w:body>\n");
+
+        for (page_idx, page) in self.pages.iter().enumerate() {
+            if page_idx > 0 {
+                doc_xml.push_str("    <w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>\n");
+            }
+            for item in &page.items {
+                if let DocumentItem::Text { text, font_size, .. } = item {
+                    let is_heading = *font_size >= 16.0;
+                    let style = if is_heading { "    <w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr>\n" } else { "" };
+                    doc_xml.push_str(&format!("    <w:p>\n{}      <w:r><w:t>{}</w:t></w:r>\n    </w:p>\n", style, quick_escape(text)));
+                }
+            }
+        }
+
+        doc_xml.push_str("  </w:body>\n</w:document>\n");
+
+        let files: &[(&str, &[u8])] = &[
+            ("[Content_Types].xml", content_types),
+            ("_rels/.rels", rels),
+            ("word/document.xml", doc_xml.as_bytes()),
+            ("word/_rels/document.xml.rels", document_rels),
+            ("word/styles.xml", styles_xml),
+        ];
+
+        Ok(create_zip_archive(files))
+    }
+
+    /// Exports document canvas into a clean Markdown string.
+    pub fn to_markdown(&self) -> String {
+        let mut md = String::new();
+        for (idx, page) in self.pages.iter().enumerate() {
+            if idx > 0 {
+                md.push_str("\n---\n\n");
+            }
+            for item in &page.items {
+                if let DocumentItem::Text { text, font_size, .. } = item {
+                    if *font_size >= 20.0 {
+                        md.push_str(&format!("# {text}\n\n"));
+                    } else if *font_size >= 15.0 {
+                        md.push_str(&format!("## {text}\n\n"));
+                    } else {
+                        md.push_str(&format!("{text}\n\n"));
+                    }
+                }
+            }
+        }
+        md
+    }
+
+    /// Exports document canvas into clean standalone HTML5 string.
+    pub fn to_html(&self) -> String {
+        let mut html = format!(
+            "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n<style>\nbody {{ font-family: sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; }}\n.page {{ border-bottom: 1px dashed #ccc; padding-bottom: 20px; margin-bottom: 20px; }}\n</style>\n</head>\n<body>\n",
+            quick_escape(&self.title)
+        );
+        for page in &self.pages {
+            html.push_str("<div class=\"page\">\n");
+            for item in &page.items {
+                if let DocumentItem::Text { text, font_size, .. } = item {
+                    if *font_size >= 20.0 {
+                        html.push_str(&format!("<h1>{}</h1>\n", quick_escape(text)));
+                    } else if *font_size >= 15.0 {
+                        html.push_str(&format!("<h2>{}</h2>\n", quick_escape(text)));
+                    } else {
+                        html.push_str(&format!("<p>{}</p>\n", quick_escape(text)));
+                    }
+                }
+            }
+            html.push_str("</div>\n");
+        }
+        html.push_str("</body>\n</html>\n");
+        html
     }
 
     /// Unpacks EPUB 3 zip publication package.
@@ -209,26 +444,68 @@ impl DocumentCanvas {
 
     /// Exports document to an EPUB 3 digital publication zip package.
     pub fn to_epub_bytes(&self) -> Result<Vec<u8>, EncoderError> {
+        const MAX_EPUB_PAGES: usize = 10_000;
+        if self.pages.len() > MAX_EPUB_PAGES {
+            return Err(EncoderError::InvalidJobSpec(format!("EPUB exceeds the {MAX_EPUB_PAGES}-chapter export limit")));
+        }
         let mimetype = b"application/epub+zip";
         let container_xml = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>";
+        let page_count = self.pages.len().max(1);
+        let mut manifest = String::new();
+        let mut spine = String::new();
+        let mut nav = String::from("<nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1><ol>");
+        let mut entries: Vec<(String, Vec<u8>)> =
+            vec![("mimetype".into(), mimetype.to_vec()), ("META-INF/container.xml".into(), container_xml.to_vec())];
+        for page_index in 0..page_count {
+            let item_id = format!("page{}", page_index + 1);
+            let href = format!("page{}.xhtml", page_index + 1);
+            let page = self.pages.get(page_index);
+            let page_title = page
+                .and_then(|page| {
+                    page.items.iter().find_map(|item| match item {
+                        DocumentItem::Text { text, font_size, .. } if *font_size >= 15.0 => Some(text.as_str()),
+                        _ => None,
+                    })
+                })
+                .unwrap_or(&self.title);
+            let mut body = String::new();
+            if let Some(page) = page {
+                for item in &page.items {
+                    if let DocumentItem::Text { text, font_size, .. } = item {
+                        if *font_size >= 20.0 {
+                            body.push_str(&format!("<h1>{}</h1>", quick_escape(text)));
+                        } else if *font_size >= 15.0 {
+                            body.push_str(&format!("<h2>{}</h2>", quick_escape(text)));
+                        } else {
+                            body.push_str(&format!("<p>{}</p>", quick_escape(text)));
+                        }
+                    }
+                }
+            }
+            let xhtml = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>{}</title></head><body>{}</body></html>\n",
+                quick_escape(page_title),
+                body
+            );
+            manifest.push_str(&format!("<item id=\"{item_id}\" href=\"{href}\" media-type=\"application/xhtml+xml\"/>"));
+            spine.push_str(&format!("<itemref idref=\"{item_id}\"/>"));
+            nav.push_str(&format!("<li><a href=\"{href}\">{}</a></li>", quick_escape(page_title)));
+            entries.push((format!("OEBPS/{href}"), xhtml.into_bytes()));
+        }
+        nav.push_str("</ol></nav>");
         let content_opf = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"pub-id\">\n  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:title>{}</dc:title>\n    <dc:language>en</dc:language>\n    <dc:identifier id=\"pub-id\">urn:uuid:encodercraft-epub</dc:identifier>\n  </metadata>\n  <manifest>\n    <item id=\"page1\" href=\"page1.xhtml\" media-type=\"application/xhtml+xml\"/>\n  </manifest>\n  <spine>\n    <itemref idref=\"page1\"/>\n  </spine>\n</package>\n",
-            quick_escape(&self.title)
-        );
-        let page1_xhtml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\">\n<head><title>{}</title></head>\n<body><h1>{}</h1><p>Generated by encoderCraft.</p></body></html>\n",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"pub-id\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>{}</dc:title><dc:language>en</dc:language><dc:identifier id=\"pub-id\">urn:uuid:encodercraft-epub</dc:identifier></metadata><manifest><item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>{}</manifest><spine>{}</spine></package>\n",
             quick_escape(&self.title),
-            quick_escape(&self.title)
+            manifest,
+            spine
         );
-
-        let files: &[(&str, &[u8])] = &[
-            ("mimetype", mimetype),
-            ("META-INF/container.xml", container_xml),
-            ("OEBPS/content.opf", content_opf.as_bytes()),
-            ("OEBPS/page1.xhtml", page1_xhtml.as_bytes()),
-        ];
-
-        Ok(create_zip_archive(files))
+        let nav_xhtml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>Contents</title></head><body>{nav}</body></html>\n"
+        );
+        entries.push(("OEBPS/content.opf".into(), content_opf.into_bytes()));
+        entries.push(("OEBPS/nav.xhtml".into(), nav_xhtml.into_bytes()));
+        let files: Vec<(&str, &[u8])> = entries.iter().map(|(name, data)| (name.as_str(), data.as_slice())).collect();
+        Ok(create_zip_archive(&files))
     }
 
     /// Exports document to Microsoft PowerPoint OpenXML (.pptx) slide presentation.
@@ -383,6 +660,152 @@ fn render_page_content(page: &DocumentPage) -> String {
     content_stream
 }
 
+fn append_document_text(doc: &mut DocumentCanvas, text: &str, font_size: f64, page_index: &mut usize, y: &mut f64) {
+    let max_chars = ((504.0 / (font_size * 0.55)) as usize).clamp(20, 120);
+    for source_line in text.lines() {
+        let mut line = String::new();
+        for word in source_line.split_whitespace() {
+            let proposed_len = line.chars().count() + usize::from(!line.is_empty()) + word.chars().count();
+            if proposed_len > max_chars && !line.is_empty() {
+                append_document_line(doc, &line, font_size, page_index, y);
+                line.clear();
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+        if !line.is_empty() {
+            append_document_line(doc, &line, font_size, page_index, y);
+        }
+    }
+}
+
+fn append_document_line(doc: &mut DocumentCanvas, text: &str, font_size: f64, page_index: &mut usize, y: &mut f64) {
+    let line_height = font_size * 1.4;
+    if *y - line_height < 72.0 {
+        doc.add_page();
+        *page_index = doc.pages.len().saturating_sub(1);
+        *y = 720.0;
+    }
+    if let Some(page) = doc.pages.get_mut(*page_index) {
+        page.add_text(54.0, *y, 504.0, line_height, text, font_size);
+    }
+    *y -= line_height + 4.0;
+}
+
+fn html_to_text(html: &str) -> Result<String, EncoderError> {
+    let mut result = String::new();
+    let mut remaining = html;
+    let mut in_head = false;
+    while !remaining.is_empty() {
+        if remaining.starts_with('<') {
+            let Some(tag_end) = remaining.find('>') else {
+                return Err(EncoderError::InvalidContainer("HTML contains an unterminated tag".into()));
+            };
+            let tag_content = remaining.get(1..tag_end).ok_or(EncoderError::UnexpectedEof)?.trim();
+            let is_closing = tag_content.starts_with('/');
+            let tag_name =
+                tag_content.trim_start_matches('/').split_ascii_whitespace().next().unwrap_or_default().trim_end_matches('/').to_ascii_lowercase();
+            remaining = remaining.get(tag_end + 1..).ok_or(EncoderError::UnexpectedEof)?;
+            if tag_name == "head" {
+                in_head = !is_closing;
+                continue;
+            }
+            if in_head {
+                continue;
+            }
+            if !is_closing && (tag_name == "script" || tag_name == "style") {
+                let close_tag = format!("</{tag_name}");
+                let close_start = find_ascii_case_insensitive(remaining, &close_tag)
+                    .ok_or_else(|| EncoderError::InvalidContainer(format!("HTML has an unclosed {tag_name} element")))?;
+                let after_close = remaining
+                    .get(close_start..)
+                    .and_then(|tail| tail.find('>').map(|offset| close_start + offset + 1))
+                    .ok_or(EncoderError::UnexpectedEof)?;
+                remaining = remaining.get(after_close..).ok_or(EncoderError::UnexpectedEof)?;
+                continue;
+            }
+            if !is_closing
+                && let Some(level) = tag_name.strip_prefix('h').and_then(|value| value.parse::<usize>().ok())
+                && (1..=6).contains(&level)
+            {
+                if !result.is_empty() && !result.ends_with('\n') {
+                    result.push('\n');
+                }
+                result.push_str(&"#".repeat(level));
+                result.push(' ');
+            } else if !is_closing && tag_name == "li" {
+                if !result.is_empty() && !result.ends_with('\n') {
+                    result.push('\n');
+                }
+                result.push_str("- ");
+            }
+            if matches!(
+                tag_name.as_str(),
+                "address"
+                    | "article"
+                    | "blockquote"
+                    | "br"
+                    | "div"
+                    | "footer"
+                    | "h1"
+                    | "h2"
+                    | "h3"
+                    | "h4"
+                    | "h5"
+                    | "h6"
+                    | "header"
+                    | "li"
+                    | "p"
+                    | "section"
+                    | "tr"
+            ) && (is_closing || tag_name == "br")
+                && !result.ends_with('\n')
+            {
+                result.push('\n');
+            }
+            continue;
+        }
+        if in_head {
+            let text_end = remaining.find('<').unwrap_or(remaining.len());
+            remaining = remaining.get(text_end..).ok_or(EncoderError::UnexpectedEof)?;
+            continue;
+        }
+        if remaining.starts_with('&')
+            && let Some(entity_end) = remaining.find(';').filter(|end| *end <= 12)
+            && let Some(character) = decode_html_entity(remaining.get(1..entity_end).ok_or(EncoderError::UnexpectedEof)?)
+        {
+            result.push(character);
+            remaining = remaining.get(entity_end + 1..).ok_or(EncoderError::UnexpectedEof)?;
+            continue;
+        }
+        let character = remaining.chars().next().ok_or(EncoderError::UnexpectedEof)?;
+        result.push(character);
+        remaining = remaining.get(character.len_utf8()..).ok_or(EncoderError::UnexpectedEof)?;
+    }
+    Ok(result)
+}
+
+fn decode_html_entity(entity: &str) -> Option<char> {
+    match entity {
+        "amp" => Some('&'),
+        "apos" => Some('\''),
+        "gt" => Some('>'),
+        "lt" => Some('<'),
+        "nbsp" => Some(' '),
+        "quot" => Some('"'),
+        _ if entity.starts_with("#x") || entity.starts_with("#X") => u32::from_str_radix(entity.get(2..)?, 16).ok().and_then(char::from_u32),
+        _ if entity.starts_with('#') => entity.get(1..)?.parse::<u32>().ok().and_then(char::from_u32),
+        _ => None,
+    }
+}
+
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let needle = needle.as_bytes();
+    haystack.as_bytes().windows(needle.len()).position(|window| window.eq_ignore_ascii_case(needle))
+}
+
 fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() || haystack.len() < needle.len() {
         return false;
@@ -471,6 +894,65 @@ fn create_zip_archive(files: &[(&str, &[u8])]) -> Vec<u8> {
     zip.extend_from_slice(&0u16.to_le_bytes()); // Comment len
 
     zip
+}
+
+/// Extracts and decompresses a specific file entry from a zip archive (e.g. DOCX OpenXML package).
+pub fn extract_zip_entry(bytes: &[u8], target_entry: &str) -> Result<Vec<u8>, EncoderError> {
+    if bytes.len() < 30 || !bytes.starts_with(b"PK\x03\x04") {
+        return Err(EncoderError::InvalidContainer("not a valid zip package".into()));
+    }
+
+    let mut cursor = 0;
+    while cursor + 30 <= bytes.len() {
+        if &bytes[cursor..cursor + 4] != b"PK\x03\x04" {
+            // Not a local file header, reached central directory or end
+            break;
+        }
+
+        let flags = u16::from_le_bytes([bytes[cursor + 6], bytes[cursor + 7]]);
+        if flags & 0x0009 != 0 {
+            return Err(EncoderError::InvalidContainer("encrypted ZIP entries and data descriptors are not supported".into()));
+        }
+        let method = u16::from_le_bytes([bytes[cursor + 8], bytes[cursor + 9]]);
+        let comp_size = u32::from_le_bytes([bytes[cursor + 18], bytes[cursor + 19], bytes[cursor + 20], bytes[cursor + 21]]) as usize;
+        let uncomp_size = u32::from_le_bytes([bytes[cursor + 22], bytes[cursor + 23], bytes[cursor + 24], bytes[cursor + 25]]) as usize;
+        let fn_len = u16::from_le_bytes([bytes[cursor + 26], bytes[cursor + 27]]) as usize;
+        let extra_len = u16::from_le_bytes([bytes[cursor + 28], bytes[cursor + 29]]) as usize;
+
+        let data_start = cursor + 30 + fn_len + extra_len;
+        if data_start > bytes.len() {
+            return Err(EncoderError::InvalidContainer("malformed zip header bounds".into()));
+        }
+
+        let name_slice = bytes.get(cursor + 30..cursor + 30 + fn_len).ok_or(EncoderError::UnexpectedEof)?;
+        let name_str = std::str::from_utf8(name_slice).unwrap_or("");
+
+        let data_end = data_start.saturating_add(comp_size);
+        let comp_data = bytes.get(data_start..data_end).ok_or(EncoderError::UnexpectedEof)?;
+
+        if name_str == target_entry {
+            const MAX_DOC_DECOMPRESSED_BYTES: usize = 50 * 1024 * 1024;
+            if uncomp_size > MAX_DOC_DECOMPRESSED_BYTES {
+                return Err(EncoderError::InvalidJobSpec(format!("uncompressed entry exceeds {MAX_DOC_DECOMPRESSED_BYTES} bytes safety limit")));
+            }
+
+            let decompressed = match method {
+                0 if comp_data.len() <= MAX_DOC_DECOMPRESSED_BYTES => comp_data.to_vec(),
+                0 => return Err(EncoderError::InvalidContainer("stored zip entry exceeds safety size limit".into())),
+                8 => miniz_oxide::inflate::decompress_to_vec_with_limit(comp_data, MAX_DOC_DECOMPRESSED_BYTES)
+                    .map_err(|e| EncoderError::InvalidContainer(format!("failed to decompress bounded zip deflate stream: {:?}", e.status)))?,
+                m => return Err(EncoderError::InvalidContainer(format!("unsupported zip compression method {m}"))),
+            };
+            if decompressed.len() != uncomp_size {
+                return Err(EncoderError::InvalidContainer("zip entry size does not match its header".into()));
+            }
+            return Ok(decompressed);
+        }
+
+        cursor = data_end;
+    }
+
+    Err(EncoderError::InvalidContainer(format!("entry '{target_entry}' not found in zip archive")))
 }
 
 #[cfg(test)]
@@ -574,6 +1056,10 @@ mod tests {
 
         let epub = doc.to_epub_bytes().expect("EPUB export should succeed");
         assert!(epub.starts_with(b"PK\x03\x04"));
+        let epub_page = String::from_utf8(extract_zip_entry(&epub, "OEBPS/page1.xhtml").expect("EPUB chapter should be present")).unwrap();
+        assert!(epub_page.contains("Executive Summary"));
+        assert!(!epub_page.contains("Generated by encoderCraft"));
+        assert!(String::from_utf8(extract_zip_entry(&epub, "OEBPS/nav.xhtml").unwrap()).unwrap().contains("Contents"));
 
         let parsed_epub = DocumentCanvas::from_bytes_auto(&epub).expect("EPUB auto decode should succeed");
         assert_eq!(parsed_epub.title, "Imported EPUB Publication");
@@ -583,5 +1069,51 @@ mod tests {
 
         let parsed_pptx = DocumentCanvas::from_bytes_auto(&pptx).expect("PPTX auto decode should succeed");
         assert_eq!(parsed_pptx.title, "Imported PowerPoint Presentation");
+    }
+
+    #[test]
+    fn test_docx_roundtrip_and_markdown_html() {
+        let mut doc = DocumentCanvas::new("Proposal");
+        doc.pages[0].add_text(54.0, 720.0, 500.0, 26.0, "Project Proposal", 20.0);
+        doc.pages[0].add_text(54.0, 680.0, 500.0, 16.0, "This is a detailed proposal for transcoding.", 12.0);
+
+        let docx_bytes = doc.to_docx_bytes().expect("DOCX export should succeed");
+        assert!(docx_bytes.starts_with(b"PK\x03\x04"));
+
+        let parsed = DocumentCanvas::from_bytes_auto(&docx_bytes).expect("DOCX decode should succeed");
+        assert!(parsed.to_markdown().contains("This is a detailed proposal for transcoding."));
+        assert!(parsed.to_markdown().contains("# Project Proposal"));
+
+        let md = doc.to_markdown();
+        assert!(md.contains("# Project Proposal"));
+        assert!(md.contains("This is a detailed proposal for transcoding."));
+
+        let html = doc.to_html();
+        assert!(html.contains("<h1>Project Proposal</h1>"));
+        assert!(html.contains("<p>This is a detailed proposal for transcoding.</p>"));
+    }
+
+    #[test]
+    fn text_import_preserves_markdown_headings_and_html_text() {
+        let markdown = DocumentCanvas::from_text("Markdown", "# Title\n\n## Section\nText", true).unwrap();
+        assert!(markdown.to_markdown().contains("# Title"));
+        assert!(markdown.to_markdown().contains("## Section"));
+        let html = DocumentCanvas::from_html("HTML", "<h1>Title &amp; More</h1><p>Body</p><script>hidden()</script>").unwrap();
+        let output = html.to_markdown();
+        assert!(output.contains("# Title & More"));
+        assert!(output.contains("Body"));
+        assert!(!output.contains("hidden"));
+    }
+
+    #[test]
+    fn zip_rejects_misleading_sizes_and_suffix_matches() {
+        let mut zip = create_zip_archive(&[("other/word/document.xml", b"not the document")]);
+        assert!(extract_zip_entry(&zip, "word/document.xml").is_err());
+        zip[22..26].copy_from_slice(&1u32.to_le_bytes());
+        assert!(extract_zip_entry(&zip, "other/word/document.xml").is_err());
+
+        let mut descriptor_zip = create_zip_archive(&[("word/document.xml", b"content")]);
+        descriptor_zip[6] |= 8;
+        assert!(extract_zip_entry(&descriptor_zip, "word/document.xml").is_err());
     }
 }

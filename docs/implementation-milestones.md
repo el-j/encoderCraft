@@ -2,7 +2,7 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** Implementation Complete & Verified (M0 through M38); M39 & M40 In Active Development  
+> **Status:** M0–M41 implementation documented; GitHub milestones M39–M45 are open (M39–M41 are locally documented as complete); M46 is planned
 > **Verification:** 100% CI compliance via `cargo xtask ci` (>150 unit, fuzz, layout, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
@@ -790,6 +790,50 @@ flowchart LR
     - Render color-coded essence chips and distinctive icons (VID, AUD, IMG, DOC, 3D, SEQ) in the Queue Source column.
 11. [x] **Preset Browser Layout Bounds & Scrolling Overflow Fix ([#202](https://github.com/el-j/encoderCraft/issues/202)):**
     - Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
+
+### Milestone 45: Queue Duplication, Collision Safety & Real Multi-Domain Conversions
+
+**Objective:** Implement collision-safe queue job/target duplication with auto-incrementing suffixes, visible duplicate destination warning alerts and auto-rename actions; replace all document and spatial placeholder pipelines with real OpenXML DOCX reading/writing, multi-page PDF/X-4 rendering, Markdown/HTML5 generation, ASCII/Binary STL auto-detection, and ISO 10303 STEP CAD ingestion; display In/Out trim points and trimmed lengths in queue rows and add table header column configuration; expand factory presets with universal document and 3D publishing targets.
+
+Tracked under GitHub Milestone 45.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Queue Duplication Auto-Increment & Collision Detection ([#228](https://github.com/el-j/encoderCraft/issues/228)):**
+   - Automatically increment destination file stems with numeric counters (`_1`, `_2`) on job and target duplication.
+   - Detect conflicting active destinations across jobs, surface prominent toolbar warning alerts and row badges, and provide one-click "Auto-Rename Collisions" tool.
+2. [x] **Real DOCX OpenXML Reader & Multi-Page PDF Pipeline ([#229](https://github.com/el-j/encoderCraft/issues/229)):**
+   - Implemented real OpenXML DOCX ingestion via ZIP extraction, paragraph/run parsing, and text flow into `DocumentCanvas`.
+   - Real multi-page PDF/X-4 rendering, DOCX OpenXML re-generation, and Markdown/HTML5 export without any stub, empty, or placeholder code.
+3. [x] **3D STL (ASCII & Binary) and ISO 10303 STEP CAD Ingestion ([#225](https://github.com/el-j/encoderCraft/issues/225)):**
+   - Auto-detect ASCII and Binary STL triangle meshes; parse and serialize ISO 10303-21 STEP CAD geometry.
+   - Integrate with 3D transcode pipeline for GLB, USDZ, OBJ, and STEP format exchange.
+4. [x] **Universal Document & Publishing Factory Presets ([#226](https://github.com/el-j/encoderCraft/issues/226)):**
+   - Added core container types `Step`, `Markdown`, `Html` to `ContainerType` and conversion target matrices.
+   - Added built-in presets: DOCX to PDF/X-4, DOCX to Markdown, DOCX to Clean HTML5, Markdown to Universal PDF, and ISO 10303 STEP CAD Mesh.
+5. [x] **Queue In/Out Display, Trimmed Length & Table Header Column Picker ([#224](https://github.com/el-j/encoderCraft/issues/224)):**
+   - Display In/Out timecodes, frame ranges, and active trimmed durations in queue rows with distinct `✂ <range>` chips.
+   - Surface target page ranges for document jobs (`Pages 1–5`).
+   - Add header column picker menu (`⚙ Columns ▾`) and right-click context menu on all table header cells.
+   - Skip layout allocation for hidden columns (`width <= 0.0`).
+
+### Milestone 46: User-Installable Codec Providers
+
+**Objective:** Let users add compatible codec implementations that are not compiled into an encoderCraft release, through an explicitly enabled, versioned, out-of-process provider interface. This is a planned follow-on to the active M42–M45 scope; the GitHub M39–M41 milestones remain open administratively even though this repository documents them as complete. It does not imply that runtime plugins exist today. See the [complete M46 planning proposal](./codec-plugin-system-plan.md) for architecture, threat model, task detail, exclusions, risks, and completion gates.
+
+Tracked under GitHub [M46 — User-Installable Codec Providers](https://github.com/el-j/encoderCraft/milestone/24).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **M46.1: Approve the Provider Boundary and Threat Model ([#251](https://github.com/el-j/encoderCraft/issues/251))** — Record the API, transport, compatibility, trust UX, and persisted-job decisions in an ADR.
+2. [ ] **M46.2: Define and Validate the Provider Manifest ([#252](https://github.com/el-j/encoderCraft/issues/252))** — Specify bounded, versioned metadata, capabilities, parameter schemas, license fields, discovery rules, and per-user installation.
+3. [ ] **M46.3: Add Runtime Capability Registry and Deterministic Selection ([#253](https://github.com/el-j/encoderCraft/issues/253))** — Combine runtime descriptors with built-ins without changing existing built-in selection or permitting silent shadowing.
+4. [ ] **M46.4: Specify Worker Protocol and Provider Conformance Harness ([#254](https://github.com/el-j/encoderCraft/issues/254))** — Define versioned control/media transport, bounded streaming, backpressure, timestamps, cancellation, and conformance tests.
+5. [ ] **M46.5: Implement Worker Supervision and Failure Handling ([#255](https://github.com/el-j/encoderCraft/issues/255))** — Supervise enabled providers, enforce bounded resources and timeouts, surface typed errors, and recover cleanly from worker failure.
+6. [ ] **M46.6: Integrate One External Video Encoder End to End ([#256](https://github.com/el-j/encoderCraft/issues/256))** — Prove frame-to-packet provider operation through an existing compatible muxer with regression and conformance fixtures.
+7. [ ] **M46.7: Extend the Contract to Audio and Decoding ([#257](https://github.com/el-j/encoderCraft/issues/257))** — Add independently declared audio encode and video/audio decode operations with explicit format and timestamp contracts.
+8. [ ] **M46.8: Expose Provider Management Through Commands, CLI, and GUI ([#258](https://github.com/el-j/encoderCraft/issues/258))** — Add review/inspect/test/enable/disable/remove workflows using the normal `CommandSpec` surface.
+9. [ ] **M46.9: Complete Conformance, Packaging, and Operator Documentation ([#259](https://github.com/el-j/encoderCraft/issues/259))** — Verify GUI/headless behavior, cross-platform packaging, queue recovery, and user/provider-author documentation.
+
+**Completion Gate:** A user can install a compatible local provider absent from the release, explicitly review and enable it, select its declared codec operation through the normal GUI or CLI path, and encode through a compatible existing muxer. Invalid, incompatible, oversized, cancelled, or crashed provider operations must return clear errors without crashing the app, hanging, exhausting unbounded memory, corrupting the journal, or changing the built-in path.
 
 ---
 
