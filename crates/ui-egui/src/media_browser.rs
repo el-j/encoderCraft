@@ -34,6 +34,34 @@ impl Default for MediaBrowserTreeState {
     }
 }
 
+pub const MEDIA_COLUMNS: [(&str, &str); 6] =
+    [("name", "Name"), ("kind", "Type"), ("size", "Size"), ("modified", "Date Modified"), ("created", "Date Created"), ("format", "Format")];
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaBrowserColumnSettings {
+    pub name: f32,
+    pub kind: f32,
+    pub size: f32,
+    pub modified: f32,
+    pub created: f32,
+    pub format: f32,
+    pub visible: Vec<String>,
+}
+
+impl Default for MediaBrowserColumnSettings {
+    fn default() -> Self {
+        Self {
+            name: 240.0,
+            kind: 80.0,
+            size: 80.0,
+            modified: 130.0,
+            created: 130.0,
+            format: 80.0,
+            visible: vec!["name".into(), "kind".into(), "size".into(), "modified".into()],
+        }
+    }
+}
+
 /// Fixed column widths for pixel-aligned table layout in List mode.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MediaBrowserColumnWidths {
@@ -41,6 +69,8 @@ pub struct MediaBrowserColumnWidths {
     pub kind: f32,
     pub size: f32,
     pub date: f32,
+    pub created: f32,
+    pub format: f32,
 }
 
 impl MediaBrowserColumnWidths {
@@ -50,7 +80,19 @@ impl MediaBrowserColumnWidths {
         let date = 115.0;
         let padding = 24.0;
         let name = (total_width - kind - size - date - padding).max(120.0);
-        Self { name, kind, size, date }
+        Self { name, kind, size, date, created: 0.0, format: 0.0 }
+    }
+
+    pub fn compute_with_settings(total_width: f32, settings: &MediaBrowserColumnSettings) -> Self {
+        let is_vis = |id: &str| settings.visible.iter().any(|v| v == id);
+        let kind = if is_vis("kind") { settings.kind } else { 0.0 };
+        let size = if is_vis("size") { settings.size } else { 0.0 };
+        let date = if is_vis("modified") { settings.modified } else { 0.0 };
+        let created = if is_vis("created") { settings.created } else { 0.0 };
+        let format = if is_vis("format") { settings.format } else { 0.0 };
+        let fixed = kind + size + date + created + format;
+        let name = (total_width - fixed - 24.0).max(120.0);
+        Self { name, kind, size, date, created, format }
     }
 }
 
@@ -63,6 +105,10 @@ pub struct MediaBrowserState {
     pub last_clicked_index: Option<usize>,
     pub inspect_properties: Option<PathBuf>,
     pub tree_state: MediaBrowserTreeState,
+    pub columns: MediaBrowserColumnSettings,
+    pub rename_target: Option<(PathBuf, String)>,
+    pub creating_folder: bool,
+    pub new_folder_input: String,
     locations: Vec<(String, PathBuf)>,
     path_input: String,
     thumbs: BoundedCache<egui::TextureHandle>,
@@ -90,6 +136,10 @@ impl MediaBrowserState {
             last_clicked_index: None,
             inspect_properties: None,
             tree_state: MediaBrowserTreeState::default(),
+            columns: MediaBrowserColumnSettings::default(),
+            rename_target: None,
+            creating_folder: false,
+            new_folder_input: "New Folder".to_string(),
             locations,
             thumbs: BoundedCache::new(THUMB_CACHE_CAPACITY),
             failed: BoundedCache::new(THUMB_CACHE_CAPACITY),
@@ -397,13 +447,96 @@ pub fn render_media_browser(
             ui,
             |ui| {
                 ui.selectable_value(&mut state.model.kind_filter, None, "All types");
-                for k in [EntryKind::Video, EntryKind::Audio, EntryKind::Image] {
+                for k in [EntryKind::Video, EntryKind::Audio, EntryKind::Image, EntryKind::Spatial3D, EntryKind::Vector, EntryKind::Document] {
                     ui.selectable_value(&mut state.model.kind_filter, Some(k), k.label());
                 }
             },
         );
         ui.checkbox(&mut state.model.show_hidden, "Hidden");
+
+        if ui.button("+ New Folder").on_hover_text("Create a new folder in this directory").clicked() {
+            state.creating_folder = true;
+            state.new_folder_input = "New Folder".to_string();
+        }
     });
+
+    if state.creating_folder {
+        egui::Window::new("Create New Folder").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
+            ui.ctx(),
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Folder Name:");
+                    ui.text_edit_singleline(&mut state.new_folder_input);
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Create").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        let name = state.new_folder_input.trim();
+                        if !name.is_empty() {
+                            let new_dir = state.model.location().join(name);
+                            match std::fs::create_dir(&new_dir) {
+                                Ok(()) => {
+                                    state.creating_folder = false;
+                                    state.model.refresh();
+                                }
+                                Err(e) => {
+                                    state.model.error = Some(format!("Failed to create folder: {e}"));
+                                    state.creating_folder = false;
+                                }
+                            }
+                        }
+                    }
+                    if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        state.creating_folder = false;
+                    }
+                });
+            },
+        );
+    }
+
+    if let Some((target_path, mut target_name)) = state.rename_target.clone() {
+        let mut close = false;
+        let mut commit = false;
+        egui::Window::new("Rename Item").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ui.ctx(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("New Name:");
+                ui.text_edit_singleline(&mut target_name);
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Rename").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    commit = true;
+                }
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    close = true;
+                }
+            });
+        });
+        if commit {
+            let trimmed = target_name.trim();
+            if !trimmed.is_empty() {
+                let new_path = target_path.with_file_name(trimmed);
+                if new_path != target_path {
+                    match std::fs::rename(&target_path, &new_path) {
+                        Ok(()) => {
+                            state.rename_target = None;
+                            state.model.refresh();
+                        }
+                        Err(e) => {
+                            state.model.error = Some(format!("Rename failed: {e}"));
+                            state.rename_target = None;
+                        }
+                    }
+                } else {
+                    state.rename_target = None;
+                }
+            }
+        } else if close {
+            state.rename_target = None;
+        } else {
+            state.rename_target = Some((target_path, target_name));
+        }
+    }
 
     ui.separator();
 
@@ -529,6 +662,27 @@ fn entry_menu(
             ui.close();
         }
     }
+
+    ui.separator();
+    if ui.button("Rename... (F2)").clicked() {
+        state.rename_target = Some((e.path.clone(), e.name.clone()));
+        ui.close();
+    }
+    if let Some(parent) = state.model.location().parent() {
+        let dest = parent.join(&e.name);
+        if ui.button("Move to Parent Folder").clicked() {
+            match std::fs::rename(&e.path, &dest) {
+                Ok(()) => state.model.refresh(),
+                Err(err) => state.model.error = Some(format!("Move failed: {err}")),
+            }
+            ui.close();
+        }
+    }
+    if ui.button("New Folder...").clicked() {
+        state.creating_folder = true;
+        state.new_folder_input = "New Folder".to_string();
+        ui.close();
+    }
 }
 
 fn activate(state: &mut MediaBrowserState, e: &Entry, to_add: &mut Vec<PathBuf>) {
@@ -536,6 +690,54 @@ fn activate(state: &mut MediaBrowserState, e: &Entry, to_add: &mut Vec<PathBuf>)
         state.go(e.path.clone());
     } else if e.kind.is_media() {
         to_add.push(e.path.clone());
+    }
+}
+
+fn media_column_picker(ui: &mut Ui, settings: &mut MediaBrowserColumnSettings) {
+    ui.label(RichText::new("Media Browser Columns").strong());
+    ui.separator();
+    for (id, label) in MEDIA_COLUMNS {
+        let is_name = id == "name";
+        let mut shown = settings.visible.iter().any(|v| v == id);
+        let resp = ui.add_enabled(!is_name, egui::Checkbox::new(&mut shown, label));
+        if resp.changed() {
+            if shown {
+                if !settings.visible.iter().any(|v| v == id) {
+                    settings.visible.push(id.to_string());
+                }
+            } else if !is_name {
+                settings.visible.retain(|v| v != id);
+            }
+        }
+    }
+    ui.separator();
+    if ui.button("Reset to Default").clicked() {
+        *settings = MediaBrowserColumnSettings::default();
+        ui.close();
+    }
+}
+
+fn media_column_header(ui: &mut Ui, label: &str, sort_by: SortBy, model: &mut BrowserModel, width: &mut f32, tokens: &Tokens) {
+    let current_sort = model.sort;
+    let is_desc = model.descending;
+    let arrow = if current_sort == sort_by { if is_desc { " \u{25be}" } else { " \u{25b4}" } } else { "" };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(*width, 20.0), egui::Sense::click());
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    header_ui.set_clip_rect(rect);
+    header_ui
+        .add(egui::Label::new(RichText::new(format!("{label}{arrow}")).small().strong().color(tokens.text_primary)).selectable(false).truncate());
+    if resp.clicked() {
+        model.descending = model.sort == sort_by && !model.descending;
+        model.sort = sort_by;
+    }
+    // Resize divider handle on right edge
+    let handle_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 3.0, rect.min.y), egui::pos2(rect.max.x + 3.0, rect.max.y));
+    let handle_resp = ui.allocate_rect(handle_rect, egui::Sense::drag());
+    if handle_resp.dragged() {
+        *width = (*width + handle_resp.drag_delta().x).clamp(40.0, 600.0);
+    }
+    if handle_resp.hovered() || handle_resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
     }
 }
 
@@ -550,56 +752,41 @@ fn list_view(
 ) {
     let now = SystemTime::now();
     let total_w = ui.available_width();
-    let cols = MediaBrowserColumnWidths::compute(total_w);
+    let cols = MediaBrowserColumnWidths::compute_with_settings(total_w, &state.columns);
 
-    let current_sort = state.model.sort;
-    let is_desc = state.model.descending;
-    let sort_arrow = move |by: SortBy| {
-        if current_sort == by { if is_desc { " \u{25be}" } else { " \u{25b4}" } } else { "" }
-    };
-
-    // Header bar
-    ui.horizontal(|ui| {
-        let name_resp = ui.add_sized(
-            [cols.name, 18.0],
-            egui::Button::new(RichText::new(format!("Name{}", sort_arrow(SortBy::Name))).small().strong()).frame(false),
-        );
-        if name_resp.clicked() {
-            state.model.descending = state.model.sort == SortBy::Name && !state.model.descending;
-            state.model.sort = SortBy::Name;
+    // Header bar with resizable column dividers and right-click column show/hide
+    let header_resp = ui.horizontal(|ui| {
+        media_column_header(ui, "Name", SortBy::Name, &mut state.model, &mut state.columns.name, tokens);
+        if state.columns.visible.iter().any(|v| v == "kind") {
+            media_column_header(ui, "Type", SortBy::Kind, &mut state.model, &mut state.columns.kind, tokens);
         }
-
-        let type_resp = ui.add_sized(
-            [cols.kind, 18.0],
-            egui::Button::new(RichText::new(format!("Type{}", sort_arrow(SortBy::Kind))).small().strong()).frame(false),
-        );
-        if type_resp.clicked() {
-            state.model.descending = state.model.sort == SortBy::Kind && !state.model.descending;
-            state.model.sort = SortBy::Kind;
+        if state.columns.visible.iter().any(|v| v == "size") {
+            media_column_header(ui, "Size", SortBy::Size, &mut state.model, &mut state.columns.size, tokens);
         }
-
-        let size_resp = ui.add_sized(
-            [cols.size, 18.0],
-            egui::Button::new(RichText::new(format!("Size{}", sort_arrow(SortBy::Size))).small().strong()).frame(false),
-        );
-        if size_resp.clicked() {
-            state.model.descending = state.model.sort == SortBy::Size && !state.model.descending;
-            state.model.sort = SortBy::Size;
+        if state.columns.visible.iter().any(|v| v == "modified") {
+            media_column_header(ui, "Modified", SortBy::Modified, &mut state.model, &mut state.columns.modified, tokens);
         }
-
-        let date_resp = ui.add_sized(
-            [cols.date, 18.0],
-            egui::Button::new(RichText::new(format!("Modified{}", sort_arrow(SortBy::Modified))).small().strong()).frame(false),
-        );
-        if date_resp.clicked() {
-            state.model.descending = state.model.sort == SortBy::Modified && !state.model.descending;
-            state.model.sort = SortBy::Modified;
+        if state.columns.visible.iter().any(|v| v == "created") {
+            media_column_header(ui, "Created", SortBy::Created, &mut state.model, &mut state.columns.created, tokens);
         }
+        if state.columns.visible.iter().any(|v| v == "format") {
+            media_column_header(ui, "Format", SortBy::Extension, &mut state.model, &mut state.columns.format, tokens);
+        }
+    });
+    header_resp.response.interact(egui::Sense::click()).context_menu(|ui| {
+        media_column_picker(ui, &mut state.columns);
     });
 
     // Cmd/Ctrl+A shortcut to select all files
     if ui.input(|i| (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::A)) {
         state.select_all(entries);
+    }
+    // F2 shortcut to rename selected item
+    if ui.input(|i| i.key_pressed(egui::Key::F2))
+        && let Some(ref sel_path) = state.selected
+        && let Some(sel_entry) = entries.iter().find(|e| &e.path == sel_path)
+    {
+        state.rename_target = Some((sel_entry.path.clone(), sel_entry.name.clone()));
     }
 
     let row_h = 20.0;
@@ -615,24 +802,78 @@ fn list_view(
                         ui.painter().rect_filled(hl_rect, 2.0, tokens.accent_primary.gamma_multiply(0.20));
                     }
 
-                    // Icon + Name
-                    let icon = if e.kind == EntryKind::Folder { Icon::Folder } else { Icon::Preset };
-                    let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());
-                    icons::paint(ui.painter(), icon_rect, icon, if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary });
+                    // Icon + Name (strictly left-aligned)
+                    let (name_rect, resp) = ui.allocate_exact_size(Vec2::new(cols.name, 18.0), egui::Sense::click());
+                    let mut name_ui =
+                        ui.new_child(egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    name_ui.set_clip_rect(name_rect);
+
+                    let icon = match e.kind {
+                        EntryKind::Folder => Icon::Folder,
+                        EntryKind::Audio => Icon::AudioWaveform,
+                        EntryKind::Video => Icon::Film,
+                        EntryKind::Image => Icon::Image,
+                        _ => Icon::Preset,
+                    };
+                    let (icon_rect, _) = name_ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());
+                    icons::paint(
+                        name_ui.painter(),
+                        icon_rect,
+                        icon,
+                        if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary },
+                    );
+                    name_ui.add_space(4.0);
 
                     let name_label = RichText::new(&e.name).small().color(tokens.text_primary);
-                    let resp = ui.add_sized([cols.name - 18.0, 18.0], egui::Label::new(name_label).sense(egui::Sense::click()).truncate());
+                    name_ui.add(egui::Label::new(name_label).selectable(false).truncate());
 
                     // Type
-                    ui.add_sized([cols.kind, 18.0], egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)).truncate());
+                    if cols.kind > 0.0 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.kind, 18.0), egui::Sense::hover());
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        cell_ui.set_clip_rect(rect);
+                        cell_ui.add(egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)).truncate());
+                    }
 
                     // Size
-                    let size_str = if e.kind == EntryKind::Folder { "--".to_string() } else { format_size(e.size) };
-                    ui.add_sized([cols.size, 18.0], egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)).truncate());
+                    if cols.size > 0.0 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.size, 18.0), egui::Sense::hover());
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        cell_ui.set_clip_rect(rect);
+                        let size_str = if e.kind == EntryKind::Folder { "--".to_string() } else { format_size(e.size) };
+                        cell_ui.add(egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)).truncate());
+                    }
 
                     // Modified
-                    let date_str = format_age(e.modified, now);
-                    ui.add_sized([cols.date, 18.0], egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
+                    if cols.date > 0.0 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.date, 18.0), egui::Sense::hover());
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        cell_ui.set_clip_rect(rect);
+                        let date_str = format_age(e.modified, now);
+                        cell_ui.add(egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
+                    }
+
+                    // Created
+                    if cols.created > 0.0 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.created, 18.0), egui::Sense::hover());
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        cell_ui.set_clip_rect(rect);
+                        let date_str = format_age(e.created, now);
+                        cell_ui.add(egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
+                    }
+
+                    // Format
+                    if cols.format > 0.0 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.format, 18.0), egui::Sense::hover());
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        cell_ui.set_clip_rect(rect);
+                        cell_ui.add(egui::Label::new(RichText::new(&e.extension).small().color(tokens.text_dim)).truncate());
+                    }
 
                     if resp.clicked() {
                         let cmd_held = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
@@ -703,8 +944,35 @@ fn thumbnail_view(
                             painter.rect_filled(rect, 3.0, tokens.accent_primary.gamma_multiply(0.25));
                         }
                         let img_rect = egui::Rect::from_min_size(rect.min, Vec2::new(cell.x, cell.y - 28.0));
-                        painter.rect_filled(img_rect.shrink(2.0), 2.0, tokens.bg_panel_darker);
-                        if let Some(tex) = state.thumbs.get(&e.path) {
+                        painter.rect_filled(img_rect.shrink(2.0), 3.0, tokens.bg_panel_darker);
+
+                        if e.kind == EntryKind::Folder {
+                            // Folders shown as folder cards
+                            let icon_size = Vec2::new(32.0, 32.0);
+                            let icon_rect = egui::Rect::from_center_size(img_rect.center() - Vec2::new(0.0, 4.0), icon_size);
+                            icons::paint(&painter, icon_rect, Icon::Folder, tokens.text_dim);
+                            painter.text(
+                                egui::pos2(img_rect.center().x, img_rect.max.y - 10.0),
+                                egui::Align2::CENTER_CENTER,
+                                "Folder",
+                                egui::FontId::proportional(10.0),
+                                tokens.text_dim,
+                            );
+                        } else if e.kind == EntryKind::Audio {
+                            // Audio files shown with audio symbol and format
+                            let icon_size = Vec2::new(28.0, 28.0);
+                            let icon_rect = egui::Rect::from_center_size(img_rect.center() - Vec2::new(0.0, 6.0), icon_size);
+                            icons::paint(&painter, icon_rect, Icon::AudioWaveform, tokens.accent_primary);
+                            let fmt_text = if !e.extension.is_empty() { &e.extension } else { "AUDIO" };
+                            painter.text(
+                                egui::pos2(img_rect.center().x, img_rect.max.y - 10.0),
+                                egui::Align2::CENTER_CENTER,
+                                fmt_text,
+                                egui::FontId::proportional(10.0),
+                                tokens.text_dim,
+                            );
+                        } else if let Some(tex) = state.thumbs.get(&e.path) {
+                            // Videos and images shown with preview
                             let size = tex.size_vec2();
                             let fitted = crate::monitor_geom::fit_rect(img_rect.shrink(2.0), size.x / size.y.max(1.0));
                             painter.image(
@@ -714,14 +982,36 @@ fn thumbnail_view(
                                 egui::Color32::WHITE,
                             );
                         } else {
+                            let icon = match e.kind {
+                                EntryKind::Video => Icon::Film,
+                                EntryKind::Image => Icon::Image,
+                                _ => Icon::Preset,
+                            };
+                            let icon_size = Vec2::new(26.0, 26.0);
+                            let icon_rect = egui::Rect::from_center_size(img_rect.center() - Vec2::new(0.0, 6.0), icon_size);
+                            icons::paint(&painter, icon_rect, icon, tokens.text_dim);
                             painter.text(
-                                img_rect.center(),
+                                egui::pos2(img_rect.center().x, img_rect.max.y - 10.0),
                                 egui::Align2::CENTER_CENTER,
                                 e.kind.label(),
-                                egui::FontId::proportional(11.0),
+                                egui::FontId::proportional(10.0),
                                 tokens.text_dim,
                             );
                         }
+
+                        // Little "format" name in right corner in thumbnail view
+                        if e.kind != EntryKind::Folder && !e.extension.is_empty() {
+                            let badge_text = &e.extension;
+                            let font = egui::FontId::proportional(9.0);
+                            let text_galley = painter.layout_no_wrap(badge_text.to_string(), font.clone(), egui::Color32::WHITE);
+                            let badge_pad = Vec2::new(3.0, 1.0);
+                            let badge_size = text_galley.size() + badge_pad * 2.0;
+                            let badge_min = egui::pos2(img_rect.max.x - badge_size.x - 4.0, img_rect.max.y - badge_size.y - 4.0);
+                            let badge_rect = egui::Rect::from_min_size(badge_min, badge_size);
+                            painter.rect_filled(badge_rect, 2.0, egui::Color32::from_black_alpha(200));
+                            painter.text(badge_rect.center(), egui::Align2::CENTER_CENTER, badge_text, font, egui::Color32::WHITE);
+                        }
+
                         let mut name = e.name.clone();
                         if name.chars().count() > 18 {
                             name = format!("{}...", name.chars().take(15).collect::<String>());
@@ -823,5 +1113,38 @@ mod tests {
         assert!(ts.favorites_expanded);
         assert!(ts.user_folders_expanded);
         assert!(ts.drives_expanded);
+    }
+
+    #[test]
+    fn column_settings_and_visibility() {
+        let mut settings = MediaBrowserColumnSettings::default();
+        let cols = MediaBrowserColumnWidths::compute_with_settings(800.0, &settings);
+        assert_eq!(cols.kind, 80.0);
+        assert_eq!(cols.created, 0.0);
+
+        settings.visible.push("created".into());
+        let cols_with_created = MediaBrowserColumnWidths::compute_with_settings(800.0, &settings);
+        assert_eq!(cols_with_created.created, 130.0);
+    }
+
+    #[test]
+    fn media_file_operations() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("original.mp4");
+        std::fs::write(&file_path, b"test").unwrap();
+
+        let renamed_path = dir.path().join("renamed.mp4");
+        std::fs::rename(&file_path, &renamed_path).unwrap();
+        assert!(!file_path.exists());
+        assert!(renamed_path.exists());
+
+        let subfolder = dir.path().join("subfolder");
+        std::fs::create_dir(&subfolder).unwrap();
+        assert!(subfolder.is_dir());
+
+        let moved_path = subfolder.join("renamed.mp4");
+        std::fs::rename(&renamed_path, &moved_path).unwrap();
+        assert!(!renamed_path.exists());
+        assert!(moved_path.exists());
     }
 }
