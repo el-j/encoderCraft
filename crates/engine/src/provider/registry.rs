@@ -19,6 +19,24 @@ pub enum ResolvedCodec {
     External { provider_id: String, operation: Box<ProviderOperation>, executable_path: PathBuf },
 }
 
+/// Resolved target audio codec implementation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResolvedAudioCodec {
+    /// Built-in first-party audio codec (AAC, Opus, FLAC, PCM, MP3, Vorbis).
+    BuiltIn(String),
+    /// External provider audio encode operation.
+    External { provider_id: String, operation: Box<ProviderOperation>, executable_path: PathBuf },
+}
+
+/// Resolved source decoder implementation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResolvedDecoder {
+    /// Built-in demux/decode pipeline.
+    BuiltIn,
+    /// External provider decode operation.
+    External { provider_id: String, operation: Box<ProviderOperation>, executable_path: PathBuf },
+}
+
 /// Errors occurring during runtime codec resolution and provider selection.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CodecResolutionError {
@@ -245,6 +263,135 @@ impl ProviderRegistry {
         }
 
         Err(CodecResolutionError::NoSuchCodec(clean.to_string()))
+    }
+
+    /// Resolves an audio codec request against built-ins and registered providers.
+    pub fn resolve_audio_codec(&self, requested_codec: &str, target_container: ContainerType) -> Result<ResolvedAudioCodec, CodecResolutionError> {
+        let clean = requested_codec.trim();
+
+        // Case 1: Explicit namespace `provider_id:codec_id`
+        if let Some((provider_id, codec_id)) = clean.split_once(':') {
+            let record = self.providers.get(provider_id).ok_or_else(|| CodecResolutionError::ProviderNotFound(provider_id.to_string()))?;
+            if !record.enabled {
+                return Err(CodecResolutionError::ProviderDisabled {
+                    provider_id: provider_id.to_string(),
+                    provider_name: record.manifest.name.clone(),
+                });
+            }
+
+            let op = record
+                .manifest
+                .operations
+                .iter()
+                .find(|o| {
+                    o.operation_kind == ProviderOperationKind::AudioEncode
+                        && (o.codec_id.eq_ignore_ascii_case(codec_id) || o.aliases.iter().any(|a| a.eq_ignore_ascii_case(codec_id)))
+                })
+                .ok_or_else(|| CodecResolutionError::UnsupportedOperation {
+                    provider_id: provider_id.to_string(),
+                    codec_id: codec_id.to_string(),
+                    operation: ProviderOperationKind::AudioEncode,
+                })?;
+
+            if !op.containers.is_empty() && !op.containers.contains(&target_container) {
+                return Err(CodecResolutionError::IncompatibleContainer { codec_id: codec_id.to_string(), container: target_container });
+            }
+
+            return Ok(ResolvedAudioCodec::External {
+                provider_id: provider_id.to_string(),
+                operation: Box::new(op.clone()),
+                executable_path: record.executable_path.clone(),
+            });
+        }
+
+        // Case 2: Built-in audio codecs take absolute precedence
+        let lower = clean.to_ascii_lowercase();
+        if matches!(lower.as_str(), "aac" | "mp4a" | "opus" | "flac" | "pcm_s16le" | "pcm_s24le" | "pcm_f32le" | "mp3" | "vorbis") {
+            return Ok(ResolvedAudioCodec::BuiltIn(lower));
+        }
+
+        // Case 3: Search enabled providers for audio encoding
+        let mut matches = Vec::new();
+        let mut disabled_matches = Vec::new();
+
+        for record in self.providers.values() {
+            for op in &record.manifest.operations {
+                if op.operation_kind == ProviderOperationKind::AudioEncode
+                    && (op.codec_id.eq_ignore_ascii_case(clean) || op.aliases.iter().any(|a| a.eq_ignore_ascii_case(clean)))
+                {
+                    if record.enabled {
+                        matches.push((record, op));
+                    } else {
+                        disabled_matches.push(record);
+                    }
+                }
+            }
+        }
+
+        if matches.len() > 1 {
+            let providers = matches.iter().map(|(r, _)| r.manifest.id.clone()).collect();
+            return Err(CodecResolutionError::AmbiguousCodec { codec_id: clean.to_string(), providers });
+        }
+
+        if let Some((record, op)) = matches.into_iter().next() {
+            if !op.containers.is_empty() && !op.containers.contains(&target_container) {
+                return Err(CodecResolutionError::IncompatibleContainer { codec_id: clean.to_string(), container: target_container });
+            }
+
+            return Ok(ResolvedAudioCodec::External {
+                provider_id: record.manifest.id.clone(),
+                operation: Box::new(op.clone()),
+                executable_path: record.executable_path.clone(),
+            });
+        }
+
+        if let Some(record) = disabled_matches.into_iter().next() {
+            return Err(CodecResolutionError::ProviderDisabled {
+                provider_id: record.manifest.id.clone(),
+                provider_name: record.manifest.name.clone(),
+            });
+        }
+
+        Err(CodecResolutionError::NoSuchCodec(clean.to_string()))
+    }
+
+    /// Resolves a video or audio decoder request against built-ins and registered providers.
+    pub fn resolve_decoder(&self, source_codec: &str, operation: ProviderOperationKind) -> Result<ResolvedDecoder, CodecResolutionError> {
+        let clean = source_codec.trim();
+
+        // Explicit namespace `provider_id:codec_id`
+        if let Some((provider_id, codec_id)) = clean.split_once(':') {
+            let record = self.providers.get(provider_id).ok_or_else(|| CodecResolutionError::ProviderNotFound(provider_id.to_string()))?;
+            if !record.enabled {
+                return Err(CodecResolutionError::ProviderDisabled {
+                    provider_id: provider_id.to_string(),
+                    provider_name: record.manifest.name.clone(),
+                });
+            }
+
+            let op = record
+                .manifest
+                .operations
+                .iter()
+                .find(|o| {
+                    o.operation_kind == operation
+                        && (o.codec_id.eq_ignore_ascii_case(codec_id) || o.aliases.iter().any(|a| a.eq_ignore_ascii_case(codec_id)))
+                })
+                .ok_or_else(|| CodecResolutionError::UnsupportedOperation {
+                    provider_id: provider_id.to_string(),
+                    codec_id: codec_id.to_string(),
+                    operation,
+                })?;
+
+            return Ok(ResolvedDecoder::External {
+                provider_id: provider_id.to_string(),
+                operation: Box::new(op.clone()),
+                executable_path: record.executable_path.clone(),
+            });
+        }
+
+        // Built-ins take precedence
+        Ok(ResolvedDecoder::BuiltIn)
     }
 }
 

@@ -170,6 +170,69 @@ impl CodecWorkerProcess {
         Ok(packets)
     }
 
+    /// Sends an uncompressed audio PCM buffer to the provider and reads any produced audio chunks.
+    pub fn encode_audio_chunk(&mut self, pts: i64, frames: u32, pcm_bytes: &[u8]) -> Result<Vec<(i64, Vec<u8>)>, EncoderError> {
+        let msg = HostMessage::EncodeAudio { pts, frames, payload_bytes: pcm_bytes.len() as u32 };
+        if let Err(e) = write_message(&mut self.stdin, &msg, Some(pcm_bytes)) {
+            return Err(self.handle_io_error(e));
+        }
+
+        let mut chunks = Vec::new();
+        let (worker_msg, payload) = self.read_worker_message(None)?;
+        match worker_msg {
+            WorkerMessage::AudioChunk { pts, payload_bytes } => {
+                let data = self.read_exact_payload(payload_bytes, payload)?;
+                chunks.push((pts, data));
+            }
+            WorkerMessage::Error { code, message } => {
+                return Err(EncoderError::Internal(format!("provider audio encode error [{code}]: {message}")));
+            }
+            _ => {}
+        }
+        Ok(chunks)
+    }
+
+    /// Sends a compressed video bitstream packet to the provider for decoding.
+    pub fn decode_video_packet(
+        &mut self,
+        pts: i64,
+        dts: i64,
+        packet_bytes: &[u8],
+    ) -> Result<Option<(i64, u32, u32, PixelFormat, Vec<u8>)>, EncoderError> {
+        let msg = HostMessage::DecodePacket { pts, dts, payload_bytes: packet_bytes.len() as u32 };
+        if let Err(e) = write_message(&mut self.stdin, &msg, Some(packet_bytes)) {
+            return Err(self.handle_io_error(e));
+        }
+
+        let (worker_msg, payload) = self.read_worker_message(None)?;
+        match worker_msg {
+            WorkerMessage::DecodedFrame { pts, width, height, pixel_format, payload_bytes } => {
+                let data = self.read_exact_payload(payload_bytes, payload)?;
+                Ok(Some((pts, width, height, pixel_format, data)))
+            }
+            WorkerMessage::Error { code, message } => Err(EncoderError::Internal(format!("provider video decode error [{code}]: {message}"))),
+            _ => Ok(None),
+        }
+    }
+
+    /// Sends a compressed audio bitstream packet to the provider for decoding.
+    pub fn decode_audio_packet(&mut self, pts: i64, packet_bytes: &[u8]) -> Result<Option<(i64, u32, u16, u32, Vec<u8>)>, EncoderError> {
+        let msg = HostMessage::DecodePacket { pts, dts: pts, payload_bytes: packet_bytes.len() as u32 };
+        if let Err(e) = write_message(&mut self.stdin, &msg, Some(packet_bytes)) {
+            return Err(self.handle_io_error(e));
+        }
+
+        let (worker_msg, payload) = self.read_worker_message(None)?;
+        match worker_msg {
+            WorkerMessage::DecodedAudio { pts, sample_rate, channels, frames, payload_bytes } => {
+                let data = self.read_exact_payload(payload_bytes, payload)?;
+                Ok(Some((pts, sample_rate, channels, frames, data)))
+            }
+            WorkerMessage::Error { code, message } => Err(EncoderError::Internal(format!("provider audio decode error [{code}]: {message}"))),
+            _ => Ok(None),
+        }
+    }
+
     /// Flushes all pending buffered frames from the worker until `FlushAck` is received.
     pub fn flush_video(&mut self) -> Result<Vec<EncodedPacket>, EncoderError> {
         if let Err(e) = write_message(&mut self.stdin, &HostMessage::Flush, None) {

@@ -70,6 +70,8 @@ pub enum WorkerMessage {
     AudioChunk { pts: i64, payload_bytes: u32 },
     /// Decoded video frame metadata; uncompressed plane bytes follow immediately.
     DecodedFrame { pts: i64, width: u32, height: u32, pixel_format: PixelFormat, payload_bytes: u32 },
+    /// Decoded audio buffer metadata; raw interleaved f32 PCM bytes follow immediately.
+    DecodedAudio { pts: i64, sample_rate: u32, channels: u16, frames: u32, payload_bytes: u32 },
     /// Worker has flushed all buffered data.
     FlushAck,
     /// Worker encountered an unrecoverable error.

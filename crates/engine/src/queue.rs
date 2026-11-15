@@ -520,7 +520,35 @@ impl QueueManager {
             }
         }
         let approvals = self.conversion_approvals_for_job(job_id)?;
-        let pipeline = TranscodePipeline::with_limits(resolved, self.pipeline_limits);
+
+        let providers_ref = Arc::clone(&self.providers);
+        let factory: encodercraft_pipeline::VideoEncoderFactory = Arc::new(move |target, width, height, fps, params| {
+            let req_codec = target.video.codec.as_deref().unwrap_or(&target.preset_name);
+            let registry = providers_ref.lock().unwrap_or_else(PoisonError::into_inner);
+            match registry.resolve_video_codec(req_codec, target.container) {
+                Ok(crate::provider::ResolvedCodec::External { provider_id, operation, executable_path }) => {
+                    let worker = crate::provider::CodecWorkerProcess::spawn_and_handshake(
+                        &provider_id,
+                        &executable_path,
+                        encodercraft_core::ProviderOperationKind::VideoEncode,
+                        &operation.codec_id,
+                        Some(width),
+                        Some(height),
+                        Some(fps),
+                        None,
+                        params.bitrate_kbps,
+                        None,
+                        None,
+                        std::collections::HashMap::new(),
+                    )?;
+                    Ok(Some(Box::new(crate::provider::ProviderVideoEncoder::new(worker))))
+                }
+                Ok(crate::provider::ResolvedCodec::BuiltIn(_)) => Ok(None),
+                Err(crate::provider::CodecResolutionError::NoSuchCodec(_)) => Ok(None),
+                Err(e) => Err(EncoderError::InvalidJobSpec(e.to_string())),
+            }
+        });
+        let pipeline = TranscodePipeline::with_limits(resolved, self.pipeline_limits).with_video_encoder_factory(factory);
         let progress = pipeline.progress();
         {
             let mut p_lock = self.active_progress.lock().unwrap_or_else(PoisonError::into_inner);

@@ -29,7 +29,7 @@ pub use inventory::{SequenceInfo, SourceInventory, inspect_bytes, inspect_source
 pub use lut::{InterpolationMode, Lut1D, Lut3D, LutError, LutVideoFrameExt};
 pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output_path};
 pub use overlay::{OverlayPosition, TimecodeOverlay, WatermarkOverlay};
-pub use pipeline::{TranscodePipeline, target_pixel_format};
+pub use pipeline::{TranscodePipeline, VideoEncoderFactory, target_pixel_format};
 pub use progress::JobProgress;
 pub use project::{MotionComp, MotionLayer, MotionProject, TimelineProject, TimelineSequence, TimelineTrack};
 pub use scale::FrameScaler;

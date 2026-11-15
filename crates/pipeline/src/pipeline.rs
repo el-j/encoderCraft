@@ -18,7 +18,7 @@ use encodercraft_muxers::{
     AudioSample, AudioStreamConfig, BextMetadata, BwfWavWriter, MkvMuxerBuilder, Mp4Muxer, MxfMuxer, VideoSample, VideoStreamConfig, WavFormatTag,
 };
 use encodercraft_video_codecs::capabilities::container_accepts;
-use encodercraft_video_codecs::{EncodeParams, VideoCodecKind, create_video_encoder_with};
+use encodercraft_video_codecs::{EncodeParams, VideoCodecKind, VideoEncoder, create_video_encoder_with};
 use hayro::hayro_interpret::InterpreterSettings;
 use hayro::hayro_syntax::Pdf;
 use hayro::{RenderCache, RenderSettings, render};
@@ -30,12 +30,17 @@ use crate::scale::FrameScaler;
 use crate::stream::{FrameProcessor, PipelineLimits, StreamSpec, StreamStats, run_stages};
 use crate::transform::ColorTransform;
 
+/// Factory for instantiating custom or external video encoders.
+pub type VideoEncoderFactory =
+    Arc<dyn Fn(&OutputTarget, u32, u32, Rational64, &EncodeParams) -> Result<Option<Box<dyn VideoEncoder + Send>>, EncoderError> + Send + Sync>;
+
 /// Execution coordinator for a single transcoding job.
 pub struct TranscodePipeline {
     spec: CraftJobSpec,
     progress: Arc<JobProgress>,
     limits: PipelineLimits,
     stats: Mutex<Option<StreamStats>>,
+    video_encoder_factory: Option<VideoEncoderFactory>,
 }
 
 /// Frees a received shared-memory stream when the job that consumed it ends, whatever the outcome.
@@ -208,7 +213,30 @@ impl TranscodePipeline {
     /// Creates a pipeline whose queues and whole-track audio stay within `limits`.
     pub fn with_limits(spec: CraftJobSpec, limits: PipelineLimits) -> Self {
         let progress = Arc::new(JobProgress::new(100));
-        Self { spec, progress, limits, stats: Mutex::new(None) }
+        Self { spec, progress, limits, stats: Mutex::new(None), video_encoder_factory: None }
+    }
+
+    /// Configures a custom video encoder factory for external codec providers.
+    pub fn with_video_encoder_factory(mut self, factory: VideoEncoderFactory) -> Self {
+        self.video_encoder_factory = Some(factory);
+        self
+    }
+
+    fn create_video_encoder(
+        &self,
+        target: &OutputTarget,
+        codec_kind: VideoCodecKind,
+        dims: Dimensions,
+        fps: Rational64,
+        params: &EncodeParams,
+    ) -> Result<Box<dyn VideoEncoder + Send>, EncoderError> {
+        if let Some(factory) = &self.video_encoder_factory
+            && let Some(encoder) = factory(target, dims.width, dims.height, fps, params)?
+        {
+            return Ok(encoder);
+        }
+        let codec_kind = resolve_codec(target, codec_kind)?;
+        create_video_encoder_with(codec_kind, dims.width, dims.height, fps, params)
     }
 
     /// Queue depth and peak frames in flight of the last video stream this pipeline ran.
@@ -1684,8 +1712,7 @@ impl TranscodePipeline {
         };
         let codec_kind = resolve_codec(target, codec_kind)?;
         let pixel_format = target_pixel_format(target)?;
-
-        let mut encoder = create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &encode_params(target))?;
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &encode_params(target))?;
         // Faststart relocates `moov` and so must read the file back.
         let staged = StagedOutput::new(&target.output_path)?;
         let out_file = std::fs::OpenOptions::new()
@@ -1809,8 +1836,9 @@ impl TranscodePipeline {
         let frame_ticks = u32::try_from(fps.den).map_err(|_| EncoderError::InvalidJobSpec("frame rate denominator is too large".into()))?;
 
         let codec_kind = VideoCodecKind::H264;
+        let codec_kind = resolve_codec(target, codec_kind)?;
         let pixel_format = target_pixel_format(target)?;
-        let mut encoder = create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &encode_params(target))?;
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &encode_params(target))?;
 
         let staged = StagedOutput::new(&target.output_path)?;
         let out_file = std::fs::OpenOptions::new()
@@ -1902,7 +1930,6 @@ impl TranscodePipeline {
             VideoCodecKind::DnxHd
         };
         let codec_kind = resolve_codec(target, codec_kind)?;
-
         let staged = StagedOutput::new(&target.output_path)?;
         let out_file = File::create(staged.path()).map_err(|e| EncoderError::Io(format!("failed to create MXF output file: {e}")))?;
         let writer = BufWriter::new(out_file);
@@ -1910,8 +1937,7 @@ impl TranscodePipeline {
         let pixel_format = target_pixel_format(target)?;
         let bit_depth = pixel_format.bits_per_component();
 
-        let mut encoder =
-            create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &EncodeParams { annex_b: true, ..encode_params(target) })?;
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &EncodeParams { annex_b: true, ..encode_params(target) })?;
         let v_cfg = VideoStreamConfig {
             codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
@@ -2008,7 +2034,7 @@ impl TranscodePipeline {
         let out_file = File::create(staged.path()).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
         let writer = BufWriter::new(out_file);
 
-        let mut encoder = create_video_encoder_with(codec_kind, dims.width, dims.height, fps, &encode_params(target))?;
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &encode_params(target))?;
         let v_cfg = VideoStreamConfig {
             codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
