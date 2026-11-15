@@ -38,11 +38,14 @@ pub enum Icon {
     ListView,
     GridView,
     Info,
-    // Canonical media & UI glyphs shared with FilmCraft:
+    // Canonical media & UI glyphs shared across ArtCraft:
     Film,
     Sequence,
     Audio,
+    AudioWaveform,
     Image,
+    Document,
+    Spatial3D,
     Speaker,
     Mute,
     Lock,
@@ -296,7 +299,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.rect_fill(3.0, 5.5, 9.0, 7.5);
             pen.rect_fill(6.0, 9.0, 13.0, 11.0);
         }
-        Audio => {
+        Audio | AudioWaveform => {
             for (i, h) in [3.0, 6.0, 9.0, 5.0, 7.0, 3.0].iter().enumerate() {
                 let x = 2.5 + i as f32 * 2.2;
                 pen.line(&[(x, 8.0 - h / 2.0), (x, 8.0 + h / 2.0)]);
@@ -306,6 +309,18 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.rect(2.0, 3.0, 14.0, 13.0);
             pen.line(&[(2.5, 12.0), (6.0, 8.0), (9.0, 11.0), (11.0, 9.0), (13.5, 12.0)]);
             pen.dot(10.5, 6.0, 1.1);
+        }
+        Document => {
+            pen.closed(&[(3.5, 2.5), (9.5, 2.5), (12.5, 5.5), (12.5, 13.5), (3.5, 13.5)]);
+            pen.line(&[(9.5, 2.5), (9.5, 5.5), (12.5, 5.5)]);
+            pen.line(&[(5.5, 8.0), (10.5, 8.0)]);
+            pen.line(&[(5.5, 10.5), (9.0, 10.5)]);
+        }
+        Spatial3D => {
+            pen.closed(&[(8.0, 2.5), (13.5, 5.5), (13.5, 11.5), (8.0, 14.5), (2.5, 11.5), (2.5, 5.5)]);
+            pen.line(&[(8.0, 8.5), (8.0, 14.5)]);
+            pen.line(&[(8.0, 8.5), (13.5, 5.5)]);
+            pen.line(&[(8.0, 8.5), (2.5, 5.5)]);
         }
         Speaker | Mute => {
             pen.fill(&[(2.0, 6.0), (5.0, 6.0), (9.0, 2.5), (9.0, 13.5), (5.0, 10.0), (2.0, 10.0)]);
@@ -532,7 +547,10 @@ mod tests {
         Icon::Film,
         Icon::Sequence,
         Icon::Audio,
+        Icon::AudioWaveform,
         Icon::Image,
+        Icon::Document,
+        Icon::Spatial3D,
         Icon::Speaker,
         Icon::Mute,
         Icon::Lock,
