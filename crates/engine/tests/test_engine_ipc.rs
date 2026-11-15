@@ -242,3 +242,48 @@ fn test_ipc_subscribe_streams_job_events_until_completion() {
     assert!(saw_completed, "no completion event received");
     server.stop();
 }
+
+#[cfg(unix)]
+#[test]
+fn test_sibling_app_ipc_unix_socket_roundtrip() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let dir = tempfile::tempdir().unwrap();
+    let sock_path = dir.path().join("encodercraft-test.sock");
+    let queue = Arc::new(QueueManager::new_in_memory());
+    let handler = Arc::new(EngineIpcHandler::new(queue, Arc::new(Mutex::new(PresetRegistry::default()))));
+    let mut server = encodercraft_ipc::IpcServer::bind_unix(&sock_path, handler).unwrap();
+
+    let stream = UnixStream::connect(&sock_path).unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    let mut writer = stream.try_clone().unwrap();
+    let mut reader = BufReader::new(stream);
+
+    // Test submission from sibling applications across the ArtCraft suite
+    let sibling_apps = ["FilmCraft", "EffectCraft", "SoundCraft", "DesignCraft", "CadCraft"];
+    for (idx, app) in sibling_apps.iter().enumerate() {
+        let job_id = format!("sibling-job-{idx}");
+        let mut spec = wav_spec(dir.path(), &job_id);
+        spec.client_info.app_name = (*app).to_string();
+        spec.client_info.pid = 4000 + idx as u32;
+        spec.start_policy = StartPolicy::Paused;
+
+        let submit_req = format!("{{\"id\":{},\"method\":\"queue.submit\",\"params\":{}}}\n", 100 + idx, serde_json::to_string(&spec).unwrap());
+        writer.write_all(submit_req.as_bytes()).unwrap();
+
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.contains(&job_id), "failed response for {app}: {line}");
+    }
+
+    // Query queue.list over Unix socket and verify all sibling descriptors are ingested
+    writer.write_all(b"{\"id\":200,\"method\":\"queue.list\",\"params\":{}}\n").unwrap();
+    let mut list_line = String::new();
+    reader.read_line(&mut list_line).unwrap();
+    for app in &sibling_apps {
+        assert!(list_line.contains(app), "queue list missing sibling app {app}");
+    }
+
+    server.stop();
+}

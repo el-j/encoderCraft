@@ -1258,6 +1258,19 @@ fn transport_bar(ui: &mut Ui, state: &mut PreviewState, tokens: &Tokens) {
         if let Some(outp) = state.transport.out_point {
             ui.label(RichText::new(format!("Out: {outp}")).small().color(tokens.text_dim));
         }
+        ui.separator();
+        let mute_icon = if state.transport.muted { icons::Icon::Mute } else { icons::Icon::Speaker };
+        let mute_tooltip = if state.transport.muted { "Unmute Audio" } else { "Mute Audio" };
+        if icons::button(ui, mute_icon, 20.0, state.transport.muted, tokens, mute_tooltip).clicked() {
+            state.transport.toggle_mute();
+        }
+        let mut vol_display = if state.transport.muted { 0.0 } else { state.transport.volume };
+        if ui.add_sized([60.0, 18.0], egui::Slider::new(&mut vol_display, 0.0..=1.0).show_value(false)).changed() {
+            state.transport.set_volume(vol_display);
+            if state.transport.muted && vol_display > 0.0 {
+                state.transport.muted = false;
+            }
+        }
     });
 }
 
@@ -1515,6 +1528,19 @@ mod tests {
         let tokens = Tokens::dark();
         egui::__run_test_ui(|ui| {
             render_preview_panel(ui, &mut state, Some(&job), false, &tokens);
+        });
+    }
+
+    #[test]
+    fn transport_audio_controls_and_preview_integration() {
+        let mut state = PreviewState::default();
+        assert_eq!(state.transport.volume, 1.0);
+        assert!(!state.transport.muted);
+        state.transport.toggle_mute();
+        assert!(state.transport.muted);
+        let tokens = Tokens::dark();
+        egui::__run_test_ui(|ui| {
+            transport_bar(ui, &mut state, &tokens);
         });
     }
 }

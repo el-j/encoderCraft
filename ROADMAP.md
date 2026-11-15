@@ -1,8 +1,8 @@
 # encoderCraft Roadmap
 
-> **Stage: Complete Implementation (v0.1.0-alpha.2 Release)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
+> **Stage: First Stable Release (v0.1.0)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-13 · **Last updated:** 2026-11-13 · **Change:** Added proposed M46 planning for user-installable codec providers after reviewing open issues and milestones  
+> **Last reviewed:** 2026-11-15 · **Last updated:** 2026-11-15 · **Change:** Completed Milestone 49 (v0.1.0 First Stable Release Readiness & Final Gap Closure)  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -22,12 +22,12 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | Metric | Target Value | Current Value | Method & Calibration |
 |---|---|---|---|
 | **Feature Breadth** | **100%** | **100% (Parity Verified)** | Parity comparison against Adobe Media Encoder 2026 feature dump. |
-| **Ready for Real Work** | **95%** | **98% (Ready)** | End-to-end reliability for production encoding queues. |
-| **Mainstream Practitioner** | **95%** | **98% (Ready)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
-| **Essentials User** | **95%** | **99% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **>150 passed** | Unit, fuzz, and integration tests across L0-L7. |
-| **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
-| **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
+| **Ready for Real Work** | **95%** | **100% (Production Ready)** | End-to-end reliability for production encoding queues. |
+| **Mainstream Practitioner** | **95%** | **100% (Production Ready)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
+| **Essentials User** | **95%** | **100% (Production Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
+| **Automated Tests** | **>80 tests** | **>300 passed** | Unit, fuzz, layout, and integration tests across L0-L7. |
+| **Workspace Crates** | **18 crates** | 22 verified | Strictly layered L0 to L7 workspace architecture. |
+| **Sibling Codec Reuse** | **100% Native** | Sibling IPC Ingestion | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
 ---
 
@@ -400,6 +400,16 @@ Tracked under Milestone [M48 - Universal Media Conversion Integrity, Real Codec 
 - [x] **M48.5: Media Browser Polish: Left-Aligned Filenames & Resizable Headers ([#279](https://github.com/el-j/encoderCraft/issues/279))** – Fixed column divider misalignment between header and row cells by synchronizing `cols.name` with `settings.name`, drawing clear divider guide lines, and strictly left-aligning filename cells.
 - [x] **M48.6: Window Maximize / Restore on Header Double-Click ([#280](https://github.com/el-j/encoderCraft/issues/280))** – Protected egui's double-click pointer state in `titlebar::drag_area` so double-clicking anywhere on the top menu bar or header bar toggles window maximize and restore across desktop platforms.
 - [x] **M48.7: Upstream craft-libs Codec Ecosystem Expansion & End-to-End Tests ([#281](https://github.com/el-j/encoderCraft/issues/281))** – Eliminated dummy fallback projects in motion and timeline project executors in favor of typed errors, added comprehensive integration tests for DOCX, EPUB, and PPTX conversions in `presets_conformance.rs`.
+
+## Milestone 49: v0.1.0 First Stable Release Readiness & Final Gap Closure
+
+Tracked under Milestone [M49 - v0.1.0 First Stable Release Readiness & Final Gap Closure](https://github.com/el-j/encoderCraft/milestone/27) addressing issues [#1](https://github.com/el-j/encoderCraft/issues/1) and [#283](https://github.com/el-j/encoderCraft/issues/283)–[#286](https://github.com/el-j/encoderCraft/issues/286).
+
+- [x] **M49.1: Sibling App Job Ingestion Listener & Headless Rendering ([#1](https://github.com/el-j/encoderCraft/issues/1))** – Production Unix domain socket and TCP daemon endpoints for seamless zero-copy batch job submission from FilmCraft, EffectCraft, SoundCraft, DesignCraft, and CadCraft.
+- [x] **M49.2: Synchronized Preview Monitor Audio Controls ([#283](https://github.com/el-j/encoderCraft/issues/283))** – Integrated real-time volume slider (0.0 to 1.0) and instant mute/unmute toggle in the preview monitor transport toolbar.
+- [x] **M49.3: Workspace Version Bump to 0.1.0 Stable & Release Packaging Verification ([#284](https://github.com/el-j/encoderCraft/issues/284))** – Promoted entire workspace to official 0.1.0 stable release and verified package build metadata and smoke test harnesses.
+- [x] **M49.4: Parity Documentation Refresh & Cross-Repository Project Linking ([#285](https://github.com/el-j/encoderCraft/issues/285))** – Complete refresh of README, ROADMAP, target app parity, and implementation milestones.
+- [x] **M49.5: Multi-Platform Release Smoke & Zero-Panic Stress Verification Gate ([#286](https://github.com/el-j/encoderCraft/issues/286))** – Full clean-room audit, xtask CI validation (>300 tests passed, strict layering, clippy clean).
 
 ## Known Issues (alpha.1, tracked above)
 

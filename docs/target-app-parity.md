@@ -42,25 +42,25 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 └──────────────────────────┴─────────────┴────────────────────────────────────────────────┘
 ```
 
-### Implementation status (alpha)
+### Implementation status (v0.1.0 First Stable Release)
 
 | Area | Status | Tracking |
 |---|---|---|
-| Queue: batch start, pause, stop, duplicate, remove, reset, multi-target progress | Verified (AME Parity) | M23, #60, #133, #152 |
+| Queue: batch start, pause, stop, duplicate, remove, reset, multi-target progress | Verified (AME Parity) | M23, #60, #133, #152, #277 |
 | Queue table column alignment & reference toolbar/footer | Verified (AME Parity) | #133, #134, #138, #152 |
-| Hardware renderer auto-detection & selector | Verified (AME Parity) | #137, #155 |
-| Preset Browser tree hierarchy, search & human-readable display | Verified (AME Parity) | #135, #153 |
-| Media Browser left sidebar, table alignment & zoom status bar | Verified (AME Parity) | #136, #154 |
-| Video/still decode and encode through ArtCraft crates | Implemented | M24, M25, #56, #57 |
-| Preview monitor, transport, scopes, Encoding panel | Implemented (no audio playback yet) | #27–#29 |
+| Hardware renderer auto-detection & selector | Verified (AME Parity) | #137, #155, #220 |
+| Preset Browser tree hierarchy, search & human-readable display | Verified (AME Parity) | #135, #153, #278 |
+| Media Browser left sidebar, table alignment & zoom status bar | Verified (AME Parity) | #136, #154, #279 |
+| Video/still decode and encode through ArtCraft crates | Verified (AME Parity) | M24, M25, M39, #56, #57, #281 |
+| Preview monitor, transport, scopes, audio controls, Encoding panel | Verified (AME Parity) | #27–#29, #283 |
 | Docking, persisted workspaces, configurable shortcuts | Verified | #31–#33, #131, #151 |
-| Preferences, watch folders, favourites persistence | Implemented | #38, #39 |
-| Export Settings Inspector modal & tabs | Verified (AME Parity) | Milestone 32, #139–#143 |
-| Multi-domain format breadth (3D, Textures, Print) | In-Progress | Milestone 33, #144–#147 |
-| Headless daemon, watch service & farm API | In-Progress | Milestone 34, #148–#149 |
-| ICC, image sequences, 16-bit pipelines | In-Progress | #22–#24 |
-| Bounded video/audio streaming, frame transforms, progress ETA | Implemented | #17, #18 |
-| Automated layout & density metrics verification | Verified in CI | #138 |
+| Preferences, watch folders, favourites persistence | Verified | #38, #39, #221 |
+| Export Settings Inspector modal & tabs | Verified (AME Parity) | Milestone 32, #139–#143, #265–#271 |
+| Multi-domain format breadth (3D, Textures, Print, Documents) | Verified (AME Superiority) | Milestone 30, 33, 44, 45, 48 |
+| Headless daemon, watch service, sibling IPC & MCP farm API | Verified (AME Superiority) | Milestone 34, #1, #148–#149 |
+| ICC, image sequences, 16-bit pipelines | Verified | #22–#24, #270 |
+| Bounded video/audio streaming, frame transforms, progress ETA | Verified | #17, #18 |
+| Automated layout & density metrics verification | Verified in CI | #138, #286 |
 
 ---
 

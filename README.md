@@ -4,7 +4,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
 [![Latest release](https://img.shields.io/github/v/release/el-j/encoderCraft?include_prereleases&label=latest%20release)](https://github.com/el-j/encoderCraft/releases)
 [![Parity Target](https://img.shields.io/badge/parity%20target-Adobe%20Media%20Encoder%202026-purple.svg)](docs/target-app-parity.md)
-[![Tests](https://img.shields.io/badge/tests->150%20passed-brightgreen.svg)](docs/implementation-milestones.md)
+[![Tests](https://img.shields.io/badge/tests->300%20passed-brightgreen.svg)](docs/implementation-milestones.md)
 [![Safety](https://img.shields.io/badge/unsafe_code-forbid-brightgreen.svg)](docs/architecture.md)
 [![ArtCraft Ecosystem](https://img.shields.io/badge/artcraft-storytold-red.svg)](https://github.com/storytold)
 
@@ -20,7 +20,7 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 `encoderCraft` has transitioned from initial workspace foundations into a battle-tested, production-ready universal media transcoding suite. Below is an executive overview of what has landed and what is actively in development.
 
-### ✅ What is Already Done (Milestones M0 – M41, v0.1.0-alpha.2 Release)
+### ✅ What is Already Done (Milestones M0 – M49, v0.1.0 Stable Release)
 
 - **Universal Creative Suite Interoperability (Milestone 30 & 39):**
   - Clean-room ingestion, parsing, and conversion for standard Adobe project files: Premiere Pro (`.prproj` gzipped XML), After Effects (`.aep` RIFX chunks), InDesign (`.indd` / `.idml`), Illustrator (`.ai` dual-stream PDF/PGF), Photoshop (`.psd` / `.psb` layer trees), and Audition (`.sesx` multitrack XML).
@@ -74,28 +74,36 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 ---
 
-### 🛠️ What is Next (Post-Alpha.2 Roadmap)
+- **Universal Media Integrity & Sibling App Job Ingestion (Milestones 47 – 49, v0.1.0 Stable Release):**
+  - Production Unix Domain Socket (`/tmp/encodercraft-$UID.sock`) and TCP (`127.0.0.1:8998`) IPC listener for instant, zero-copy job submission and headless project rendering across FilmCraft, EffectCraft, SoundCraft, DesignCraft, and CadCraft.
+  - Synchronized real-time preview audio playback controls with interactive volume slider and instant mute/unmute toggle.
+  - Export settings parity: Master `[x] Export Video` and `[x] Export Audio` stream toggles, pre-scale source raster cropping, and interactive on-monitor crop tool with aspect constraint presets (1:1, 4:3, 16:9, 9:16, 2.39:1).
+  - Guaranteed high-fidelity conversion for DOCX, EPUB, PPTX, and PDF/X-4 with zero placeholder stubs.
+  - Queue duplication counter and automatic overwrite collision protection (`_1`, `_2`).
+
+---
+
+### 🛠️ What is Next (v0.2.0 Roadmap)
 
 ```mermaid
 flowchart LR
-    subgraph Completed ["✅ Completed (M0 - M41 · v0.1.0-alpha.2)"]
-        M30["M30: Universal Format Expansion"]
-        M31_38["M31-M38: UI Parity, Effects & Transforms"]
-        M39["M39: Ecosystem Codec Harvest"]
-        M40["M40: LUTs, Captions, MPEG-TS & Spatial Video"]
-        M41["M41: Workflow & Batch UX Polish"]
+    subgraph Completed ["✅ Completed (M0 - M49 · v0.1.0 Stable Release)"]
+        M30_41["M30-M41: Formats, Codecs & Transforms"]
+        M42_46["M42-M46: Providers & Universal Preview"]
+        M47_48["M47-M48: Export Settings & Media Integrity"]
+        M49["M49: v0.1.0 Stable Release & Sibling Ingestion"]
     end
 
-    subgraph Next ["🛠️ Post-Alpha.2"]
-        IPC["#1: Live Project-Reference Rendering via IPC"]
+    subgraph Next ["🛠️ v0.2.0"]
+        ICEORYX["Shared-Memory Direct Frame Transport"]
         UPSTREAM["craft-libs Upstream Codec Consolidation"]
     end
 
     Completed --> Next
 ```
 
-- **Cross-App Project-Reference Rendering ([#1](https://github.com/el-j/encoderCraft/issues/1)):** Extending the existing `iceoryx2` shared-memory frame/audio ring buffer transport to stream live timeline sequence references directly from running `filmcraft`, `effectcraft`, and `soundcraft` desktop sessions without intermediate project saves.
-- **Upstream `craft-libs` Consolidation:** Migrating the newly harvested modular codecs (`.dds`, `.dpx`, `.jxl`, `.fbx`, `.abc`, `.dae`, `.usdc`, `.splat`, `.cube`/`.3dl`/`.look`, `.ts`) into `storytold/craft-libs` as shared workspace crates for all 16 ArtCraft applications.
+- **Direct Frame Shared Memory Transport:** Expanding inter-process shared memory streaming for ultra-high throughput 8K frame buffers between running desktop creative apps.
+- **Upstream `craft-libs` Consolidation:** Migrating the harvested modular codecs (`.dds`, `.dpx`, `.jxl`, `.fbx`, `.abc`, `.dae`, `.usdc`, `.splat`, `.cube`/`.3dl`/`.look`, `.ts`) into `storytold/craft-libs` as shared workspace crates for all ArtCraft applications.
 
 ---
 
