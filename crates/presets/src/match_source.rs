@@ -47,6 +47,12 @@ pub fn evaluate_preset(preset: &EncodingPreset, source: &MediaInfo, output_path:
             MatchSourceOr::Exact(layout) => layout,
         }),
         bitrate_kbps: settings.bitrate_kbps,
+        bit_depth: match settings.codec.as_str() {
+            "pcm_s16le" => Some(16),
+            "pcm_s24le" => Some(24),
+            "pcm_f32le" => Some(32),
+            _ => None,
+        },
         delay_ms: 0,
     });
 
@@ -66,11 +72,16 @@ pub fn evaluate_preset(preset: &EncodingPreset, source: &MediaInfo, output_path:
         }
     }
 
+    let export_video = preset.video.is_some() && preset.container.supports_video();
+    let export_audio = preset.audio.is_some() && preset.container.supports_audio();
+
     Ok(OutputTarget {
         target_id: format!("{}-target", preset.name.to_ascii_lowercase().replace(' ', "-")),
         output_path,
         preset_name: preset.name.clone(),
         container: preset.container,
+        export_video,
+        export_audio,
         custom_width,
         custom_height,
         custom_frame_rate,

@@ -411,6 +411,13 @@ impl TranscodePipeline {
             std::fs::write(&sidecar_path, xmp_packet.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write sidecar XMP: {e}")))?;
         }
 
+        // Parity with AME: If container supports video or audio, at least one stream must be enabled
+        if (target.container.supports_video() || target.container.supports_audio()) && !target.is_video_enabled() && !target.is_audio_enabled() {
+            return Err(EncoderError::InvalidJobSpec(
+                "Cannot export target: both 'Export Video' and 'Export Audio' are disabled. At least one stream must be enabled.".into(),
+            ));
+        }
+
         match target.container {
             ContainerType::Wave => self.execute_audio_wav(target, start_time)?,
             ContainerType::Flac => self.execute_audio_flac(target, start_time)?,
@@ -1680,6 +1687,9 @@ impl TranscodePipeline {
     }
 
     fn execute_video_mp4(&self, target: &OutputTarget, is_mov: bool, start_time: Instant) -> Result<(), EncoderError> {
+        if !target.is_video_enabled() {
+            return self.execute_audio_mp4(target, is_mov, start_time);
+        }
         let input = VideoInput::open(&self.spec.source, target)?;
         let dims = input.dims();
         let fps = input.fps();
@@ -1826,6 +1836,97 @@ impl TranscodePipeline {
             encodercraft_muxers::append_spatial_video_boxes(&mut file, spatial, &encoder.config_record())?;
         }
 
+        staged.commit()
+    }
+
+    fn execute_audio_mp4(&self, target: &OutputTarget, is_mov: bool, start_time: Instant) -> Result<(), EncoderError> {
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(staged.path())
+            .map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
+        let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
+
+        let codec = audio_codec(target).unwrap_or("aac");
+        let channels = u8::try_from(sample_buf.channel_count())
+            .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the encoder limit".into()))?;
+
+        let (codec_fourcc, bits_per_sample, codec_private, mut audio_encoder) = if codec.eq_ignore_ascii_case("aac") {
+            let aac_enc = AacEncoderWrapper::new(sample_buf.sample_rate, channels, aac_bitrate_bps(target)?)?;
+            (*b"mp4a", 16, aac_enc.audio_specific_config(), Mp4AudioEncoder::Aac(Box::new(aac_enc)))
+        } else if is_mov && codec.eq_ignore_ascii_case("pcm_s24le") {
+            (*b"lpcm", 24, Vec::new(), Mp4AudioEncoder::Pcm24Le)
+        } else {
+            return Err(EncoderError::UnsupportedCodec(format!("audio codec {codec} is not supported in this output container")));
+        };
+
+        let a_cfg =
+            AudioStreamConfig { codec_fourcc, sample_rate: sample_buf.sample_rate, layout: sample_buf.layout, bits_per_sample, codec_private };
+        let a_track_idx = mp4_muxer.add_audio_stream(&a_cfg)?;
+
+        let total_samples = sample_buf.samples_per_channel();
+        let chunk_size = 1024;
+        let mut offset = 0;
+        let mut next_pts = 0i64;
+
+        match &mut audio_encoder {
+            Mp4AudioEncoder::Aac(aac_encoder) => {
+                let mut write = |packets: Vec<Vec<u8>>, muxer: &mut Mp4Muxer<std::fs::File>| -> Result<(), EncoderError> {
+                    for pkt in &packets {
+                        muxer.write_audio_sample(a_track_idx, AudioSample { data: pkt, pts: next_pts, duration_ticks: 1024 })?;
+                        next_pts += 1024;
+                    }
+                    Ok(())
+                };
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    write(aac_encoder.encode_buffer(&window)?, &mut mp4_muxer)?;
+                    offset += count;
+                }
+                write(aac_encoder.flush()?, &mut mp4_muxer)?;
+            }
+            Mp4AudioEncoder::Pcm24Le => {
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    let data = encode_pcm_s24le(&window)?;
+                    let duration = u32::try_from(count)
+                        .map_err(|_| EncoderError::InvalidJobSpec("PCM audio sample window exceeds the MP4 duration limit".into()))?;
+                    mp4_muxer.write_audio_sample(a_track_idx, AudioSample { data: &data, pts: next_pts, duration_ticks: duration })?;
+                    next_pts = next_pts.saturating_add(i64::from(duration));
+                    offset += count;
+                }
+            }
+        }
+
+        mp4_muxer.finish(!is_mov)?;
+
+        if let Some(ref meta) = target.metadata {
+            let xmp_packet = meta.to_xmp_packet();
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(staged.path())
+                .map_err(|e| EncoderError::Io(format!("failed to open MP4 for XMP embedding: {e}")))?;
+            encodercraft_muxers::append_xmp_uuid_box(&mut file, &xmp_packet)?;
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
         staged.commit()
     }
 
@@ -2011,6 +2112,9 @@ impl TranscodePipeline {
     }
 
     fn execute_video_mkv(&self, target: &OutputTarget, is_webm: bool, start_time: Instant) -> Result<(), EncoderError> {
+        if !target.is_video_enabled() {
+            return self.execute_audio_mkv(target, is_webm, start_time);
+        }
         let input = VideoInput::open(&self.spec.source, target)?;
         let dims = input.dims();
         let fps = input.fps();
@@ -2198,6 +2302,136 @@ impl TranscodePipeline {
         let mut finished = mkv_muxer.finish()?;
         std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush MKV file: {e}")))?;
         drop(finished);
+        staged.commit()
+    }
+
+    fn execute_audio_mkv(&self, target: &OutputTarget, is_webm: bool, start_time: Instant) -> Result<(), EncoderError> {
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = File::create(staged.path()).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
+        let writer = BufWriter::new(out_file);
+        let mut builder = MkvMuxerBuilder::new(writer, is_webm);
+
+        let configured_codec = audio_codec(target);
+        if is_webm
+            && let Some(codec) = configured_codec
+            && !codec.eq_ignore_ascii_case("opus")
+        {
+            return Err(EncoderError::UnsupportedCodec(format!("WebM does not support audio codec {codec}")));
+        }
+        let use_opus = is_webm || configured_codec.is_some_and(|codec| codec.eq_ignore_ascii_case("opus"));
+
+        let channels = u8::try_from(sample_buf.channel_count())
+            .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the encoder limit".into()))?;
+
+        let (mut audio_encoder, audio_track) = if use_opus {
+            let encoder = OpusEncoder::new(channels, opus_bitrate_bps(target, usize::from(channels))?);
+            let a_cfg = AudioStreamConfig {
+                codec_fourcc: *b"Opus",
+                sample_rate: 48_000,
+                layout: sample_buf.layout,
+                bits_per_sample: 16,
+                codec_private: encoder.opus_head(),
+            };
+            let track = builder.add_audio_stream(&a_cfg)?;
+            (MatroskaAudioEncoder::Opus(Box::new(encoder)), track)
+        } else {
+            let codec = configured_codec.unwrap_or("aac");
+            if !codec.eq_ignore_ascii_case("aac") {
+                return Err(EncoderError::UnsupportedCodec(format!("Matroska audio codec {codec} is not supported")));
+            }
+            let aac_enc = AacEncoderWrapper::new(sample_buf.sample_rate, channels, aac_bitrate_bps(target)?)?;
+            let a_cfg = AudioStreamConfig {
+                codec_fourcc: *b"mp4a",
+                sample_rate: sample_buf.sample_rate,
+                layout: sample_buf.layout,
+                bits_per_sample: 16,
+                codec_private: aac_enc.audio_specific_config(),
+            };
+            let track = builder.add_audio_stream(&a_cfg)?;
+            (MatroskaAudioEncoder::Aac(Box::new(aac_enc)), track)
+        };
+
+        let mut mkv_muxer = builder.build()?;
+        let total_samples = sample_buf.samples_per_channel();
+        let chunk_size = 1024;
+        let mut offset = 0;
+
+        match &mut audio_encoder {
+            MatroskaAudioEncoder::Aac(aac_encoder) => {
+                let rate = f64::from(sample_buf.sample_rate);
+                let duration = (1024.0 * 1_000_000.0 / rate).round() as u32;
+                let mut idx = 0u64;
+                let mut write = |packets: Vec<Vec<u8>>, muxer: &mut encodercraft_muxers::MkvMuxer<BufWriter<File>>| -> Result<(), EncoderError> {
+                    for pkt in &packets {
+                        let pts = (idx as f64 * 1024.0 * 1_000_000.0 / rate).round() as i64;
+                        muxer.write_audio_sample(audio_track, AudioSample { data: pkt, pts, duration_ticks: duration })?;
+                        idx += 1;
+                    }
+                    Ok(())
+                };
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    write(aac_encoder.encode_buffer(&window)?, &mut mkv_muxer)?;
+                    offset += count;
+                }
+                write(aac_encoder.flush()?, &mut mkv_muxer)?;
+            }
+            MatroskaAudioEncoder::Opus(opus_encoder) => {
+                let ch_count = sample_buf.channel_count();
+                let frame_len = OpusEncoder::FRAME_SIZE
+                    .checked_mul(ch_count)
+                    .ok_or_else(|| EncoderError::Internal("overflow calculating Opus frame size".into()))?;
+                let frame_samples = u64::try_from(OpusEncoder::FRAME_SIZE)
+                    .map_err(|_| EncoderError::Internal("Opus frame size exceeds the timestamp limit".into()))?;
+                let frame_duration = u32::try_from(samples_to_micros(frame_samples)?)
+                    .map_err(|_| EncoderError::Internal("Opus packet duration exceeds the container limit".into()))?;
+                let mut pending = Vec::with_capacity(frame_len);
+                let mut next_sample = 0u64;
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    for packet in encode_opus_buffer(opus_encoder, &window, &mut pending)? {
+                        let pts = samples_to_micros(next_sample)?;
+                        mkv_muxer.write_audio_sample(audio_track, AudioSample { data: &packet, pts, duration_ticks: frame_duration })?;
+                        next_sample =
+                            next_sample.checked_add(frame_samples).ok_or_else(|| EncoderError::Internal("Opus sample timeline overflow".into()))?;
+                    }
+                    offset += count;
+                }
+                if pending.len() % ch_count != 0 {
+                    return Err(EncoderError::Internal("incomplete interleaved Opus sample group".into()));
+                }
+                let remaining_samples = pending.len() / ch_count;
+                if remaining_samples > 0 {
+                    pending.resize(frame_len, 0.0);
+                    let packet = opus_encoder.encode_float(&pending);
+                    let pts = samples_to_micros(next_sample)?;
+                    let duration = u32::try_from(samples_to_micros(
+                        u64::try_from(remaining_samples).map_err(|_| EncoderError::Internal("Opus tail exceeds the timestamp limit".into()))?,
+                    )?)
+                    .map_err(|_| EncoderError::Internal("Opus tail duration exceeds the container limit".into()))?;
+                    mkv_muxer.write_audio_sample(audio_track, AudioSample { data: &packet, pts, duration_ticks: duration })?;
+                }
+            }
+        }
+
+        let mut finished = mkv_muxer.finish()?;
+        std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush MKV file: {e}")))?;
+        drop(finished);
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
         staged.commit()
     }
 

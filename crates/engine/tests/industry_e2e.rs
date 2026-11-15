@@ -181,6 +181,7 @@ fn test_queue_scheduler_lifecycle_and_multitarget_e2e() {
                     sample_rate: Some(48_000),
                     layout: Some(ChannelLayout::Stereo),
                     bitrate_kbps: None,
+                    bit_depth: Some(24),
                     delay_ms: 0,
                 }),
                 ..Default::default()
@@ -195,6 +196,7 @@ fn test_queue_scheduler_lifecycle_and_multitarget_e2e() {
                     sample_rate: Some(48_000),
                     layout: Some(ChannelLayout::Stereo),
                     bitrate_kbps: Some(320),
+                    bit_depth: None,
                     delay_ms: -20, // 20ms audio advance
                 }),
                 ..Default::default()

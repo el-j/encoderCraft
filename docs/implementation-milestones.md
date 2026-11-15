@@ -902,6 +902,25 @@ Tracked under GitHub [M46 — User-Installable Codec Providers](https://github.c
 
 ---
 
+### Milestone 47: Export Settings Parity: Audio Configuration, Stream Toggles, Cropping & Multi-Format Controls
+
+**Objective:** Achieve complete parity with Adobe Media Encoder 2026 for export settings: master `[x] Export Video` and `[x] Export Audio` stream toggles, true pre-scaling source raster cropping, interactive on-monitor crop tool with aspect constraint presets, interactive persistent audio parameter controls, multi-format audio-only pipeline execution (MP4/M4A/MKV/WebM), still image quality, advanced video rate controls, and queue/inspector synchronization.
+
+Tracked under GitHub [M47 — Export Settings Parity: Audio Configuration, Stream Toggles, Cropping & Multi-Format Controls](https://github.com/el-j/encoderCraft/milestone/25) addressing issues [#260](https://github.com/el-j/encoderCraft/issues/260) and [#265](https://github.com/el-j/encoderCraft/issues/265)–[#271](https://github.com/el-j/encoderCraft/issues/271).
+
+#### Deliverables & Sub-Tasks:
+1. [x] **M47.1: Master Stream Export Toggles ([#265](https://github.com/el-j/encoderCraft/issues/265))** — Added `export_video` and `export_audio` master stream checkboxes to `OutputTarget`, enforced stream gating in pipeline execution (`is_video_enabled()`, `is_audio_enabled()`), and dynamically filtered inspector tabs (`Video` hidden when video disabled; `Audio` and `Loudness` hidden when audio disabled).
+2. [x] **M47.2: Pre-Scale Source Raster Cropping ([#266](https://github.com/el-j/encoderCraft/issues/266))** — Implemented true subregion raster cropping in `FrameScaler` (`scale_cropped` and `scale_cropped_into`) prior to scaling and letterboxing/pillarboxing, replacing obsolete margin painting.
+3. [x] **M47.3: Interactive Preview Monitor Crop Tool ([#267](https://github.com/el-j/encoderCraft/issues/267))** — Added interactive `✂ Crop Tool` toggle in preview monitor, with rule-of-thirds grid lines, translucent mask outside crop box, corner drag handles, and aspect constraint presets (`1:1`, `4:3`, `16:9`, `9:16`, `2.39:1`, `Custom`).
+4. [x] **M47.4: Dynamic Interactive Audio Parameters & Persistence ([#268](https://github.com/el-j/encoderCraft/issues/268))** — Replaced static audio text with interactive dropdowns for codec selection (container capability filtered), sample rate (44.1k to 192k), channel layout (Mono to 7.1), lossy bitrate (64-512 kbps), bit depth (16, 24, 32-bit float), lip-sync delay, and format-specific options (BWF BEXT, RF64, FLAC compression, Joint Stereo).
+5. [x] **M47.5: Multi-Format Audio-Only Pipeline Support ([#269](https://github.com/el-j/encoderCraft/issues/269))** — Implemented `execute_audio_mp4` and `execute_audio_mkv` to support direct audio-only stream extraction into MP4/M4A and MKV/WebM containers from video, audio, and DAW project sources.
+6. [x] **M47.6: Still Image & Advanced Video Rate Controls ([#270](https://github.com/el-j/encoderCraft/issues/270))** — Added still image quality slider (1-100) for JPEG/WebP/JXL, keyframe interval (GOP) drag value, consecutive B-frames, codec profile dropdown, and pixel format depth options.
+7. [x] **M47.7: Queue & Preset Synchronization ([#271](https://github.com/el-j/encoderCraft/issues/271))** — Ensured bidirectional synchronization of stream capabilities (`export_video`, `export_audio`), presets, and audio settings when modifying containers across the queue panel and inspector.
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use egui::{ColorImage, RichText, TextureHandle, Ui, Window};
 use encodercraft_core::{
-    CaptionExportFormat, ContainerType, CraftJobSpec, DeinterlaceMode, FlipMode, FrameRateMode, MediaStreamKind, OutputTarget, OverlayAnchor,
-    Rational64, Rotation, ScalingFilter, SourceDescriptor, SourceSelection, VideoLimiterClipLevel,
+    CaptionExportFormat, ChannelLayout, ContainerType, CraftJobSpec, DeinterlaceMode, FlipMode, FrameRateMode, MediaStreamKind, OutputTarget,
+    OverlayAnchor, Rational64, Rotation, ScalingFilter, SourceDescriptor, SourceSelection, VideoLimiterClipLevel,
 };
 use encodercraft_geom::ScaleMode;
 use encodercraft_pipeline::SourceInventory;
@@ -54,9 +54,8 @@ impl InspectorTab {
     }
 }
 
-/// Tabs for a job: source-specific pickers first, then the tabs relevant to the output container.
-/// Domains without video or audio hide those tabs.
-pub fn visible_tabs(source: Option<ContainerType>, target: ContainerType) -> Vec<InspectorTab> {
+/// Tabs for a job: source-specific pickers first, then the tabs relevant to the output container and stream toggles (AME Parity).
+pub fn visible_tabs_for_target(source: Option<ContainerType>, target: &OutputTarget) -> Vec<InspectorTab> {
     use InspectorTab::*;
     let mut tabs = Vec::new();
     match source.map(|c| c.media_kind()) {
@@ -66,15 +65,50 @@ pub fn visible_tabs(source: Option<ContainerType>, target: ContainerType) -> Vec
         Some(MediaStreamKind::LayeredComposite) => tabs.push(Layers),
         _ => {}
     }
-    match target.media_kind() {
-        MediaStreamKind::AudioOnly => tabs.extend([Audio, Loudness, Publish, Metadata]),
-        MediaStreamKind::StillImage | MediaStreamKind::LayeredComposite => tabs.extend([Video, Effects, Publish, Metadata]),
-        MediaStreamKind::Vector2D | MediaStreamKind::Document | MediaStreamKind::Spatial3D | MediaStreamKind::Cad2D => {
-            tabs.extend([Publish, Metadata])
+    match target.container.media_kind() {
+        MediaStreamKind::AudioOnly => {
+            if target.export_audio {
+                tabs.extend([Audio, Loudness]);
+            }
+            tabs.extend([Publish, Metadata]);
         }
-        _ => tabs.extend([Video, Audio, Effects, Captions, Publish, Loudness, Metadata]),
+        MediaStreamKind::StillImage | MediaStreamKind::LayeredComposite => {
+            tabs.push(Video);
+            tabs.extend([Effects, Publish, Metadata]);
+        }
+        MediaStreamKind::Vector2D | MediaStreamKind::Document | MediaStreamKind::Spatial3D | MediaStreamKind::Cad2D => {
+            tabs.extend([Publish, Metadata]);
+        }
+        _ => {
+            if target.export_video {
+                tabs.push(Video);
+            }
+            if target.export_audio {
+                tabs.push(Audio);
+            }
+            tabs.extend([Effects, Captions, Publish]);
+            if target.export_audio {
+                tabs.push(Loudness);
+            }
+            tabs.push(Metadata);
+        }
+    }
+    if tabs.is_empty() {
+        tabs.push(Metadata);
     }
     tabs
+}
+
+/// Tabs for a job: source-specific pickers first, then the tabs relevant to the output container.
+/// Domains without video or audio hide those tabs.
+pub fn visible_tabs(source: Option<ContainerType>, target: ContainerType) -> Vec<InspectorTab> {
+    let dummy = OutputTarget {
+        container: target,
+        export_video: target.supports_video() || matches!(target.media_kind(), MediaStreamKind::StillImage | MediaStreamKind::LayeredComposite),
+        export_audio: target.supports_audio(),
+        ..Default::default()
+    };
+    visible_tabs_for_target(source, &dummy)
 }
 
 /// Whether the source holds structure (sequences, pages, layers) rather than plain media, so it is worth inspecting.
@@ -150,6 +184,56 @@ pub fn destination_options(source: Option<ContainerType>) -> Vec<(ContainerType,
     }
 }
 
+/// Default audio codec for an output container (AME Parity).
+pub fn default_audio_codec_for_container(c: ContainerType) -> &'static str {
+    match c {
+        ContainerType::Wave => "pcm_s24le",
+        ContainerType::Aiff => "pcm_s24be",
+        ContainerType::Flac => "flac",
+        ContainerType::Mp3 => "mp3",
+        ContainerType::OggAudio => "vorbis",
+        ContainerType::Opus | ContainerType::WebM => "opus",
+        ContainerType::Caf => "lpcm",
+        _ => "aac",
+    }
+}
+
+/// Available audio codecs for an output container format (AME Parity).
+pub fn audio_codecs_for_container(container: ContainerType) -> &'static [(&'static str, &'static str)] {
+    match container {
+        ContainerType::IsoBmffMp4 => &[("aac", "AAC-LC (Advanced Audio Coding)")],
+        ContainerType::QuickTimeMov => &[
+            ("aac", "AAC-LC (Advanced Audio Coding)"),
+            ("pcm_s24le", "Uncompressed Linear PCM (24-bit)"),
+            ("pcm_s16le", "Uncompressed Linear PCM (16-bit)"),
+            ("alac", "Apple Lossless Audio (ALAC)"),
+        ],
+        ContainerType::MatroskaMkv => &[
+            ("opus", "Ogg Opus (RFC 7845)"),
+            ("aac", "AAC-LC (Advanced Audio Coding)"),
+            ("flac", "Free Lossless Audio Codec (FLAC)"),
+            ("pcm_s24le", "Linear PCM (24-bit)"),
+        ],
+        ContainerType::WebM => &[("opus", "Ogg Opus (RFC 7845)"), ("vorbis", "Ogg Vorbis")],
+        ContainerType::Wave => &[
+            ("pcm_s24le", "Uncompressed PCM (24-bit Broadcast Wave)"),
+            ("pcm_s16le", "Uncompressed PCM (16-bit CD Standard)"),
+            ("pcm_f32le", "32-bit Floating Point PCM"),
+        ],
+        ContainerType::Aiff => &[
+            ("pcm_s24be", "Uncompressed PCM Big-Endian (24-bit)"),
+            ("pcm_s16be", "Uncompressed PCM Big-Endian (16-bit)"),
+            ("pcm_f32be", "32-bit Float PCM Big-Endian"),
+        ],
+        ContainerType::Flac => &[("flac", "Free Lossless Audio Codec (FLAC)")],
+        ContainerType::Mp3 => &[("mp3", "MPEG Audio Layer 3 (MP3)")],
+        ContainerType::OggAudio => &[("vorbis", "Ogg Vorbis Audio"), ("opus", "Ogg Opus Audio"), ("flac", "Ogg FLAC Lossless")],
+        ContainerType::Opus => &[("opus", "Ogg Opus Interactive Audio")],
+        ContainerType::Caf => &[("lpcm", "Apple Core Audio Linear PCM"), ("alac", "Apple Lossless (ALAC)"), ("aac", "AAC-LC")],
+        _ => &[("aac", "AAC-LC (Advanced Audio Coding)"), ("pcm_s24le", "Linear PCM 24-bit")],
+    }
+}
+
 /// Preview monitor tab mode within the Export Settings dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewTabMode {
@@ -157,6 +241,42 @@ pub enum PreviewTabMode {
     Source,
     Output,
     Compare,
+}
+
+/// Interactive preview crop aspect ratio constraint presets (AME Parity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CropAspectPreset {
+    #[default]
+    Custom,
+    Square1x1,
+    Standard4x3,
+    Widescreen16x9,
+    Vertical9x16,
+    Anamorphic239x1,
+}
+
+impl CropAspectPreset {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Custom => "Custom",
+            Self::Square1x1 => "1:1 Square",
+            Self::Standard4x3 => "4:3 Standard",
+            Self::Widescreen16x9 => "16:9 Widescreen",
+            Self::Vertical9x16 => "9:16 Vertical (Reels/TikTok)",
+            Self::Anamorphic239x1 => "2.39:1 Cinemascope",
+        }
+    }
+
+    pub fn ratio(&self) -> Option<f32> {
+        match self {
+            Self::Custom => None,
+            Self::Square1x1 => Some(1.0),
+            Self::Standard4x3 => Some(4.0 / 3.0),
+            Self::Widescreen16x9 => Some(16.0 / 9.0),
+            Self::Vertical9x16 => Some(9.0 / 16.0),
+            Self::Anamorphic239x1 => Some(2.39),
+        }
+    }
 }
 
 /// State for the inspector settings modal.
@@ -173,6 +293,8 @@ pub struct InspectorState {
     pub preview_frame_idx: u64,
     pub preview_frame_count: u64,
     pub aspect_ratio_locked: bool,
+    pub crop_interactive: bool,
+    pub crop_aspect_preset: CropAspectPreset,
     pub video_bitrate_mode: String,
     pub audio_sample_rate_idx: usize,
     pub audio_channels_idx: usize,
@@ -198,6 +320,8 @@ impl Default for InspectorState {
             preview_frame_idx: 0,
             preview_frame_count: 100,
             aspect_ratio_locked: true,
+            crop_interactive: false,
+            crop_aspect_preset: CropAspectPreset::Custom,
             video_bitrate_mode: "VBR 1-Pass".into(),
             audio_sample_rate_idx: 1, // 48,000 Hz
             audio_channels_idx: 1,    // Stereo (2.0)
@@ -352,6 +476,53 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut Cr
         ui.selectable_value(&mut state.preview_tab, PreviewTabMode::Output, "Output");
         ui.selectable_value(&mut state.preview_tab, PreviewTabMode::Compare, "Split Compare");
 
+        ui.add_space(6.0);
+        ui.separator();
+        ui.add_space(6.0);
+
+        // Interactive Source Cropping Tool (AME Parity: Source Crop Tool)
+        let crop_active = state.crop_interactive;
+        if ui.selectable_label(crop_active, "✂ Crop Tool").clicked() {
+            state.crop_interactive = !state.crop_interactive;
+            if state.crop_interactive {
+                state.preview_tab = PreviewTabMode::Source;
+                if let Some(target) = spec.targets.first_mut() {
+                    let crop_cfg = target.crop.get_or_insert_with(Default::default);
+                    crop_cfg.enabled = true;
+                }
+            }
+        }
+
+        if state.crop_interactive {
+            egui::ComboBox::from_id_salt("inspector_crop_aspect_combo").selected_text(state.crop_aspect_preset.label()).width(90.0).show_ui(
+                ui,
+                |ui| {
+                    for preset in [
+                        CropAspectPreset::Custom,
+                        CropAspectPreset::Square1x1,
+                        CropAspectPreset::Standard4x3,
+                        CropAspectPreset::Widescreen16x9,
+                        CropAspectPreset::Vertical9x16,
+                        CropAspectPreset::Anamorphic239x1,
+                    ] {
+                        if ui.selectable_label(state.crop_aspect_preset == preset, preset.label()).clicked() {
+                            state.crop_aspect_preset = preset;
+                            if let (Some(ratio), Some(probe), Some(target)) = (preset.ratio(), &state.preview_probe, spec.targets.first_mut())
+                                && let Some(ref v) = probe.video
+                            {
+                                let src_w = v.width as f32;
+                                let src_h = v.height as f32;
+                                let (cw, ch) = if src_w / src_h > ratio { (src_h * ratio, src_h) } else { (src_w, src_w / ratio) };
+                                let px = ((src_w - cw) / 2.0).round().max(0.0) as u32;
+                                let py = ((src_h - ch) / 2.0).round().max(0.0) as u32;
+                                target.crop = Some(encodercraft_core::CropConfig { enabled: true, left: px, right: px, top: py, bottom: py });
+                            }
+                        }
+                    }
+                },
+            );
+        }
+
         if let Some(ref probe) = state.preview_probe
             && let Some(ref v) = probe.video
         {
@@ -412,6 +583,93 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut Cr
                     egui::FontId::proportional(10.0),
                     tokens.accent_primary,
                 );
+            }
+
+            // Interactive Crop Box & Rule-of-Thirds Grid Overlay
+            if (state.crop_interactive || state.preview_tab == PreviewTabMode::Source)
+                && let Some(target) = spec.targets.first()
+                && let Some(crop_cfg) = &target.crop
+                && crop_cfg.enabled
+            {
+                let (src_w, src_h) = state
+                    .preview_probe
+                    .as_ref()
+                    .and_then(|p| p.video.as_ref())
+                    .map(|v| (v.width as f32, v.height as f32))
+                    .unwrap_or((1920.0, 1080.0));
+
+                let scale_x = rect.width() / src_w.max(1.0);
+                let scale_y = rect.height() / src_h.max(1.0);
+
+                let crop_rect = egui::Rect::from_min_max(
+                    egui::pos2(
+                        (rect.min.x + (crop_cfg.left as f32 * scale_x)).min(rect.max.x),
+                        (rect.min.y + (crop_cfg.top as f32 * scale_y)).min(rect.max.y),
+                    ),
+                    egui::pos2(
+                        (rect.max.x - (crop_cfg.right as f32 * scale_x)).max(rect.min.x),
+                        (rect.max.y - (crop_cfg.bottom as f32 * scale_y)).max(rect.min.y),
+                    ),
+                );
+
+                if crop_rect.is_positive() {
+                    let mask_color = egui::Color32::from_black_alpha(150);
+                    // Dim surrounding areas
+                    painter.rect_filled(egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, crop_rect.min.y)), 0.0, mask_color);
+                    painter.rect_filled(egui::Rect::from_min_max(egui::pos2(rect.min.x, crop_rect.max.y), rect.max), 0.0, mask_color);
+                    painter.rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(rect.min.x, crop_rect.min.y), egui::pos2(crop_rect.min.x, crop_rect.max.y)),
+                        0.0,
+                        mask_color,
+                    );
+                    painter.rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(crop_rect.max.x, crop_rect.min.y), egui::pos2(rect.max.x, crop_rect.max.y)),
+                        0.0,
+                        mask_color,
+                    );
+
+                    // Crop border
+                    painter.rect_stroke(crop_rect, 0.0, egui::Stroke::new(1.5, egui::Color32::WHITE), egui::StrokeKind::Inside);
+
+                    // Rule of thirds grid
+                    let grid_stroke = egui::Stroke::new(0.5, egui::Color32::from_white_alpha(90));
+                    let tw = crop_rect.width() / 3.0;
+                    let th = crop_rect.height() / 3.0;
+                    painter.line_segment(
+                        [egui::pos2(crop_rect.min.x + tw, crop_rect.min.y), egui::pos2(crop_rect.min.x + tw, crop_rect.max.y)],
+                        grid_stroke,
+                    );
+                    painter.line_segment(
+                        [egui::pos2(crop_rect.min.x + 2.0 * tw, crop_rect.min.y), egui::pos2(crop_rect.min.x + 2.0 * tw, crop_rect.max.y)],
+                        grid_stroke,
+                    );
+                    painter.line_segment(
+                        [egui::pos2(crop_rect.min.x, crop_rect.min.y + th), egui::pos2(crop_rect.max.x, crop_rect.min.y + th)],
+                        grid_stroke,
+                    );
+                    painter.line_segment(
+                        [egui::pos2(crop_rect.min.x, crop_rect.min.y + 2.0 * th), egui::pos2(crop_rect.max.x, crop_rect.min.y + 2.0 * th)],
+                        grid_stroke,
+                    );
+
+                    // Corner brackets
+                    let bracket_len = 8.0;
+                    let bracket_stroke = egui::Stroke::new(2.5, tokens.accent_primary);
+                    // TL
+                    painter.line_segment([crop_rect.min, crop_rect.min + egui::vec2(bracket_len, 0.0)], bracket_stroke);
+                    painter.line_segment([crop_rect.min, crop_rect.min + egui::vec2(0.0, bracket_len)], bracket_stroke);
+                    // TR
+                    let tr = egui::pos2(crop_rect.max.x, crop_rect.min.y);
+                    painter.line_segment([tr, tr + egui::vec2(-bracket_len, 0.0)], bracket_stroke);
+                    painter.line_segment([tr, tr + egui::vec2(0.0, bracket_len)], bracket_stroke);
+                    // BL
+                    let bl = egui::pos2(crop_rect.min.x, crop_rect.max.y);
+                    painter.line_segment([bl, bl + egui::vec2(bracket_len, 0.0)], bracket_stroke);
+                    painter.line_segment([bl, bl + egui::vec2(0.0, -bracket_len)], bracket_stroke);
+                    // BR
+                    painter.line_segment([crop_rect.max, crop_rect.max + egui::vec2(-bracket_len, 0.0)], bracket_stroke);
+                    painter.line_segment([crop_rect.max, crop_rect.max + egui::vec2(0.0, -bracket_len)], bracket_stroke);
+                }
             }
 
             // Output / Compare active effects badges
@@ -480,6 +738,33 @@ fn render_preview_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut Cr
             });
         }
     });
+
+    // If crop tool is active, display the interactive margin sliders below monitor
+    if state.crop_interactive
+        && let Some(target) = spec.targets.first_mut()
+    {
+        let mut crop_cfg = target.crop.unwrap_or_default();
+        crop_cfg.enabled = true;
+        ui.add_space(3.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Margins:").small().strong());
+            ui.label(RichText::new("L:").small());
+            ui.add(egui::DragValue::new(&mut crop_cfg.left).range(0..=3840).speed(1));
+            ui.label(RichText::new("T:").small());
+            ui.add(egui::DragValue::new(&mut crop_cfg.top).range(0..=2160).speed(1));
+            ui.label(RichText::new("R:").small());
+            ui.add(egui::DragValue::new(&mut crop_cfg.right).range(0..=3840).speed(1));
+            ui.label(RichText::new("B:").small());
+            ui.add(egui::DragValue::new(&mut crop_cfg.bottom).range(0..=2160).speed(1));
+            if ui.small_button("Reset").clicked() {
+                crop_cfg.left = 0;
+                crop_cfg.top = 0;
+                crop_cfg.right = 0;
+                crop_cfg.bottom = 0;
+            }
+            target.crop = Some(crop_cfg);
+        });
+    }
 
     ui.add_space(6.0);
 
@@ -581,6 +866,25 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
                     let mut p = target.output_path.clone();
                     p.set_extension(ext);
                     target.output_path = p;
+                    target.export_video = c.supports_video();
+                    target.export_audio = c.supports_audio();
+                    if target.export_audio && target.audio.is_none() {
+                        let def = default_audio_codec_for_container(*c);
+                        target.audio = Some(encodercraft_core::AudioEncodeSettings {
+                            codec: Some(def.to_string()),
+                            sample_rate: Some(48_000),
+                            layout: Some(ChannelLayout::Stereo),
+                            bitrate_kbps: if def.starts_with("pcm") { None } else { Some(320) },
+                            bit_depth: if def == "pcm_s24le" {
+                                Some(24)
+                            } else if def == "pcm_s16le" {
+                                Some(16)
+                            } else {
+                                None
+                            },
+                            delay_ms: 0,
+                        });
+                    }
                 }
             }
         });
@@ -627,11 +931,52 @@ fn render_settings_section(ui: &mut Ui, state: &mut InspectorState, spec: &mut C
         }
     });
 
+    ui.add_space(4.0);
+
+    // Master Stream Toggles (AME Parity: [x] Export Video, [x] Export Audio)
+    let video_supported = target.container.supports_video();
+    let audio_supported = target.container.supports_audio();
+
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(video_supported, |ui| {
+            let mut v = target.export_video;
+            if ui.checkbox(&mut v, RichText::new("Export Video").strong()).changed() {
+                target.export_video = v;
+            }
+        });
+
+        ui.add_space(20.0);
+
+        ui.add_enabled_ui(audio_supported, |ui| {
+            let mut a = target.export_audio;
+            if ui.checkbox(&mut a, RichText::new("Export Audio").strong()).changed() {
+                target.export_audio = a;
+                if target.export_audio && target.audio.is_none() {
+                    let def = default_audio_codec_for_container(target.container);
+                    target.audio = Some(encodercraft_core::AudioEncodeSettings {
+                        codec: Some(def.to_string()),
+                        sample_rate: Some(48_000),
+                        layout: Some(ChannelLayout::Stereo),
+                        bitrate_kbps: if def.starts_with("pcm") { None } else { Some(320) },
+                        bit_depth: if def == "pcm_s24le" {
+                            Some(24)
+                        } else if def == "pcm_s16le" {
+                            Some(16)
+                        } else {
+                            None
+                        },
+                        delay_ms: 0,
+                    });
+                }
+            }
+        });
+    });
+
     ui.add_space(6.0);
     ui.separator();
 
     // Tabs
-    let tabs = visible_tabs(source, target.container);
+    let tabs = visible_tabs_for_target(source, target);
     if !tabs.contains(&state.active_tab)
         && let Some(first) = tabs.first()
     {
@@ -743,6 +1088,32 @@ fn render_layers_tab(ui: &mut Ui, title: &str, selection: &mut SourceSelection, 
 }
 
 fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut InspectorState) {
+    if target.container.media_kind().is_image()
+        || matches!(
+            target.container,
+            ContainerType::Jpeg
+                | ContainerType::WebP
+                | ContainerType::Jxl
+                | ContainerType::Png
+                | ContainerType::Tiff
+                | ContainerType::OpenExr
+                | ContainerType::Bmp
+        )
+    {
+        ui.heading("Still Image Settings");
+        ui.add_space(4.0);
+
+        let mut quality = target.image_quality.unwrap_or(90);
+        ui.horizontal(|ui| {
+            ui.label("Image Quality (1-100):");
+            if ui.add(egui::Slider::new(&mut quality, 1..=100)).changed() {
+                target.image_quality = Some(quality);
+            }
+        });
+        ui.add_space(6.0);
+        ui.separator();
+    }
+
     ui.heading("Basic Video Settings");
     ui.add_space(4.0);
 
@@ -949,16 +1320,25 @@ fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
     ui.add_space(6.0);
     ui.separator();
 
-    // Bitrate Settings (CBR, VBR 1-Pass, VBR 2-Pass)
+    // Bitrate Settings (CBR, VBR 1-Pass, VBR 2-Pass, Constant Quality)
     ui.heading("Bitrate Settings");
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
         ui.label("Bitrate Encoding:");
         egui::ComboBox::from_id_salt("inspector_bitrate_mode_combo").selected_text(&state.video_bitrate_mode).show_ui(ui, |ui| {
-            ui.selectable_value(&mut state.video_bitrate_mode, "VBR 1-Pass".into(), "VBR, 1 Pass");
-            ui.selectable_value(&mut state.video_bitrate_mode, "VBR 2-Pass".into(), "VBR, 2 Pass");
-            ui.selectable_value(&mut state.video_bitrate_mode, "CBR".into(), "CBR (Constant Bitrate)");
+            if ui.selectable_value(&mut state.video_bitrate_mode, "VBR 1-Pass".into(), "VBR, 1 Pass").clicked() {
+                target.video.rate_mode = encodercraft_core::RateMode::Vbr;
+            }
+            if ui.selectable_value(&mut state.video_bitrate_mode, "VBR 2-Pass".into(), "VBR, 2 Pass").clicked() {
+                target.video.rate_mode = encodercraft_core::RateMode::Vbr;
+            }
+            if ui.selectable_value(&mut state.video_bitrate_mode, "CBR".into(), "CBR (Constant Bitrate)").clicked() {
+                target.video.rate_mode = encodercraft_core::RateMode::Cbr;
+            }
+            if ui.selectable_value(&mut state.video_bitrate_mode, "Constant Quality".into(), "Constant Quality").clicked() {
+                target.video.rate_mode = encodercraft_core::RateMode::ConstantQuality;
+            }
         });
     });
 
@@ -975,6 +1355,101 @@ fn render_video_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
     ui.add_space(6.0);
     ui.separator();
 
+    // Advanced Video Settings
+    ui.heading("Advanced Video Settings");
+    ui.add_space(4.0);
+
+    // Keyframe Distance (GOP)
+    let mut gop = target.video.keyframe_interval.unwrap_or(24);
+    ui.horizontal(|ui| {
+        ui.label("Keyframe Distance (GOP):");
+        if ui.add(egui::DragValue::new(&mut gop).range(1..=300).suffix(" frames")).changed() {
+            target.video.keyframe_interval = Some(gop);
+        }
+    });
+
+    // B-Frames
+    let mut bframes = target.video.bframes.unwrap_or(3);
+    ui.horizontal(|ui| {
+        ui.label("Consecutive B-Frames:");
+        if ui.add(egui::DragValue::new(&mut bframes).range(0..=16)).changed() {
+            target.video.bframes = Some(bframes);
+        }
+    });
+
+    // Codec Profile
+    let current_profile = target.video.profile.clone().unwrap_or_else(|| "high".to_string());
+    ui.horizontal(|ui| {
+        ui.label("Profile:");
+        egui::ComboBox::from_id_salt("inspector_video_profile_combo").selected_text(&current_profile).show_ui(ui, |ui| {
+            for (prof_id, prof_label) in [
+                ("baseline", "Baseline"),
+                ("main", "Main"),
+                ("high", "High"),
+                ("prores_proxy", "Apple ProRes Proxy"),
+                ("prores_lt", "Apple ProRes LT"),
+                ("prores_422", "Apple ProRes 422 Standard"),
+                ("prores_hq", "Apple ProRes 422 HQ"),
+                ("prores_4444", "Apple ProRes 4444"),
+            ] {
+                if ui.selectable_label(current_profile == prof_id, prof_label).clicked() {
+                    target.video.profile = Some(prof_id.to_string());
+                }
+            }
+        });
+    });
+
+    // Pixel Format / Color Depth
+    let current_pf = target.video.pixel_format.unwrap_or(encodercraft_color::PixelFormat::Yuv420p);
+    ui.horizontal(|ui| {
+        ui.label("Pixel Format & Depth:");
+        egui::ComboBox::from_id_salt("inspector_pixel_format_combo")
+            .selected_text(match current_pf {
+                encodercraft_color::PixelFormat::Yuv420p => "Planar YUV 4:2:0 (8-bit Standard)",
+                encodercraft_color::PixelFormat::Yuv422p => "Planar YUV 4:2:2 (8-bit Broadcast)",
+                encodercraft_color::PixelFormat::Yuv420p10 => "Planar YUV 4:2:0 10-bit (HDR10/HEVC Main 10)",
+                encodercraft_color::PixelFormat::Yuv422p10 => "Planar YUV 4:2:2 10-bit (ProRes 422/Broadcast)",
+                encodercraft_color::PixelFormat::Yuv444p12 => "Planar YUV 4:4:4 12-bit (ProRes 4444 Master)",
+                encodercraft_color::PixelFormat::Rgba8 => "8-bit RGBA",
+                encodercraft_color::PixelFormat::Rgb8 => "8-bit RGB",
+                encodercraft_color::PixelFormat::Rgba16 => "16-bit RGBA",
+                encodercraft_color::PixelFormat::RgbaF32 => "32-bit Float RGBA (HDR)",
+                _ => "Auto (Default)",
+            })
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(current_pf == encodercraft_color::PixelFormat::Yuv420p, "Planar YUV 4:2:0 (8-bit Standard)").clicked() {
+                    target.video.pixel_format = Some(encodercraft_color::PixelFormat::Yuv420p);
+                }
+                if ui.selectable_label(current_pf == encodercraft_color::PixelFormat::Yuv422p, "Planar YUV 4:2:2 (8-bit Broadcast)").clicked() {
+                    target.video.pixel_format = Some(encodercraft_color::PixelFormat::Yuv422p);
+                }
+                if ui
+                    .selectable_label(current_pf == encodercraft_color::PixelFormat::Yuv420p10, "Planar YUV 4:2:0 10-bit (HDR10/HEVC Main 10)")
+                    .clicked()
+                {
+                    target.video.pixel_format = Some(encodercraft_color::PixelFormat::Yuv420p10);
+                }
+                if ui
+                    .selectable_label(current_pf == encodercraft_color::PixelFormat::Yuv422p10, "Planar YUV 4:2:2 10-bit (ProRes 422/Broadcast)")
+                    .clicked()
+                {
+                    target.video.pixel_format = Some(encodercraft_color::PixelFormat::Yuv422p10);
+                }
+                if ui
+                    .selectable_label(current_pf == encodercraft_color::PixelFormat::Yuv444p12, "Planar YUV 4:4:4 12-bit (ProRes 4444 Master)")
+                    .clicked()
+                {
+                    target.video.pixel_format = Some(encodercraft_color::PixelFormat::Yuv444p12);
+                }
+                if ui.selectable_label(current_pf == encodercraft_color::PixelFormat::Rgba8, "8-bit RGBA").clicked() {
+                    target.video.pixel_format = Some(encodercraft_color::PixelFormat::Rgba8);
+                }
+            });
+    });
+
+    ui.add_space(6.0);
+    ui.separator();
+
     // Hardware Acceleration & Rendering options
     ui.checkbox(&mut target.hardware_acceleration, "Hardware Acceleration (VideoToolbox / NVENC / VA-API)");
 }
@@ -983,42 +1458,206 @@ fn render_audio_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
     ui.heading("Audio Format & Channels");
     ui.add_space(4.0);
 
-    ui.horizontal(|ui| {
-        ui.label("Audio Codec:");
-        ui.label("AAC-LC (Advanced Audio Coding) / Linear PCM 24-bit");
+    let mut audio_settings = target.audio.clone().unwrap_or_else(|| {
+        let def = default_audio_codec_for_container(target.container);
+        let bit_depth = if def == "pcm_s24le" || def == "pcm_s24be" || def == "lpcm" {
+            Some(24)
+        } else if def == "pcm_s16le" || def == "pcm_s16be" {
+            Some(16)
+        } else if def == "pcm_f32le" || def == "pcm_f32be" {
+            Some(32)
+        } else {
+            None
+        };
+        encodercraft_core::AudioEncodeSettings {
+            codec: Some(def.to_string()),
+            sample_rate: Some(48000),
+            layout: Some(ChannelLayout::Stereo),
+            bitrate_kbps: if def.starts_with("pcm") { None } else { Some(320) },
+            bit_depth,
+            delay_ms: 0,
+        }
     });
 
+    let available_codecs = audio_codecs_for_container(target.container);
+    let current_codec_id = audio_settings.codec.clone().unwrap_or_else(|| default_audio_codec_for_container(target.container).to_string());
+    let current_codec_label =
+        available_codecs.iter().find(|(id, _)| *id == current_codec_id.as_str()).map(|(_, l)| *l).unwrap_or(current_codec_id.as_str());
+
+    ui.horizontal(|ui| {
+        ui.label("Audio Codec:");
+        egui::ComboBox::from_id_salt("inspector_audio_codec_combo").selected_text(current_codec_label).show_ui(ui, |ui| {
+            for (id, label) in available_codecs {
+                let is_selected = current_codec_id.as_str() == *id;
+                if ui.selectable_label(is_selected, *label).clicked() {
+                    audio_settings.codec = Some((*id).to_string());
+                    if *id == "pcm_s16le" || *id == "pcm_s16be" {
+                        audio_settings.bit_depth = Some(16);
+                    } else if *id == "pcm_s24le" || *id == "pcm_s24be" || *id == "lpcm" {
+                        audio_settings.bit_depth = Some(24);
+                    } else if *id == "pcm_f32le" || *id == "pcm_f32be" {
+                        audio_settings.bit_depth = Some(32);
+                    }
+                }
+            }
+        });
+    });
+
+    let current_sr = audio_settings.sample_rate.unwrap_or(48000);
     ui.horizontal(|ui| {
         ui.label("Sample Rate:");
         egui::ComboBox::from_id_salt("inspector_audio_sr")
-            .selected_text(match state.audio_sample_rate_idx {
-                0 => "44,100 Hz",
-                2 => "96,000 Hz",
+            .selected_text(match current_sr {
+                44100 => "44,100 Hz (CD Standard)",
+                48000 => "48,000 Hz (Video Broadcast Standard)",
+                88200 => "88,200 Hz",
+                96000 => "96,000 Hz (Hi-Res Audio)",
+                192000 => "192,000 Hz (Studio Master)",
                 _ => "48,000 Hz",
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut state.audio_sample_rate_idx, 0, "44,100 Hz (CD Standard)");
-                ui.selectable_value(&mut state.audio_sample_rate_idx, 1, "48,000 Hz (Video Broadcast Standard)");
-                ui.selectable_value(&mut state.audio_sample_rate_idx, 2, "96,000 Hz (Hi-Res Audio)");
+                if ui.selectable_label(current_sr == 44100, "44,100 Hz (CD Standard)").clicked() {
+                    audio_settings.sample_rate = Some(44100);
+                    state.audio_sample_rate_idx = 0;
+                }
+                if ui.selectable_label(current_sr == 48000, "48,000 Hz (Video Broadcast Standard)").clicked() {
+                    audio_settings.sample_rate = Some(48000);
+                    state.audio_sample_rate_idx = 1;
+                }
+                if ui.selectable_label(current_sr == 88200, "88,200 Hz").clicked() {
+                    audio_settings.sample_rate = Some(88200);
+                }
+                if ui.selectable_label(current_sr == 96000, "96,000 Hz (Hi-Res Audio)").clicked() {
+                    audio_settings.sample_rate = Some(96000);
+                    state.audio_sample_rate_idx = 2;
+                }
+                if ui.selectable_label(current_sr == 192000, "192,000 Hz (Studio Master)").clicked() {
+                    audio_settings.sample_rate = Some(192000);
+                }
             });
     });
 
+    let current_layout = audio_settings.layout.unwrap_or(ChannelLayout::Stereo);
     ui.horizontal(|ui| {
         ui.label("Channels:");
         egui::ComboBox::from_id_salt("inspector_audio_ch")
-            .selected_text(match state.audio_channels_idx {
-                0 => "Mono (1.0)",
-                2 => "5.1 Surround",
-                3 => "8 Channels (7.1 / Broadcast)",
+            .selected_text(match current_layout {
+                ChannelLayout::Mono => "Mono (1.0)",
+                ChannelLayout::Surround51 => "5.1 Surround",
+                ChannelLayout::Surround71 => "8 Channels (7.1 / Broadcast)",
                 _ => "Stereo (2.0)",
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut state.audio_channels_idx, 0, "Mono (1.0)");
-                ui.selectable_value(&mut state.audio_channels_idx, 1, "Stereo (2.0)");
-                ui.selectable_value(&mut state.audio_channels_idx, 2, "5.1 Surround");
-                ui.selectable_value(&mut state.audio_channels_idx, 3, "8 Channels (7.1 Surround / Broadcast 8-Track)");
+                if ui.selectable_label(current_layout == ChannelLayout::Mono, "Mono (1.0)").clicked() {
+                    audio_settings.layout = Some(ChannelLayout::Mono);
+                    state.audio_channels_idx = 0;
+                }
+                if ui.selectable_label(current_layout == ChannelLayout::Stereo, "Stereo (2.0)").clicked() {
+                    audio_settings.layout = Some(ChannelLayout::Stereo);
+                    state.audio_channels_idx = 1;
+                }
+                if ui.selectable_label(current_layout == ChannelLayout::Surround51, "5.1 Surround").clicked() {
+                    audio_settings.layout = Some(ChannelLayout::Surround51);
+                    state.audio_channels_idx = 2;
+                }
+                if ui.selectable_label(current_layout == ChannelLayout::Surround71, "8 Channels (7.1 Surround / Broadcast 8-Track)").clicked() {
+                    audio_settings.layout = Some(ChannelLayout::Surround71);
+                    state.audio_channels_idx = 3;
+                }
             });
     });
+
+    let is_lossy = current_codec_id == "aac" || current_codec_id == "mp3" || current_codec_id == "opus" || current_codec_id == "vorbis";
+    if is_lossy {
+        let kbps = audio_settings.bitrate_kbps.unwrap_or(320);
+        ui.horizontal(|ui| {
+            ui.label("Bitrate [kbps]:");
+            egui::ComboBox::from_id_salt("inspector_audio_bitrate_combo").selected_text(format!("{kbps} kbps")).show_ui(ui, |ui| {
+                for rate in [64, 96, 128, 160, 192, 256, 320, 384, 448, 512] {
+                    if ui.selectable_label(kbps == rate, format!("{rate} kbps")).clicked() {
+                        audio_settings.bitrate_kbps = Some(rate);
+                    }
+                }
+            });
+        });
+    }
+
+    let is_pcm_or_lossless =
+        current_codec_id.starts_with("pcm") || current_codec_id == "lpcm" || current_codec_id == "flac" || current_codec_id == "alac";
+    if is_pcm_or_lossless {
+        let current_depth = audio_settings.bit_depth.unwrap_or(24);
+        ui.horizontal(|ui| {
+            ui.label("Sample Size / Bit Depth:");
+            egui::ComboBox::from_id_salt("inspector_audio_depth_combo")
+                .selected_text(match current_depth {
+                    16 => "16-bit Integer",
+                    32 => "32-bit Float",
+                    _ => "24-bit Integer (Broadcast/Studio)",
+                })
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(current_depth == 16, "16-bit Integer (CD Standard)").clicked() {
+                        audio_settings.bit_depth = Some(16);
+                        if target.container == ContainerType::Wave {
+                            audio_settings.codec = Some("pcm_s16le".to_string());
+                        } else if target.container == ContainerType::Aiff {
+                            audio_settings.codec = Some("pcm_s16be".to_string());
+                        }
+                    }
+                    if ui.selectable_label(current_depth == 24, "24-bit Integer (Studio Master)").clicked() {
+                        audio_settings.bit_depth = Some(24);
+                        if target.container == ContainerType::Wave {
+                            audio_settings.codec = Some("pcm_s24le".to_string());
+                        } else if target.container == ContainerType::Aiff {
+                            audio_settings.codec = Some("pcm_s24be".to_string());
+                        }
+                    }
+                    if ui.selectable_label(current_depth == 32, "32-bit Floating Point").clicked() {
+                        audio_settings.bit_depth = Some(32);
+                        if target.container == ContainerType::Wave {
+                            audio_settings.codec = Some("pcm_f32le".to_string());
+                        } else if target.container == ContainerType::Aiff {
+                            audio_settings.codec = Some("pcm_f32be".to_string());
+                        }
+                    }
+                });
+        });
+    }
+
+    // Format-Specific Audio Settings (AME Parity)
+    match target.container {
+        ContainerType::Wave => {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("WAV/BWF Format Options:").small().color(egui::Color32::GRAY));
+                let mut bext = true;
+                let mut rf64 = true;
+                ui.checkbox(&mut bext, "Broadcast Wave Format (BEXT chunk)").on_hover_text("Includes standard SMPTE timecode & originator metadata");
+                ui.checkbox(&mut rf64, "RF64 Large File Support (>4GB)");
+            });
+        }
+        ContainerType::Flac => {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("FLAC Compression Level:");
+                ui.label("8 (Maximum Compression)");
+            });
+        }
+        ContainerType::Mp3 => {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Stereo Mode:");
+                ui.label("Joint Stereo (Standard)");
+            });
+        }
+        ContainerType::Opus => {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Opus Application:");
+                ui.label("Audio (Full Fidelity Broadcast)");
+            });
+        }
+        _ => {}
+    }
 
     ui.add_space(6.0);
     ui.separator();
@@ -1047,14 +1686,14 @@ fn render_audio_tab(ui: &mut Ui, target: &mut OutputTarget, state: &mut Inspecto
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label("Lip-Sync / Audio Delay:");
-        let mut audio_settings = target.audio.clone().unwrap_or_default();
         let mut delay = audio_settings.delay_ms;
         let drag = ui.add(egui::DragValue::new(&mut delay).suffix(" ms").speed(1.0).range(-5000..=5000));
         if drag.changed() {
             audio_settings.delay_ms = delay;
-            target.audio = Some(audio_settings);
         }
     });
+
+    target.audio = Some(audio_settings);
 
     ui.add_space(8.0);
     ui.separator();
@@ -1808,5 +2447,54 @@ mod tests {
         } else {
             panic!("expected file source");
         }
+    }
+
+    #[test]
+    fn test_stream_toggles_and_tab_filtering() {
+        let mut target = OutputTarget { container: ContainerType::IsoBmffMp4, export_video: true, export_audio: true, ..Default::default() };
+        let full_tabs = visible_tabs_for_target(None, &target);
+        assert!(full_tabs.contains(&InspectorTab::Video));
+        assert!(full_tabs.contains(&InspectorTab::Audio));
+
+        // Disable video stream (audio-only podcast / stem delivery)
+        target.export_video = false;
+        let audio_only_tabs = visible_tabs_for_target(None, &target);
+        assert!(!audio_only_tabs.contains(&InspectorTab::Video));
+        assert!(audio_only_tabs.contains(&InspectorTab::Audio));
+
+        // Disable audio stream (silent B-roll / video-only deliverable)
+        target.export_video = true;
+        target.export_audio = false;
+        let video_only_tabs = visible_tabs_for_target(None, &target);
+        assert!(video_only_tabs.contains(&InspectorTab::Video));
+        assert!(!video_only_tabs.contains(&InspectorTab::Audio));
+        assert!(!video_only_tabs.contains(&InspectorTab::Loudness));
+    }
+
+    #[test]
+    fn test_audio_tab_codec_and_bit_depth_persistence() {
+        let mut target = OutputTarget { container: ContainerType::Wave, export_video: false, export_audio: true, ..Default::default() };
+        let mut state = InspectorState::default();
+
+        egui::__run_test_ui(|ui| {
+            render_audio_tab(ui, &mut target, &mut state);
+        });
+
+        assert!(target.audio.is_some());
+        let a = target.audio.as_ref().unwrap();
+        assert_eq!(a.codec.as_deref(), Some("pcm_s24le"));
+        assert_eq!(a.bit_depth, Some(24));
+        assert_eq!(a.sample_rate, Some(48000));
+        assert_eq!(a.layout, Some(ChannelLayout::Stereo));
+    }
+
+    #[test]
+    fn test_crop_aspect_presets_ratios() {
+        assert_eq!(CropAspectPreset::Square1x1.ratio(), Some(1.0));
+        assert!((CropAspectPreset::Standard4x3.ratio().unwrap() - 1.3333).abs() < 0.01);
+        assert!((CropAspectPreset::Widescreen16x9.ratio().unwrap() - 1.7777).abs() < 0.01);
+        assert!((CropAspectPreset::Vertical9x16.ratio().unwrap() - 0.5625).abs() < 0.01);
+        assert!((CropAspectPreset::Anamorphic239x1.ratio().unwrap() - 2.39).abs() < 0.01);
+        assert_eq!(CropAspectPreset::Custom.ratio(), None);
     }
 }
