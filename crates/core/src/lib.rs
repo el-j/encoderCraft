@@ -9,6 +9,7 @@ pub mod error;
 pub mod frame;
 pub mod job;
 pub mod metadata;
+pub mod provider;
 pub mod timecode;
 
 pub use audio::{AudioChannelMapping, AudioSampleBuffer, AudioTrackLayout, ChannelLayout};
@@ -21,4 +22,8 @@ pub use job::{
     VideoEncodeSettings, VideoLimiterClipLevel, VideoLimiterConfig, VideoTransform, WatermarkOverlayConfig,
 };
 pub use metadata::XmpMetadata;
+pub use provider::{
+    CURRENT_PROTOCOL_VERSION, DiscoveredProvider, MAX_MANIFEST_BYTES, ProviderManifest, ProviderOperation, ProviderOperationKind, ProviderParamType,
+    ProviderParameterSpec, ProviderValidationError, default_provider_directories, discover_providers_in,
+};
 pub use timecode::{MediaTimecode, Rational64};

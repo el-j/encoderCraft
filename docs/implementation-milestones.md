@@ -888,9 +888,9 @@ Tracked under GitHub Milestone 45.
 Tracked under GitHub [M46 — User-Installable Codec Providers](https://github.com/el-j/encoderCraft/milestone/24).
 
 #### Deliverables & Sub-Tasks:
-1. [ ] **M46.1: Approve the Provider Boundary and Threat Model ([#251](https://github.com/el-j/encoderCraft/issues/251))** — Record the API, transport, compatibility, trust UX, and persisted-job decisions in an ADR.
-2. [ ] **M46.2: Define and Validate the Provider Manifest ([#252](https://github.com/el-j/encoderCraft/issues/252))** — Specify bounded, versioned metadata, capabilities, parameter schemas, license fields, discovery rules, and per-user installation.
-3. [ ] **M46.3: Add Runtime Capability Registry and Deterministic Selection ([#253](https://github.com/el-j/encoderCraft/issues/253))** — Combine runtime descriptors with built-ins without changing existing built-in selection or permitting silent shadowing.
+1. [x] **M46.1: Approve the Provider Boundary and Threat Model ([#251](https://github.com/el-j/encoderCraft/issues/251))** — Record the API, transport, compatibility, trust UX, and persisted-job decisions in an ADR (`docs/adr-0002-codec-provider-system.md`).
+2. [x] **M46.2: Define and Validate the Provider Manifest ([#252](https://github.com/el-j/encoderCraft/issues/252))** — Specify bounded, versioned metadata, capabilities, parameter schemas, license fields, discovery rules, and per-user installation (`crates/core/src/provider.rs`).
+3. [x] **M46.3: Add Runtime Capability Registry and Deterministic Selection ([#253](https://github.com/el-j/encoderCraft/issues/253))** — Combine runtime descriptors with built-ins without changing existing built-in selection or permitting silent shadowing (`crates/engine/src/provider/registry.rs`).
 4. [ ] **M46.4: Specify Worker Protocol and Provider Conformance Harness ([#254](https://github.com/el-j/encoderCraft/issues/254))** — Define versioned control/media transport, bounded streaming, backpressure, timestamps, cancellation, and conformance tests.
 5. [ ] **M46.5: Implement Worker Supervision and Failure Handling ([#255](https://github.com/el-j/encoderCraft/issues/255))** — Supervise enabled providers, enforce bounded resources and timeouts, surface typed errors, and recover cleanly from worker failure.
 6. [ ] **M46.6: Integrate One External Video Encoder End to End ([#256](https://github.com/el-j/encoderCraft/issues/256))** — Prove frame-to-packet provider operation through an existing compatible muxer with regression and conformance fixtures.

@@ -9,6 +9,7 @@ use encodercraft_core::{CraftJobSpec, EncoderError, JobPriority, JobStatus};
 use encodercraft_pipeline::{JobProgress, PipelineLimits, TranscodePipeline};
 
 use crate::conversion::{ConversionDecision, LossyConversion, LossyConversionKey, assess_lossy_conversions};
+use crate::provider::ProviderRegistry;
 use crate::state::{AppPreferences, LogEntry, QueueJournal, QueuedJob, load_journal, load_preferences, save_journal_atomic, save_preferences_atomic};
 
 /// Upper bound for concurrently running jobs.
@@ -26,6 +27,7 @@ pub struct QueueManager {
     stop_worker_signal: Arc<AtomicBool>,
     paused: AtomicBool,
     pipeline_limits: PipelineLimits,
+    providers: Arc<Mutex<ProviderRegistry>>,
 }
 
 /// Computes an auto-incremented non-colliding file path by appending or incrementing `_1`, `_2`, etc.
@@ -97,6 +99,7 @@ impl QueueManager {
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
             paused: AtomicBool::new(false),
             pipeline_limits,
+            providers: Arc::new(Mutex::new(ProviderRegistry::new())),
         }
     }
 
@@ -113,6 +116,8 @@ impl QueueManager {
             }
         }
         let parallelism = journal.active_parallelism.clamp(1, MAX_PARALLELISM);
+        let mut registry = ProviderRegistry::new();
+        registry.discover(&encodercraft_core::default_provider_directories());
         Ok(Self {
             journal_path: Some(journal_path),
             conversion_preferences_path: Mutex::new(None),
@@ -124,7 +129,13 @@ impl QueueManager {
             stop_worker_signal: Arc::new(AtomicBool::new(false)),
             paused: AtomicBool::new(false),
             pipeline_limits: PipelineLimits::default(),
+            providers: Arc::new(Mutex::new(registry)),
         })
+    }
+
+    /// Returns the active provider registry.
+    pub fn provider_registry(&self) -> Arc<Mutex<ProviderRegistry>> {
+        Arc::clone(&self.providers)
     }
 
     /// Number of jobs that may be encoded concurrently.
