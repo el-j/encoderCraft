@@ -279,8 +279,11 @@ pub enum ContainerType {
     Alembic,
     Collada,
     Splat,
+    Step,
     Pdf,
     Docx,
+    Markdown,
+    Html,
     Idml,
     Epub,
     Pptx,
@@ -352,8 +355,11 @@ impl ContainerType {
         Self::Alembic,
         Self::Collada,
         Self::Splat,
+        Self::Step,
         Self::Pdf,
         Self::Docx,
+        Self::Markdown,
+        Self::Html,
         Self::Idml,
         Self::Epub,
         Self::Pptx,
@@ -421,8 +427,11 @@ impl ContainerType {
             Self::Alembic => "abc",
             Self::Collada => "dae",
             Self::Splat => "splat",
+            Self::Step => "step",
             Self::Pdf => "pdf",
             Self::Docx => "docx",
+            Self::Markdown => "md",
+            Self::Html => "html",
             Self::Idml => "idml",
             Self::Epub => "epub",
             Self::Pptx => "pptx",
@@ -476,6 +485,9 @@ impl ContainerType {
             "dae" | "collada" => Some(Self::Collada),
             "usdc" => Some(Self::Usdc),
             "splat" => Some(Self::Splat),
+            "stp" => Some(Self::Step),
+            "markdown" => Some(Self::Markdown),
+            "htm" => Some(Self::Html),
             "epub" => Some(Self::Epub),
             "pptx" => Some(Self::Pptx),
             "json" | "lottie" => Some(Self::LottieJson),
@@ -536,8 +548,11 @@ impl ContainerType {
             Self::Alembic => "Alembic VFX Animation Cache (ABC)",
             Self::Collada => "Collada Digital Asset Exchange (DAE)",
             Self::Splat => "3D Gaussian Splat Point Cloud (SPLAT)",
+            Self::Step => "ISO 10303 STEP CAD (.step)",
             Self::Pdf => "Portable Document Format (PDF)",
             Self::Docx => "Microsoft Word Document (DOCX)",
+            Self::Markdown => "Markdown Document (.md)",
+            Self::Html => "HTML Document (.html)",
             Self::Idml => "InDesign Markup Language (IDML)",
             Self::Epub => "EPUB 3 Digital Publication (EPUB)",
             Self::Pptx => "Microsoft PowerPoint Presentation (PPTX)",
@@ -600,12 +615,26 @@ impl ContainerType {
             Self::Svg | Self::AdobeIllustratorAi | Self::ArtcraftVectorcraft | Self::PostScriptEps | Self::WindowsMetafile => {
                 MediaStreamKind::Vector2D
             }
-            Self::Pdf | Self::Docx | Self::Idml | Self::Epub | Self::Pptx | Self::AdobeInDesignIndd | Self::ArtcraftDesigncraft => {
-                MediaStreamKind::Document
-            }
-            Self::Gltf | Self::Usdz | Self::Usdc | Self::Obj | Self::Stl | Self::Ply | Self::Fbx | Self::Alembic | Self::Collada | Self::Splat => {
-                MediaStreamKind::Spatial3D
-            }
+            Self::Pdf
+            | Self::Docx
+            | Self::Markdown
+            | Self::Html
+            | Self::Idml
+            | Self::Epub
+            | Self::Pptx
+            | Self::AdobeInDesignIndd
+            | Self::ArtcraftDesigncraft => MediaStreamKind::Document,
+            Self::Gltf
+            | Self::Usdz
+            | Self::Usdc
+            | Self::Obj
+            | Self::Stl
+            | Self::Ply
+            | Self::Fbx
+            | Self::Alembic
+            | Self::Collada
+            | Self::Splat
+            | Self::Step => MediaStreamKind::Spatial3D,
             Self::AutocadDxf | Self::AutocadDwg | Self::HpglPlotter | Self::ArtcraftCadcraft => MediaStreamKind::Cad2D,
             Self::AdobePhotoshopPsd | Self::AdobePhotoshopPsb | Self::ArtcraftPhotocraft => MediaStreamKind::LayeredComposite,
             Self::AdobeAfterEffectsAep | Self::ArtcraftEffectcraft | Self::LottieJson => MediaStreamKind::MotionGraph,
@@ -686,11 +715,32 @@ impl ContainerType {
                 ]
             }
             MediaStreamKind::Document => {
-                vec![Self::ArtcraftDesigncraft, Self::Pdf, Self::Idml, Self::Docx, Self::Epub, Self::Pptx, Self::Png, Self::Tiff]
+                vec![
+                    Self::ArtcraftDesigncraft,
+                    Self::Pdf,
+                    Self::Idml,
+                    Self::Docx,
+                    Self::Markdown,
+                    Self::Html,
+                    Self::Epub,
+                    Self::Pptx,
+                    Self::Png,
+                    Self::Tiff,
+                ]
             }
-            MediaStreamKind::Spatial3D => {
-                vec![Self::Gltf, Self::Usdz, Self::Usdc, Self::Obj, Self::Stl, Self::Ply, Self::Fbx, Self::Alembic, Self::Collada, Self::Splat]
-            }
+            MediaStreamKind::Spatial3D => vec![
+                Self::Gltf,
+                Self::Usdz,
+                Self::Usdc,
+                Self::Obj,
+                Self::Stl,
+                Self::Ply,
+                Self::Fbx,
+                Self::Alembic,
+                Self::Collada,
+                Self::Splat,
+                Self::Step,
+            ],
             MediaStreamKind::Cad2D => {
                 vec![Self::ArtcraftCadcraft, Self::AutocadDxf, Self::AutocadDwg, Self::Svg, Self::Pdf, Self::HpglPlotter, Self::Png]
             }

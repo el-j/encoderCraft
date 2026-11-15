@@ -120,6 +120,9 @@ pub struct AppPreferences {
     /// Percentage of GPU VRAM allocated for hardware rendering and texture caching (10..=100).
     #[serde(default = "default_vram_budget_percent")]
     pub vram_budget_percent: u8,
+    /// Queue table columns selected by the user.
+    #[serde(default = "default_queue_columns")]
+    pub queue_visible_columns: Vec<String>,
     /// Use the operating system's title bar instead of the app-drawn one (takes effect on restart).
     #[serde(default)]
     pub system_title_bar: bool,
@@ -152,6 +155,10 @@ fn default_theme() -> String {
 
 fn default_vram_budget_percent() -> u8 {
     80
+}
+
+fn default_queue_columns() -> Vec<String> {
+    ["source", "inOut", "trimmedLength", "format", "preset", "output", "status"].map(str::to_owned).to_vec()
 }
 
 fn default_renderer() -> String {
@@ -220,6 +227,7 @@ impl Default for AppPreferences {
             auto_encode_watch_folders: true,
             selected_renderer: default_renderer(),
             vram_budget_percent: default_vram_budget_percent(),
+            queue_visible_columns: default_queue_columns(),
             system_title_bar: false,
             lossy_conversion_decisions: Vec::new(),
             default_audio_sample_rate: default_audio_sample_rate(),
@@ -351,7 +359,7 @@ mod prefs_tests {
     fn preferences_round_trip_and_corruption_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.json");
-        let p = AppPreferences { max_parallel_jobs: 4, ..AppPreferences::default() };
+        let p = AppPreferences { max_parallel_jobs: 4, queue_visible_columns: vec!["source".into(), "status".into()], ..AppPreferences::default() };
         save_preferences_atomic(&path, &p).unwrap();
         assert_eq!(load_preferences(&path).unwrap(), p);
         std::fs::write(&path, "{broken").unwrap();

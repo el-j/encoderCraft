@@ -9,6 +9,24 @@ use encodercraft_engine::{QueueManager, QueuedJob, cmd::CommandRegistry};
 use crate::icons;
 use crate::theme::Tokens;
 
+const QUEUE_COLUMNS: [(&str, &str); 11] = [
+    ("source", "Source"),
+    ("inOut", "In/Out Range"),
+    ("trimmedLength", "Trimmed Length"),
+    ("format", "Format"),
+    ("preset", "Preset"),
+    ("output", "Output File"),
+    ("status", "Status"),
+    ("eta", "ETA"),
+    ("videoCodec", "Video Codec"),
+    ("audioChannels", "Audio Channels"),
+    ("bitrate", "Target Bitrate"),
+];
+
+fn queue_column_visible(columns: &[String], id: &str) -> bool {
+    columns.iter().any(|column| column == id)
+}
+
 /// Column identifiers for sortable queue table headers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueSortColumn {
@@ -42,6 +60,7 @@ pub struct QueuePanelState {
     pub pending_specs: Vec<CraftJobSpec>,
     pub pending_updates: Vec<(String, CraftJobSpec)>,
     pub status_message: Option<String>,
+    pub confirm_collision_start: bool,
 }
 
 fn execute_queue_command(
@@ -215,22 +234,65 @@ impl QueuePanelState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QueueColumnWidths {
     pub src: f32,
+    pub in_out: f32,
+    pub trimmed_length: f32,
     pub format: f32,
     pub preset: f32,
     pub output: f32,
     pub status: f32,
+    pub eta: f32,
+    pub video_codec: f32,
+    pub audio_channels: f32,
+    pub bitrate: f32,
 }
 
 impl QueueColumnWidths {
+    pub const IN_OUT: f32 = 125.0;
+    pub const TRIMMED_LENGTH: f32 = 110.0;
     pub const FORMAT: f32 = 100.0;
     pub const PRESET: f32 = 175.0;
     pub const OUTPUT: f32 = 210.0;
     pub const STATUS: f32 = 110.0;
+    pub const ETA: f32 = 82.0;
+    pub const VIDEO_CODEC: f32 = 90.0;
+    pub const AUDIO_CHANNELS: f32 = 105.0;
+    pub const BITRATE: f32 = 100.0;
 
     pub fn calculate(available_width: f32, spacing: f32) -> Self {
         let fixed = Self::FORMAT + Self::PRESET + Self::OUTPUT + Self::STATUS + (spacing * 4.0);
         let src = (available_width - fixed).max(160.0);
-        Self { src, format: Self::FORMAT, preset: Self::PRESET, output: Self::OUTPUT, status: Self::STATUS }
+        Self {
+            src,
+            in_out: 0.0,
+            trimmed_length: 0.0,
+            format: Self::FORMAT,
+            preset: Self::PRESET,
+            output: Self::OUTPUT,
+            status: Self::STATUS,
+            eta: 0.0,
+            video_codec: 0.0,
+            audio_channels: 0.0,
+            bitrate: 0.0,
+        }
+    }
+
+    pub fn calculate_for_columns(available_width: f32, spacing: f32, columns: &[String]) -> Self {
+        let visible = |id: &str| queue_column_visible(columns, id);
+        let src = if visible("source") { 160.0 } else { 0.0 };
+        let in_out = if visible("inOut") { Self::IN_OUT } else { 0.0 };
+        let trimmed_length = if visible("trimmedLength") { Self::TRIMMED_LENGTH } else { 0.0 };
+        let format = if visible("format") { Self::FORMAT } else { 0.0 };
+        let preset = if visible("preset") { Self::PRESET } else { 0.0 };
+        let output = if visible("output") { Self::OUTPUT } else { 0.0 };
+        let status = if visible("status") { Self::STATUS } else { 0.0 };
+        let eta = if visible("eta") { Self::ETA } else { 0.0 };
+        let video_codec = if visible("videoCodec") { Self::VIDEO_CODEC } else { 0.0 };
+        let audio_channels = if visible("audioChannels") { Self::AUDIO_CHANNELS } else { 0.0 };
+        let bitrate = if visible("bitrate") { Self::BITRATE } else { 0.0 };
+        let fixed = in_out + trimmed_length + format + preset + output + status + eta + video_codec + audio_channels + bitrate;
+        let gaps = spacing * QUEUE_COLUMNS.len().saturating_sub(1) as f32;
+        let src = if visible("source") { (available_width - fixed - gaps).max(160.0) } else { src };
+        Self { src, in_out, trimmed_length, format, preset, output, status, eta, video_codec, audio_channels, bitrate }
     }
 }
 
@@ -551,6 +613,68 @@ pub fn job_source_name(job: &QueuedJob) -> String {
     }
 }
 
+fn trim_display(source: &SourceDescriptor) -> (String, String) {
+    let SourceDescriptor::File { start_tick, duration_ticks, timebase, .. } = source else {
+        return ("—".into(), "—".into());
+    };
+    if start_tick.is_none() && duration_ticks.is_none() {
+        return ("Full source".into(), "—".into());
+    }
+    let Some(timebase) = timebase else {
+        return match (start_tick, duration_ticks) {
+            (Some(s), Some(d)) if *d > 0 => {
+                let end = s.saturating_add(*d);
+                (format!("F{s} – F{end}"), format!("{d} frames"))
+            }
+            (Some(s), None) => (format!("From F{s}"), "—".into()),
+            (None, Some(d)) if *d > 0 => (format!("0 – F{d}"), format!("{d} frames")),
+            _ => ("Full source".into(), "—".into()),
+        };
+    };
+
+    let start = start_tick.unwrap_or(0);
+    let start_time = format_ticks(start, *timebase);
+    let Some(duration) = duration_ticks else {
+        return match start_time {
+            Some(start_time) => (format!("In {start_time}"), "—".into()),
+            None => ("Full source".into(), "—".into()),
+        };
+    };
+    if *duration < 0 {
+        return ("Invalid range".into(), "—".into());
+    }
+    let Some(end) = start.checked_add(*duration) else {
+        return ("Invalid range".into(), "—".into());
+    };
+    let range = match (start_time, format_ticks(end, *timebase)) {
+        (Some(start), Some(end)) => (format!("{start} – {end}"), Some(start)),
+        _ => ("Invalid range".into(), None),
+    };
+    let trimmed = format_ticks(*duration, *timebase).unwrap_or_else(|| "—".into());
+    (range.0, trimmed)
+}
+
+fn format_ticks(ticks: i64, timebase: encodercraft_core::Rational64) -> Option<String> {
+    if ticks < 0 || timebase.num <= 0 || timebase.den <= 0 {
+        return None;
+    }
+    let seconds = (ticks as f64) * (timebase.num as f64) / (timebase.den as f64);
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    let milliseconds = (seconds * 1000.0).round();
+    if !milliseconds.is_finite() || milliseconds >= u64::MAX as f64 {
+        return None;
+    }
+    let milliseconds = milliseconds as u64;
+    let whole_seconds = milliseconds / 1000;
+    Some(format!("{:02}:{:02}:{:02}.{:03}", whole_seconds / 3600, (whole_seconds / 60) % 60, whole_seconds % 60, milliseconds % 1000))
+}
+
+fn format_seconds(seconds: u64) -> String {
+    format!("{:02}:{:02}:{:02}", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+}
+
 /// Context and callbacks passed to the queue panel renderer.
 pub struct QueuePanelContext<'a> {
     pub queue_mgr: &'a Arc<QueueManager>,
@@ -562,6 +686,7 @@ pub struct QueuePanelContext<'a> {
     pub on_add_media: &'a mut bool,
     pub on_add_folder: &'a mut bool,
     pub selected_renderer: &'a mut String,
+    pub visible_columns: &'a mut Vec<String>,
     pub on_show_source_properties: &'a mut Option<std::path::PathBuf>,
 }
 
@@ -576,6 +701,7 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
     let on_add_media = &mut *ctx.on_add_media;
     let on_add_folder = &mut *ctx.on_add_folder;
     let selected_renderer = &mut *ctx.selected_renderer;
+    let visible_columns = &mut *ctx.visible_columns;
     let on_show_source_properties = &mut *ctx.on_show_source_properties;
 
     let mut jobs = queue_mgr.list_jobs();
@@ -609,12 +735,73 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
         });
     }
 
-    let cols = QueueColumnWidths::calculate(ui.available_width(), ui.spacing().item_spacing.x);
+    let cols = QueueColumnWidths::calculate_for_columns(ui.available_width(), ui.spacing().item_spacing.x, visible_columns);
 
     ui.vertical(|ui| {
         if let Some(message) = &state.status_message {
             ui.label(RichText::new(message).small().color(tokens.status_failed));
         }
+
+        let collisions = queue_mgr.find_output_path_collisions();
+        if !collisions.is_empty() {
+            let warning = egui::Color32::from_rgb(232, 160, 48);
+            egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 4.0)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    icons::icon_label(ui, icons::Icon::Info, 14.0, warning);
+                    ui.label(
+                        RichText::new(format!("Destination Collision: {} output path(s) will overwrite each other!", collisions.len()))
+                            .small()
+                            .color(warning),
+                    );
+                    if ui
+                        .small_button("Auto-Rename Collisions")
+                        .on_hover_text("Automatically append unique increment counters (_1, _2) to colliding destinations")
+                        .clicked()
+                    {
+                        let mut reserved: Vec<_> =
+                            jobs.iter().flat_map(|job| job.spec.targets.iter().map(|target| target.output_path.clone())).collect();
+                        for (colliding_path, colliding_job_ids) in &collisions {
+                            for job_id in colliding_job_ids.iter().skip(1) {
+                                if let Some(j) = jobs.iter().find(|j| &j.spec.job_id == job_id) {
+                                    for (t_idx, target) in j.spec.targets.iter().enumerate() {
+                                        if &target.output_path == colliding_path {
+                                            let new_path = encodercraft_engine::increment_path_stem(&target.output_path, &reserved);
+                                            let mut updated = target.clone();
+                                            updated.output_path.clone_from(&new_path);
+                                            reserved.push(new_path);
+                                            execute_queue_command(
+                                                state,
+                                                commands,
+                                                queue_mgr,
+                                                "queue.update_output_target",
+                                                serde_json::json!({
+                                                    "jobId": job_id,
+                                                    "targetIndex": t_idx,
+                                                    "target": updated,
+                                                }),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        state.confirm_collision_start = false;
+                    }
+                    if ui.small_button("Proceed Anyway").on_hover_text("Start the queue knowing these outputs will overwrite each other").clicked() {
+                        state.confirm_collision_start = false;
+                        execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StartQueue);
+                    }
+                    if state.confirm_collision_start && ui.small_button("Cancel").clicked() {
+                        state.confirm_collision_start = false;
+                    }
+                });
+                if state.confirm_collision_start {
+                    ui.label(RichText::new("Confirm starting with duplicate destinations?").small().color(warning));
+                }
+            });
+            ui.add_space(2.0);
+        }
+
         let worker_running = queue_mgr.is_worker_running();
         state.is_running = worker_running && !queue_mgr.is_paused();
 
@@ -727,7 +914,11 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
                 ui.add_enabled_ui(can_start, |ui| {
                     let start_btn = icons::button_tinted(ui, icons::Icon::Play, 22.0, false, tokens.status_completed, tokens, "Start Queue (Enter)");
                     if start_btn.clicked() {
-                        execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StartQueue);
+                        if !collisions.is_empty() {
+                            state.confirm_collision_start = true;
+                        } else {
+                            execute_app_queue_command(state, commands, queue_mgr, crate::commands::AppCommand::StartQueue);
+                        }
                     }
                 });
 
@@ -769,14 +960,22 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
             });
         } else {
             // Table Header
-            render_table_header(ui, state, tokens, cols);
+            render_table_header(ui, state, tokens, cols, visible_columns);
 
             ui.separator();
 
             // Table Rows Scroll Area
             egui::ScrollArea::both().id_salt("queue_job_rows_scroll_area").auto_shrink([false; 2]).show(ui, |ui| {
                 for (idx, job) in jobs.iter().enumerate() {
-                    let item = GroupedJobItem { job, job_idx: idx, all_jobs: &jobs, cols, on_inspect_job, on_show_source_properties };
+                    let item = GroupedJobItem {
+                        job,
+                        job_idx: idx,
+                        all_jobs: &jobs,
+                        cols,
+                        collisions: &collisions,
+                        on_inspect_job,
+                        on_show_source_properties,
+                    };
                     render_grouped_job_row(ui, item, state, queue_mgr, commands, tokens);
                 }
             });
@@ -818,15 +1017,39 @@ fn sort_indicator(state: &QueuePanelState, col: QueueSortColumn) -> &'static str
     }
 }
 
-fn render_column_cell<R>(ui: &mut Ui, width: f32, height: f32, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+fn render_column_cell<R: Default>(ui: &mut Ui, width: f32, height: f32, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    if width <= 0.0 {
+        return R::default();
+    }
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
     cell_ui.set_clip_rect(rect);
     add_contents(&mut cell_ui)
 }
 
-fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens, cols: QueueColumnWidths) {
-    egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
+fn column_picker_contents(ui: &mut Ui, visible_columns: &mut Vec<String>) {
+    ui.label(RichText::new("Queue Columns").strong());
+    ui.separator();
+    for (id, label) in QUEUE_COLUMNS {
+        let mut shown = queue_column_visible(visible_columns, id);
+        if ui.checkbox(&mut shown, label).changed() {
+            if shown {
+                if !queue_column_visible(visible_columns, id) {
+                    visible_columns.push(id.to_owned());
+                }
+            } else if id != "source" {
+                visible_columns.retain(|column| column != id);
+            }
+        }
+    }
+    ui.separator();
+    if ui.button("Reset to Default Columns").clicked() {
+        *visible_columns = ["source", "inOut", "trimmedLength", "format", "preset", "output", "status"].map(str::to_owned).to_vec();
+    }
+}
+
+fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens, cols: QueueColumnWidths, visible_columns: &mut Vec<String>) {
+    let header = egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
         ui.horizontal(|ui| {
             // Source Column (expands)
             render_column_cell(ui, cols.src, 18.0, |ui| {
@@ -835,6 +1058,13 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
                 if src_resp.clicked() {
                     state.toggle_sort(QueueSortColumn::Source);
                 }
+            });
+
+            render_column_cell(ui, cols.in_out, 18.0, |ui| {
+                ui.label(RichText::new("In/Out Range").strong().small());
+            });
+            render_column_cell(ui, cols.trimmed_length, 18.0, |ui| {
+                ui.label(RichText::new("Trimmed Length").strong().small());
             });
 
             // Format Column
@@ -872,7 +1102,29 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
                     state.toggle_sort(QueueSortColumn::Status);
                 }
             });
+
+            render_column_cell(ui, cols.eta, 18.0, |ui| {
+                ui.label(RichText::new("ETA").strong().small());
+            });
+            render_column_cell(ui, cols.video_codec, 18.0, |ui| {
+                ui.label(RichText::new("Video Codec").strong().small());
+            });
+            render_column_cell(ui, cols.audio_channels, 18.0, |ui| {
+                ui.label(RichText::new("Audio Channels").strong().small());
+            });
+            render_column_cell(ui, cols.bitrate, 18.0, |ui| {
+                ui.label(RichText::new("Target Bitrate").strong().small());
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button(RichText::new("⚙ Columns ▾").small(), |ui| {
+                    column_picker_contents(ui, visible_columns);
+                });
+            });
         });
+    });
+    header.response.interact(egui::Sense::click()).context_menu(|ui| {
+        column_picker_contents(ui, visible_columns);
     });
 }
 
@@ -881,6 +1133,7 @@ struct GroupedJobItem<'a> {
     pub job_idx: usize,
     pub all_jobs: &'a [QueuedJob],
     pub cols: QueueColumnWidths,
+    pub collisions: &'a [(std::path::PathBuf, Vec<String>)],
     pub on_inspect_job: &'a mut Option<CraftJobSpec>,
     pub on_show_source_properties: &'a mut Option<std::path::PathBuf>,
 }
@@ -937,6 +1190,13 @@ fn render_grouped_job_row(
                     ui.label(RichText::new(prio_label).small().color(tokens.accent_primary));
                 }
 
+                // In/Out Trim Chip (visible even if In/Out columns are hidden)
+                let (source_trim_range, source_trim_dur) = trim_display(&job.spec.source);
+                if source_trim_range != "Full source" && source_trim_range != "—" {
+                    ui.label(RichText::new(format!("✂ {source_trim_range}")).small().color(tokens.accent_primary))
+                        .on_hover_text(format!("In/Out Range: {source_trim_range}\nTrimmed Duration: {source_trim_dur}"));
+                }
+
                 // Source Name
                 let source_name = job_source_name(job);
                 let approx_chars = ((ui.available_width() - 8.0) / 7.2).clamp(8.0, 48.0) as usize;
@@ -965,6 +1225,16 @@ fn render_grouped_job_row(
                 job_select_btn.context_menu(|ui| {
                     render_job_context_menu(ui, job, all_jobs, state, queue_mgr, commands, on_show_source_properties);
                 });
+            });
+
+            let (in_out_range, trimmed_length) = trim_display(&job.spec.source);
+            let has_trim = in_out_range != "Full source" && in_out_range != "—";
+            let trim_color = if has_trim { tokens.accent_primary } else { tokens.text_dim };
+            render_column_cell(ui, cols.in_out, tokens.row_height, |ui| {
+                ui.label(RichText::new(&in_out_range).small().color(trim_color));
+            });
+            render_column_cell(ui, cols.trimmed_length, tokens.row_height, |ui| {
+                ui.label(RichText::new(&trimmed_length).small().color(trim_color));
             });
 
             // Format Summary Column (Inline dropdown selector)
@@ -1075,10 +1345,16 @@ fn render_grouped_job_row(
             render_column_cell(ui, cols.output, tokens.row_height, |ui| {
                 if job.spec.targets.len() == 1 {
                     if let Some(t) = job.spec.targets.first() {
+                        let is_colliding = item.collisions.iter().any(|(p, _)| p == &t.output_path);
                         let path_str = t.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
+                        let link_color = if is_colliding { tokens.status_failed } else { tokens.accent_primary };
                         let out_link = ui
-                            .link(RichText::new(middle_truncate(path_str, 26)).color(tokens.accent_primary))
+                            .link(RichText::new(middle_truncate(path_str, 24)).color(link_color))
                             .on_hover_text(t.output_path.display().to_string());
+                        if is_colliding {
+                            ui.label(RichText::new("⚠ Duplicate").small().color(tokens.status_failed))
+                                .on_hover_text("Warning: this output path is shared by another job and will be overwritten!");
+                        }
                         if out_link.clicked()
                             && let Some(new_path) = rfd::FileDialog::new().set_file_name(path_str).save_file()
                         {
@@ -1106,6 +1382,29 @@ fn render_grouped_job_row(
                     let pbar = egui::ProgressBar::new(progress).desired_width(45.0);
                     ui.add(pbar);
                 }
+            });
+            render_column_cell(ui, cols.eta, tokens.row_height, |ui| {
+                ui.label(RichText::new(job.target_eta_seconds.map(format_seconds).unwrap_or_else(|| "—".into())).small().color(tokens.text_dim));
+            });
+            let first_target = job.spec.targets.first();
+            render_column_cell(ui, cols.video_codec, tokens.row_height, |ui| {
+                ui.label(
+                    RichText::new(first_target.and_then(|target| target.video.codec.as_deref()).unwrap_or("Auto")).small().color(tokens.text_dim),
+                );
+            });
+            render_column_cell(ui, cols.audio_channels, tokens.row_height, |ui| {
+                let channels = first_target
+                    .and_then(|target| target.audio.as_ref())
+                    .and_then(|audio| audio.layout.map(|layout| format!("{layout:?}")))
+                    .unwrap_or_else(|| "—".into());
+                ui.label(RichText::new(channels).small().color(tokens.text_dim));
+            });
+            render_column_cell(ui, cols.bitrate, tokens.row_height, |ui| {
+                let bitrate = first_target
+                    .and_then(|target| target.target_bitrate_kbps.or_else(|| target.audio.as_ref().and_then(|audio| audio.bitrate_kbps)))
+                    .map(|kbps| format!("{kbps} kbps"))
+                    .unwrap_or_else(|| "—".into());
+                ui.label(RichText::new(bitrate).small().color(tokens.text_dim));
             });
         });
 
@@ -1136,6 +1435,18 @@ fn render_grouped_job_row(
                                 "queue.duplicate_output_target",
                                 serde_json::json!({ "jobId": job_id, "targetIndex": idx }),
                             );
+                        }
+                    });
+
+                    render_column_cell(ui, cols.in_out, tokens.row_height, |ui| {
+                        if let Some((first, last)) = target.selection.pages {
+                            ui.label(RichText::new(format!("Pages {first}–{last}")).small().color(tokens.accent_primary));
+                        }
+                    });
+                    render_column_cell(ui, cols.trimmed_length, tokens.row_height, |ui| {
+                        if let Some((first, last)) = target.selection.pages {
+                            let count = last.saturating_sub(first).saturating_add(1);
+                            ui.label(RichText::new(format!("{count} pages")).small().color(tokens.accent_primary));
                         }
                     });
 
@@ -1257,10 +1568,16 @@ fn render_grouped_job_row(
 
                     // Output File Path Column (Blue Link style)
                     render_column_cell(ui, cols.output, tokens.row_height, |ui| {
+                        let is_colliding = item.collisions.iter().any(|(p, _)| p == &target.output_path);
                         let path_str = target.output_path.file_name().and_then(|s| s.to_str()).unwrap_or("output.mp4");
+                        let link_color = if is_colliding { tokens.status_failed } else { tokens.accent_primary };
                         let out_link = ui
-                            .link(RichText::new(middle_truncate(path_str, 26)).color(tokens.accent_primary))
+                            .link(RichText::new(middle_truncate(path_str, 24)).color(link_color))
                             .on_hover_text(target.output_path.display().to_string());
+                        if is_colliding {
+                            ui.label(RichText::new("⚠ Duplicate").small().color(tokens.status_failed))
+                                .on_hover_text("Warning: this output path is shared by another job and will be overwritten!");
+                        }
                         if out_link.clicked()
                             && let Some(new_path) = rfd::FileDialog::new().set_file_name(path_str).save_file()
                         {
@@ -1321,6 +1638,23 @@ fn render_grouped_job_row(
                     render_column_cell(ui, cols.status, tokens.row_height, |ui| {
                         ui.label(RichText::new(target.container.display_name()).small().color(tokens.text_dim));
                     });
+                    render_column_cell(ui, cols.eta, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.video_codec, tokens.row_height, |ui| {
+                        ui.label(RichText::new(target.video.codec.as_deref().unwrap_or("Auto")).small().color(tokens.text_dim));
+                    });
+                    render_column_cell(ui, cols.audio_channels, tokens.row_height, |ui| {
+                        let channels =
+                            target.audio.as_ref().and_then(|audio| audio.layout.map(|layout| format!("{layout:?}"))).unwrap_or_else(|| "—".into());
+                        ui.label(RichText::new(channels).small().color(tokens.text_dim));
+                    });
+                    render_column_cell(ui, cols.bitrate, tokens.row_height, |ui| {
+                        let bitrate = target
+                            .target_bitrate_kbps
+                            .or_else(|| target.audio.as_ref().and_then(|audio| audio.bitrate_kbps))
+                            .map(|kbps| format!("{kbps} kbps"))
+                            .unwrap_or_else(|| "—".into());
+                        ui.label(RichText::new(bitrate).small().color(tokens.text_dim));
+                    });
                 });
             }
         }
@@ -1333,12 +1667,18 @@ fn render_grouped_job_row(
                         let clip_name = clip.path.file_name().and_then(|s| s.to_str()).unwrap_or("Clip");
                         ui.label(RichText::new(format!("↳ Clip #{}: {}", c_idx + 1, clip_name)).small().color(tokens.text_dim));
                     });
+                    render_column_cell(ui, cols.in_out, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.trimmed_length, tokens.row_height, |_| {});
                     render_column_cell(ui, cols.format, tokens.row_height, |ui| {
                         ui.label(RichText::new("Segment").small().color(tokens.text_dim));
                     });
                     render_column_cell(ui, cols.preset, tokens.row_height, |_| {});
                     render_column_cell(ui, cols.output, tokens.row_height, |_| {});
                     render_column_cell(ui, cols.status, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.eta, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.video_codec, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.audio_channels, tokens.row_height, |_| {});
+                    render_column_cell(ui, cols.bitrate, tokens.row_height, |_| {});
                 });
             }
         }
@@ -1703,6 +2043,40 @@ mod tests {
     }
 
     #[test]
+    fn column_visibility_reallocates_space_and_trim_display_uses_source_timebase() {
+        let all_columns = QUEUE_COLUMNS.iter().map(|(id, _)| (*id).to_owned()).collect::<Vec<_>>();
+        let all_visible = QueueColumnWidths::calculate_for_columns(1600.0, 4.0, &all_columns);
+        let compact = QueueColumnWidths::calculate_for_columns(1600.0, 4.0, &["source".to_owned(), "inOut".to_owned(), "trimmedLength".to_owned()]);
+        assert_eq!(all_visible.bitrate, QueueColumnWidths::BITRATE);
+        assert_eq!(compact.bitrate, 0.0);
+        assert!(compact.src > all_visible.src);
+
+        let source = SourceDescriptor::File {
+            path: "clip.mov".into(),
+            start_tick: Some(1_500),
+            duration_ticks: Some(4_500),
+            timebase: Some(encodercraft_core::Rational64 { num: 1, den: 1_000 }),
+        };
+        assert_eq!(trim_display(&source), ("00:00:01.500 – 00:00:06.000".into(), "00:00:04.500".into()));
+
+        let invalid_timebase = SourceDescriptor::File {
+            path: "clip.mov".into(),
+            start_tick: Some(1),
+            duration_ticks: Some(2),
+            timebase: Some(encodercraft_core::Rational64 { num: 1, den: 0 }),
+        };
+        assert_eq!(trim_display(&invalid_timebase), ("Invalid range".into(), "—".into()));
+
+        let negative_duration = SourceDescriptor::File {
+            path: "clip.mov".into(),
+            start_tick: Some(10),
+            duration_ticks: Some(-5),
+            timebase: Some(encodercraft_core::Rational64 { num: 1, den: 1 }),
+        };
+        assert_eq!(trim_display(&negative_duration), ("Invalid range".into(), "—".into()));
+    }
+
+    #[test]
     fn test_queue_panel_renderer_selection() {
         let queue_mgr = Arc::new(QueueManager::new_in_memory());
         let commands = CommandRegistry::new();
@@ -1714,6 +2088,7 @@ mod tests {
         let mut on_add_media = false;
         let mut on_add_folder = false;
         let mut selected_renderer = String::new();
+        let mut visible_columns = ["source", "inOut", "trimmedLength", "format", "preset", "output", "status"].map(str::to_owned).to_vec();
         let mut on_show_source_properties = None;
 
         egui::__run_test_ui(|ui| {
@@ -1730,6 +2105,7 @@ mod tests {
                     on_add_media: &mut on_add_media,
                     on_add_folder: &mut on_add_folder,
                     selected_renderer: &mut selected_renderer,
+                    visible_columns: &mut visible_columns,
                     on_show_source_properties: &mut on_show_source_properties,
                 },
             );

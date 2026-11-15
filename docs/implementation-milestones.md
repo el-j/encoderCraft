@@ -2,7 +2,7 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** Implementation Complete & Verified (M0 through M38); M39 & M40 In Active Development  
+> **Status:** M0–M41 implementation documented; GitHub milestones M39–M45 are open (M39–M41 are locally documented as complete); M46 is planned
 > **Verification:** 100% CI compliance via `cargo xtask ci` (>150 unit, fuzz, layout, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
@@ -870,14 +870,35 @@ Tracked under GitHub Milestone 45.
 **Objective:** Display In/Out trim markers and trimmed duration directly in queue rows, provide right-click table header column toggles, audit 3D mesh conversions and add STEP/STP CAD ingestion, and add one-click document/publishing presets. Tracked under Milestone [M45 - Queue In/Out Display, Table Customization & 3D/Document Presets](https://github.com/el-j/encoderCraft/milestone/23).
 
 #### Deliverables & Sub-Tasks:
-1. [ ] **Queue In/Out Point & Trimmed Duration Display ([#224](https://github.com/el-j/encoderCraft/issues/224)):**
+1. [x] **Queue In/Out Point & Trimmed Duration Display ([#224](https://github.com/el-j/encoderCraft/issues/224)):**
    - Display In/Out timecodes and active trimmed duration in queue items.
    - Right-click column show/hide selector on queue table header.
-2. [ ] **3D Conversion Pipeline Audit & STEP/STP CAD Ingestion ([#225](https://github.com/el-j/encoderCraft/issues/225)):**
+2. [x] **3D Conversion Pipeline Audit & STEP/STP CAD Ingestion ([#225](https://github.com/el-j/encoderCraft/issues/225)):**
    - Ensure robust conversion across STL, OBJ, GLB, and USDZ.
    - Ingest ISO 10303 STEP/STP CAD solids and tessellate to standard 3D meshes.
-3. [ ] **Document & Publishing Conversion Presets ([#226](https://github.com/el-j/encoderCraft/issues/226)):**
+3. [x] **Document & Publishing Conversion Presets ([#226](https://github.com/el-j/encoderCraft/issues/226)):**
    - Factory presets for DOCX to Markdown, DOCX to HTML5, PDF to PNG sequence, Markdown to PDF, and Document to EPUB 3.
+
+---
+
+### Milestone 46: User-Installable Codec Providers
+
+**Objective:** Let users add compatible codec implementations that are not compiled into an encoderCraft release, through an explicitly enabled, versioned, out-of-process provider interface. This is a planned follow-on to the active M42–M45 scope; the GitHub M39–M41 milestones remain open administratively even though this repository documents them as complete. It does not imply that runtime plugins exist today. See the [complete M46 planning proposal](./codec-plugin-system-plan.md) for architecture, threat model, task detail, exclusions, risks, and completion gates.
+
+Tracked under GitHub [M46 — User-Installable Codec Providers](https://github.com/el-j/encoderCraft/milestone/24).
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **M46.1: Approve the Provider Boundary and Threat Model ([#251](https://github.com/el-j/encoderCraft/issues/251))** — Record the API, transport, compatibility, trust UX, and persisted-job decisions in an ADR.
+2. [ ] **M46.2: Define and Validate the Provider Manifest ([#252](https://github.com/el-j/encoderCraft/issues/252))** — Specify bounded, versioned metadata, capabilities, parameter schemas, license fields, discovery rules, and per-user installation.
+3. [ ] **M46.3: Add Runtime Capability Registry and Deterministic Selection ([#253](https://github.com/el-j/encoderCraft/issues/253))** — Combine runtime descriptors with built-ins without changing existing built-in selection or permitting silent shadowing.
+4. [ ] **M46.4: Specify Worker Protocol and Provider Conformance Harness ([#254](https://github.com/el-j/encoderCraft/issues/254))** — Define versioned control/media transport, bounded streaming, backpressure, timestamps, cancellation, and conformance tests.
+5. [ ] **M46.5: Implement Worker Supervision and Failure Handling ([#255](https://github.com/el-j/encoderCraft/issues/255))** — Supervise enabled providers, enforce bounded resources and timeouts, surface typed errors, and recover cleanly from worker failure.
+6. [ ] **M46.6: Integrate One External Video Encoder End to End ([#256](https://github.com/el-j/encoderCraft/issues/256))** — Prove frame-to-packet provider operation through an existing compatible muxer with regression and conformance fixtures.
+7. [ ] **M46.7: Extend the Contract to Audio and Decoding ([#257](https://github.com/el-j/encoderCraft/issues/257))** — Add independently declared audio encode and video/audio decode operations with explicit format and timestamp contracts.
+8. [ ] **M46.8: Expose Provider Management Through Commands, CLI, and GUI ([#258](https://github.com/el-j/encoderCraft/issues/258))** — Add review/inspect/test/enable/disable/remove workflows using the normal `CommandSpec` surface.
+9. [ ] **M46.9: Complete Conformance, Packaging, and Operator Documentation ([#259](https://github.com/el-j/encoderCraft/issues/259))** — Verify GUI/headless behavior, cross-platform packaging, queue recovery, and user/provider-author documentation.
+
+**Completion Gate:** A user can install a compatible local provider absent from the release, explicitly review and enable it, select its declared codec operation through the normal GUI or CLI path, and encode through a compatible existing muxer. Invalid, incompatible, oversized, cancelled, or crashed provider operations must return clear errors without crashing the app, hanging, exhausting unbounded memory, corrupting the journal, or changing the built-in path.
 
 ---
 
