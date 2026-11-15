@@ -90,6 +90,9 @@ craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs",
 craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a3e0b5a9440d18f19422a9dca13516747b7d3181", features = ["egui"] }
 craft-menu = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a3e0b5a9440d18f19422a9dca13516747b7d3181" }
 craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a3e0b5a9440d18f19422a9dca13516747b7d3181", features = ["egui"] }
+texturecraft-formats = { git = "https://github.com/storytold/texturecraft", rev = "386630ee85cb22679295b24013575d1aecb39ad2" }
+texturecraft-geom = { git = "https://github.com/storytold/texturecraft", rev = "386630ee85cb22679295b24013575d1aecb39ad2" }
+designcraft-textimport = { git = "https://github.com/storytold/designcraft", rev = "ed43b4a6ab028c15d406cc61463204c7a439dc7d" }
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }
@@ -118,6 +121,9 @@ craft-dispatch = { path = "crates/dispatch" }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+hayro = "0.7.1"
+lopdf = "0.45.0"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 rayon = "1"
 crossbeam-channel = "0.5"

@@ -2,7 +2,7 @@
 
 > **Stage: Complete Implementation (v0.1.0-alpha.2 Release)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-08 · **Last updated:** 2026-11-08 · **Change:** Complete M0–M41 implementation suite, ecosystem codec harvest, broadcast MPEG-TS & Spatial Video, and v0.1.0-alpha.2 release  
+> **Last reviewed:** 2026-11-13 · **Last updated:** 2026-11-13 · **Change:** Added proposed M46 planning for user-installable codec providers after reviewing open issues and milestones  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -12,7 +12,8 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 - [docs/inter-app-dispatch-protocol.md](docs/inter-app-dispatch-protocol.md) (inter-app IPC and streaming protocol)
 - [docs/preset-system-and-watchfolders.md](docs/preset-system-and-watchfolders.md) (preset engine & automated ingest)
 - [docs/craft-libs-codecs-migration-plan.md](docs/craft-libs-codecs-migration-plan.md) (unifying codecs into craft-libs as One True Source)
-- [docs/implementation-milestones.md](docs/implementation-milestones.md) (M0 through M36 execution plan)
+- [docs/implementation-milestones.md](docs/implementation-milestones.md) (implementation milestones and execution plan)
+- [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) (proposed user-installable codec provider system, M46)
 
 ---
 
@@ -339,18 +340,18 @@ Tracked under Milestone [M41 - Production Workflow, UI/UX Polish & Adobe Media E
 
 Tracked under Milestone [M42 - Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews](https://github.com/el-j/encoderCraft/milestone/20).
 
-- [ ] **M42.1: File & Folder Operations in Media Browser (#216)** – Inline rename (`Cmd+R` / Enter), New Folder (`Cmd+Shift+N`), and file move operations.
-- [ ] **M42.2: Resizable Columns, Left-Aligned Names & Header Column Picker (#217)** – Interactive column divider resizing, left-aligned filenames in list view, and right-click column show/hide menu.
-- [ ] **M42.3: Rich Thumbnail View with Folder Cards & Format Badges (#218)** – Folder-styled cards, image/video thumbnail textures, audio waveforms, and corner format pills (`MP4`, `FLAC`, etc.).
+- [x] **M42.1: File & Folder Operations in Media Browser (#216)** – Inline rename (`Cmd+R` / Enter), New Folder (`Cmd+Shift+N`), and file move operations.
+- [x] **M42.2: Resizable Columns, Left-Aligned Names & Header Column Picker (#217)** – Interactive column divider resizing, left-aligned filenames in list view, and right-click column show/hide menu.
+- [x] **M42.3: Rich Thumbnail View with Folder Cards & Format Badges (#218)** – Folder-styled cards, image/video thumbnail textures, audio waveforms, and corner format pills (`MP4`, `FLAC`, etc.).
 
 ## Milestone 43: Desktop Shell, Window Behavior & Settings Parity
 
 Tracked under Milestone [M43 - Desktop Shell, Window Behavior & Settings Parity](https://github.com/el-j/encoderCraft/milestone/21).
 
-- [ ] **M43.1: Preset Browser Overscroll & Detached Item Popup Fix (#219)** – Fix detached floating preset labels bleeding outside dock boundaries and constrain tree to scroll area.
-- [ ] **M43.2: Resizable Settings Window Height & Hardware-Relevant Filtering (#220)** – Dynamic height resizing for preferences modal and filter accelerators by active host hardware.
-- [ ] **M43.3: Automatic Parent Directory Creation on State Journal Commit (#221)** – Prevent atomic journal I/O failure on parallelism and settings mutations by ensuring parent directory exists.
-- [ ] **M43.4: Window Maximize / Restore Toggle on Title Bar Double-Click (#222)** – Double-click on header bar toggles window maximize and restore across desktop platforms.
+- [x] **M43.1: Preset Browser Overscroll & Detached Item Popup Fix (#219)** – Fix detached floating preset labels bleeding outside dock boundaries and constrain tree to scroll area.
+- [x] **M43.2: Resizable Settings Window Height & Hardware-Relevant Filtering (#220)** – Dynamic height resizing for preferences modal and filter accelerators by active host hardware.
+- [x] **M43.3: Automatic Parent Directory Creation on State Journal Commit (#221)** – Prevent atomic journal I/O failure on parallelism and settings mutations by ensuring parent directory exists.
+- [x] **M43.4: Window Maximize / Restore Toggle on Title Bar Double-Click (#222)** – Double-click on header bar toggles window maximize and restore across desktop platforms.
 
 ## Milestone 44: Universal Preview Engine for All Media Domains
 
@@ -362,9 +363,19 @@ Tracked under Milestone [M44 - Universal Preview Engine for All Media Domains](h
 
 Tracked under Milestone [M45 - Queue In/Out Display, Table Customization & 3D/Document Presets](https://github.com/el-j/encoderCraft/milestone/23).
 
-- [ ] **M45.1: Queue In/Out Point & Trimmed Duration Display (#224)** – Display In mark, Out mark, and trimmed length directly in queue rows; add right-click column show/hide selector to queue table header.
-- [ ] **M45.2: 3D Conversion Pipeline Audit & STEP/STP CAD Ingestion (#225)** – Ensure robust transcode across all 3D mesh formats (STL, OBJ, GLB, USDZ) and add ISO 10303 STEP/STP solid CAD ingestion.
-- [ ] **M45.3: Document & Publishing Conversion Presets (#226)** – Built-in factory presets for DOCX to Markdown, DOCX to HTML, PDF to PNG sequence, Markdown to PDF, and Document to EPUB 3.
+- [x] **M45.1: Queue In/Out Point & Trimmed Duration Display (#224)** – Display In mark, Out mark, and trimmed length directly in queue rows; add right-click column show/hide selector to queue table header.
+- [x] **M45.2: 3D Conversion Pipeline Audit & STEP/STP CAD Ingestion (#225)** – Ensure robust transcode across all 3D mesh formats (STL, OBJ, GLB, USDZ) and add ISO 10303 STEP/STP solid CAD ingestion.
+- [x] **M45.3: Document & Publishing Conversion Presets (#226)** – Built-in factory presets for DOCX to Markdown, DOCX to HTML, PDF to PNG sequence, Markdown to PDF, and Document to EPUB 3.
+
+## Proposed Milestone 46: User-Installable Codec Providers
+
+Open GitHub issues and milestones were reviewed on 2026-11-13. GitHub currently marks M39–M45 open; M39–M41 are documented as complete in this repository, while M42–M45 contain the current format, preview, and queue work. No pre-existing open issue or milestone defines a general runtime provider API. Adjacent docs do contemplate a specific optional system-FFmpeg subprocess bridge ([format matrix](docs/file-format-matrix.md), [plan-draft-00](docs/plan-draft-00.md), and the implementation risk table), but not provider manifests, multi-provider discovery, lifecycle controls, or a reusable protocol. GitHub [milestone M46](https://github.com/el-j/encoderCraft/milestone/24) and its nine scoped issues (#251–#259) now track the broader follow-on work without replacing or reprioritizing existing milestones.
+
+- **Goal:** Let users install compatible codecs absent from a release without rebuilding encoderCraft.
+- **Proposed design:** Local, versioned provider manifests and explicitly enabled, out-of-process workers; keep shipped codecs in-process and unchanged.
+- **Planned tasks:** [M46.1–M46.9](https://github.com/el-j/encoderCraft/milestone/24) cover the threat model/API, manifest/discovery, runtime registry, worker protocol, supervision, video vertical slice, audio/decode support, command/CLI/GUI management, and conformance/packaging/documentation.
+- **Scope guardrails:** No in-process Rust dynamic-library ABI, marketplace, auto-download, auto-enable, arbitrary engine replacement, or bundled third-party providers in v1. An enabled provider runs with the user's permissions; subprocess execution is not a security sandbox.
+- **Plan:** [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) contains the detailed architecture proposal, task definitions, completion gate, and open risks.
 
 ## Known Issues (alpha.1, tracked above)
 

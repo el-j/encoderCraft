@@ -22,6 +22,12 @@ encodercraft-video-codecs = { workspace = true }
 encodercraft-image-codecs = { workspace = true }
 encodercraft-source = { workspace = true }
 encodercraft-spatial-io = { workspace = true }
+texturecraft-formats = { workspace = true }
+texturecraft-geom = { workspace = true }
+designcraft-textimport = { workspace = true }
+hayro = { workspace = true }
+lopdf = { workspace = true }
+image = { workspace = true }
 craft-media = { workspace = true }
 filmcraft-mxf = { workspace = true }
 filmcraft-captions = { workspace = true }
