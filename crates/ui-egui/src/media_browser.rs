@@ -813,6 +813,8 @@ fn list_view(
                         EntryKind::Audio => Icon::AudioWaveform,
                         EntryKind::Video => Icon::Film,
                         EntryKind::Image => Icon::Image,
+                        EntryKind::Spatial3D => Icon::Spatial3D,
+                        EntryKind::Document => Icon::Document,
                         _ => Icon::Preset,
                     };
                     let (icon_rect, _) = name_ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());

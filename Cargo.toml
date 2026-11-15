@@ -63,6 +63,19 @@ authors = ["el-j", "ArtCraft Contributors"]
 # Upstream shared ArtCraft libraries (official storytold/craft-libs repository)
 craft-atomic = { git = "https://github.com/storytold/craft-libs" }
 craft-media = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["isobmff", "matroska", "bitstream"] }
+craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", features = ["serde", "native-windows"] }
+craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", features = ["egui"] }
+craft-menu = { version = "0.1.0", git = "https://github.com/storytold/craft-libs" }
+craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", features = ["egui"] }
+craft-mesh = { git = "https://github.com/storytold/craft-libs", features = ["stl", "obj", "ply", "gltf"] }
+craft-docx = { git = "https://github.com/storytold/craft-libs" }
+craft-svg = { git = "https://github.com/storytold/craft-libs" }
+craft-markdown = { git = "https://github.com/storytold/craft-libs" }
+craft-html = { git = "https://github.com/storytold/craft-libs" }
+craft-idml = { git = "https://github.com/storytold/craft-libs" }
+craft-epub = { git = "https://github.com/storytold/craft-libs" }
+craft-eps = { git = "https://github.com/storytold/craft-libs" }
+craft-audio = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["decode", "peaks", "encode", "flac-encode", "pcm-encode"] }
 
 # Official ArtCraft repositories (mapped to canonical `craft-*` crate names; transitions to craft-libs once #504 & #439-#448 merge)
 craft-h264enc = { package = "filmcraft-h264enc", git = "https://github.com/storytold/filmcraft" }
@@ -86,10 +99,6 @@ craft-aac = { package = "filmcraft-aac", git = "https://github.com/storytold/fil
 craft-opus = { package = "filmcraft-opus", git = "https://github.com/storytold/filmcraft" }
 craft-audio-io = { package = "soundcraft-audio-io", git = "https://github.com/storytold/soundcraft" }
 craft-dsp = { package = "soundcraft-dsp", git = "https://github.com/storytold/soundcraft" }
-craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a3e0b5a9440d18f19422a9dca13516747b7d3181", features = ["serde", "native-windows"] }
-craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a3e0b5a9440d18f19422a9dca13516747b7d3181", features = ["egui"] }
-craft-menu = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a3e0b5a9440d18f19422a9dca13516747b7d3181" }
-craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a3e0b5a9440d18f19422a9dca13516747b7d3181", features = ["egui"] }
 texturecraft-formats = { git = "https://github.com/storytold/texturecraft", rev = "386630ee85cb22679295b24013575d1aecb39ad2" }
 texturecraft-geom = { git = "https://github.com/storytold/texturecraft", rev = "386630ee85cb22679295b24013575d1aecb39ad2" }
 designcraft-textimport = { git = "https://github.com/storytold/designcraft", rev = "ed43b4a6ab028c15d406cc61463204c7a439dc7d" }

@@ -340,9 +340,9 @@ Tracked under Milestone [M41 - Production Workflow, UI/UX Polish & Adobe Media E
 
 Tracked under Milestone [M42 - Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews](https://github.com/el-j/encoderCraft/milestone/20).
 
-- [ ] **M42.1: File & Folder Operations in Media Browser (#216)** – Inline rename (`Cmd+R` / Enter), New Folder (`Cmd+Shift+N`), and file move operations.
-- [ ] **M42.2: Resizable Columns, Left-Aligned Names & Header Column Picker (#217)** – Interactive column divider resizing, left-aligned filenames in list view, and right-click column show/hide menu.
-- [ ] **M42.3: Rich Thumbnail View with Folder Cards & Format Badges (#218)** – Folder-styled cards, image/video thumbnail textures, audio waveforms, and corner format pills (`MP4`, `FLAC`, etc.).
+- [x] **M42.1: File & Folder Operations in Media Browser (#216)** – Inline rename (`Cmd+R` / Enter), New Folder (`Cmd+Shift+N`), and file move operations.
+- [x] **M42.2: Resizable Columns, Left-Aligned Names & Header Column Picker (#217)** – Interactive column divider resizing, left-aligned filenames in list view, and right-click column show/hide menu.
+- [x] **M42.3: Rich Thumbnail View with Folder Cards & Format Badges (#218)** – Folder-styled cards, image/video thumbnail textures, audio waveforms, and corner format pills (`MP4`, `FLAC`, etc.).
 
 ## Milestone 43: Desktop Shell, Window Behavior & Settings Parity
 
@@ -357,7 +357,7 @@ Tracked under Milestone [M43 - Desktop Shell, Window Behavior & Settings Parity]
 
 Tracked under Milestone [M44 - Universal Preview Engine for All Media Domains](https://github.com/el-j/encoderCraft/milestone/22).
 
-- [ ] **M44.1: Universal Preview for Documents, Vector Graphics, 3D & Audio (#223)** – Render paginated document previews (DOCX, PDF, IDML, text), vector graphics (SVG, EPS, WMF), interactive 3D viewport (STL, OBJ, GLB, USDZ), and audio waveform scrubber in the Preview monitor.
+- [x] **M44.1: Universal Preview for Documents, Vector Graphics, 3D & Audio (#223)** – Render paginated document previews (DOCX, PDF, IDML, text), vector graphics (SVG, EPS, WMF), interactive 3D viewport (STL, OBJ, GLB, USDZ), and audio waveform scrubber in the Preview monitor.
 
 ## Milestone 45: Queue In/Out Display, Table Customization & 3D/Document Presets
 

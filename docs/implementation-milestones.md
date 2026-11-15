@@ -858,7 +858,7 @@ Tracked under GitHub Milestone 45.
 **Objective:** Expand Preview panel to display and play all ArtCraft media domains: paginated documents, vector graphics, interactive 3D spatial viewports, and audio waveforms with playback transport. Tracked under Milestone [M44 - Universal Preview Engine for All Media Domains](https://github.com/el-j/encoderCraft/milestone/22).
 
 #### Deliverables & Sub-Tasks:
-1. [ ] **Universal Preview for Documents, Vector Graphics, 3D & Audio ([#223](https://github.com/el-j/encoderCraft/issues/223)):**
+1. [x] **Universal Preview for Documents, Vector Graphics, 3D & Audio ([#223](https://github.com/el-j/encoderCraft/issues/223)):**
    - Document preview: DOCX, PDF, IDML, text, Markdown.
    - Vector preview: SVG, EPS, WMF with zoom and pan.
    - 3D spatial preview: interactive orbit/pan/zoom viewport for STL, OBJ, GLB, USDZ.
