@@ -19,6 +19,9 @@ encodercraft-engine = { workspace = true }
 encodercraft-pipeline = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-video-codecs = { workspace = true }
+encodercraft-spatial-io = { workspace = true }
+encodercraft-image-codecs = { workspace = true }
+encodercraft-audio-dsp = { workspace = true }
 encodercraft-source = { workspace = true }
 encodercraft-watch = { workspace = true }
 filmcraft-scopes = { workspace = true }
@@ -26,6 +29,9 @@ craft-ui = { workspace = true }
 craft-keymap = { workspace = true }
 craft-window = { workspace = true }
 craft-menu = { workspace = true }
+craft-audio = { workspace = true }
+craft-mesh = { workspace = true }
+craft-svg = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
 chrono = { workspace = true }
 rfd = { workspace = true }
@@ -35,4 +41,3 @@ log = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-encodercraft-image-codecs = { workspace = true }

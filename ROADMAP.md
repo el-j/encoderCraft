@@ -357,7 +357,7 @@ Tracked under Milestone [M43 - Desktop Shell, Window Behavior & Settings Parity]
 
 Tracked under Milestone [M44 - Universal Preview Engine for All Media Domains](https://github.com/el-j/encoderCraft/milestone/22).
 
-- [ ] **M44.1: Universal Preview for Documents, Vector Graphics, 3D & Audio (#223)** – Render paginated document previews (DOCX, PDF, IDML, text), vector graphics (SVG, EPS, WMF), interactive 3D viewport (STL, OBJ, GLB, USDZ), and audio waveform scrubber in the Preview monitor.
+- [x] **M44.1: Universal Preview for Documents, Vector Graphics, 3D & Audio (#223)** – Render paginated document previews (DOCX, PDF, IDML, text), vector graphics (SVG, EPS, WMF), interactive 3D viewport (STL, OBJ, GLB, USDZ), and audio waveform scrubber in the Preview monitor.
 
 ## Milestone 45: Queue In/Out Display, Table Customization & 3D/Document Presets
 
