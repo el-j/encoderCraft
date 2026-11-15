@@ -1609,6 +1609,7 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
                             on_add_media: &mut add_media,
                             on_add_folder: &mut add_folder,
                             selected_renderer: &mut self.app.prefs_state.prefs.selected_renderer,
+                            visible_columns: &mut self.app.prefs_state.prefs.queue_visible_columns,
                             on_show_source_properties: &mut self.app.pending_source_properties,
                         },
                     );

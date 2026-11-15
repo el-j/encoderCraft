@@ -615,5 +615,87 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 target_lufs: Some(-16.0),
             }),
         },
+        // 25. Microsoft Word to PDF/X-4 (High Quality)
+        EncodingPreset {
+            name: "Microsoft Word to PDF/X-4 (High Quality)".into(),
+            description: "Converts Microsoft Word DOCX OpenXML documents into high-resolution multi-page PDF/X-4 publishing files".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Pdf,
+            video: None,
+            audio: None,
+        },
+        // 26. Microsoft Word to Markdown (.md)
+        EncodingPreset {
+            name: "Microsoft Word to Markdown (.md)".into(),
+            description: "Converts Microsoft Word DOCX OpenXML documents into clean GitHub Flavored Markdown".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Markdown,
+            video: None,
+            audio: None,
+        },
+        // 27. Microsoft Word to Clean HTML5 (.html)
+        EncodingPreset {
+            name: "Microsoft Word to Clean HTML5 (.html)".into(),
+            description: "Converts Microsoft Word DOCX OpenXML documents into standalone semantic HTML5 documents".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Html,
+            video: None,
+            audio: None,
+        },
+        // 28. Markdown to Universal PDF
+        EncodingPreset {
+            name: "Markdown to Universal PDF".into(),
+            description: "Renders Markdown text files into formatted multi-page PDF documents".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Pdf,
+            video: None,
+            audio: None,
+        },
+        // 29. PDF pages to PNG sequence
+        EncodingPreset {
+            name: "PDF Pages to PNG Sequence (300 DPI)".into(),
+            description: "Renders each selected PDF page as a 300-DPI PNG image".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Png,
+            video: None,
+            audio: None,
+        },
+        // 30. Document to EPUB 3
+        EncodingPreset {
+            name: "Document to EPUB 3 Publication".into(),
+            description: "Publishes document pages and text as an EPUB 3 publication with a table of contents".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Epub,
+            video: None,
+            audio: None,
+        },
+        // 31. ISO 10303 STEP CAD Mesh (.step)
+        EncodingPreset {
+            name: "ISO 10303 STEP CAD Mesh (.step)".into(),
+            description: "Standard for the Exchange of Product model data (ISO 10303-21) CAD exchange mesh".into(),
+            category: PresetCategory::Spatial3D,
+            container: ContainerType::Step,
+            video: None,
+            audio: None,
+        },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn document_publication_presets_use_the_expected_containers() {
+        let presets = factory_presets();
+        for (name, container) in
+            [("PDF Pages to PNG Sequence (300 DPI)", ContainerType::Png), ("Document to EPUB 3 Publication", ContainerType::Epub)]
+        {
+            let preset = presets.iter().find(|preset| preset.name == name).expect("M45 document preset is registered");
+            assert_eq!(preset.category, PresetCategory::Document);
+            assert_eq!(preset.container, container);
+            assert!(preset.video.is_none());
+            assert!(preset.audio.is_none());
+        }
+    }
 }

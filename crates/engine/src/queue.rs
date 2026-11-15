@@ -1,7 +1,7 @@
 //! Multi-job execution scheduler and queue controller.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -26,6 +26,56 @@ pub struct QueueManager {
     stop_worker_signal: Arc<AtomicBool>,
     paused: AtomicBool,
     pipeline_limits: PipelineLimits,
+}
+
+/// Computes an auto-incremented non-colliding file path by appending or incrementing `_1`, `_2`, etc.
+pub fn increment_path_stem(path: &Path, existing_paths: &[PathBuf]) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+
+    // Strip existing trailing numeric counter e.g. stem "video_1" -> base "video", counter 1
+    let (mut base, mut counter) = if let Some((prefix, num_str)) = stem.rsplit_once('_') {
+        if let Some(n) = num_str.parse::<u64>().ok().and_then(|n| n.checked_add(1)) { (prefix.to_owned(), n) } else { (stem.to_owned(), 1) }
+    } else {
+        (stem.to_owned(), 1)
+    };
+
+    loop {
+        let new_file_name = if ext.is_empty() { format!("{base}_{counter}") } else { format!("{base}_{counter}.{ext}") };
+        let candidate = parent.join(new_file_name);
+        if !existing_paths.iter().any(|p| p == &candidate) {
+            return candidate;
+        }
+        if let Some(next) = counter.checked_add(1) {
+            counter = next;
+        } else {
+            base = format!("{base}_{counter}");
+            counter = 1;
+        }
+    }
+}
+
+/// Computes an auto-incremented non-colliding ID string (for job IDs or target IDs).
+pub fn increment_id(base_id: &str, existing_ids: &[String]) -> String {
+    let (mut base, mut counter) = if let Some((prefix, num_str)) = base_id.rsplit_once('_') {
+        if let Some(n) = num_str.parse::<u64>().ok().and_then(|n| n.checked_add(1)) { (prefix.to_owned(), n) } else { (base_id.to_owned(), 1) }
+    } else {
+        (base_id.to_owned(), 1)
+    };
+
+    loop {
+        let candidate = format!("{base}_{counter}");
+        if !existing_ids.iter().any(|id| id == &candidate) {
+            return candidate;
+        }
+        if let Some(next) = counter.checked_add(1) {
+            counter = next;
+        } else {
+            base = format!("{base}_{counter}");
+            counter = 1;
+        }
+    }
 }
 
 impl QueueManager {
@@ -316,7 +366,7 @@ impl QueueManager {
         Ok(())
     }
 
-    /// Duplicates an existing job with a new generated ID.
+    /// Duplicates an existing job with a new generated ID and auto-incremented target output paths.
     pub fn duplicate_job(&self, job_id: &str) -> Result<String, EncoderError> {
         self.submit_job(self.duplicate_job_spec(job_id)?)
     }
@@ -330,9 +380,39 @@ impl QueueManager {
             .find(|j| j.spec.job_id == job_id)
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' not found in queue")))?;
 
+        let mut existing_ids: Vec<String> = lock.jobs.iter().map(|j| j.spec.job_id.clone()).collect();
+        let mut existing_paths: Vec<PathBuf> = lock.jobs.iter().flat_map(|j| j.spec.targets.iter().map(|t| t.output_path.clone())).collect();
+
         let mut new_spec = job.spec.clone();
-        new_spec.job_id = format!("{}-copy", job.spec.job_id);
+        let new_job_id = increment_id(&job.spec.job_id, &existing_ids);
+        existing_ids.push(new_job_id.clone());
+        new_spec.job_id = new_job_id;
+
+        for (idx, target) in new_spec.targets.iter_mut().enumerate() {
+            let new_path = increment_path_stem(&target.output_path, &existing_paths);
+            existing_paths.push(new_path.clone());
+            target.output_path = new_path;
+            target.target_id = format!("{}_{}", target.target_id, idx + 1);
+        }
+
         Ok(new_spec)
+    }
+
+    /// Returns a list of all output paths that are shared by two or more active/queued targets in the queue.
+    pub fn find_output_path_collisions(&self) -> Vec<(PathBuf, Vec<String>)> {
+        let lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut map: std::collections::HashMap<PathBuf, Vec<String>> = std::collections::HashMap::new();
+
+        for job in &lock.jobs {
+            if matches!(job.status, JobStatus::Completed | JobStatus::Failed(_) | JobStatus::Cancelled) {
+                continue;
+            }
+            for target in &job.spec.targets {
+                map.entry(target.output_path.clone()).or_default().push(job.spec.job_id.clone());
+            }
+        }
+
+        map.into_iter().filter(|(_, job_ids)| job_ids.len() > 1).collect()
     }
 
     /// Reorders the queue to match the given list of job IDs.
@@ -740,9 +820,11 @@ impl QueueManager {
         Ok(())
     }
 
-    /// Duplicates an output target on a job.
+    /// Duplicates an output target on a job with an auto-incremented non-colliding file name.
     pub fn duplicate_output_target(&self, job_id: &str, target_idx: usize) -> Result<(), EncoderError> {
         let mut lock = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let existing_paths: Vec<PathBuf> = lock.jobs.iter().flat_map(|j| j.spec.targets.iter().map(|t| t.output_path.clone())).collect();
+
         let job = lock
             .jobs
             .iter_mut()
@@ -757,12 +839,10 @@ impl QueueManager {
             .ok_or_else(|| EncoderError::InvalidJobSpec(format!("target index {target_idx} out of range")))?;
 
         let mut dup = target;
-        let mut out_path = dup.output_path;
-        let stem = out_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-        let ext = out_path.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
-        out_path.set_file_name(format!("{stem}_copy.{ext}"));
-        dup.output_path = out_path;
-        dup.target_id = format!("{}_copy", dup.target_id);
+        let new_path = increment_path_stem(&dup.output_path, &existing_paths);
+        let existing_target_ids: Vec<String> = job.spec.targets.iter().map(|t| t.target_id.clone()).collect();
+        dup.output_path = new_path;
+        dup.target_id = increment_id(&dup.target_id, &existing_target_ids);
 
         job.spec.targets.push(dup);
         drop(lock);
@@ -1496,5 +1576,62 @@ mod tests {
         let queue = QueueManager::new_in_memory();
         let unique = crate::automation::resolve_unique_output_path(&existing_out, queue.app_preferences().unwrap().increment_output_filename);
         assert_eq!(unique, dir.path().join("existing_1.mp4"));
+    }
+
+    #[test]
+    fn test_increment_path_stem_and_duplicate_job() {
+        let p1 = PathBuf::from("/render/video.mp4");
+        let existing = vec![p1.clone(), PathBuf::from("/render/video_1.mp4")];
+        let p2 = increment_path_stem(&p1, &existing);
+        assert_eq!(p2, PathBuf::from("/render/video_2.mp4"));
+
+        let queue = QueueManager::new_in_memory();
+        let mut spec = make_test_spec("job-dup", JobPriority::Normal);
+        spec.targets[0].output_path = p1.clone();
+        queue.submit_job(spec).unwrap();
+
+        let dup_id = queue.duplicate_job("job-dup").unwrap();
+        assert_eq!(dup_id, "job-dup_1");
+
+        let jobs = queue.list_jobs();
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[1].spec.targets[0].output_path, PathBuf::from("/render/video_1.mp4"));
+
+        // Duplicate again: should increment to _2 without colliding
+        let dup_id_2 = queue.duplicate_job("job-dup").unwrap();
+        assert_eq!(dup_id_2, "job-dup_2");
+        let jobs2 = queue.list_jobs();
+        assert_eq!(jobs2[2].spec.targets[0].output_path, PathBuf::from("/render/video_2.mp4"));
+
+        // Duplicate output target on the job
+        queue.duplicate_output_target(&dup_id_2, 0).unwrap();
+        let jobs3 = queue.list_jobs();
+        assert_eq!(jobs3[2].spec.targets.len(), 2);
+        assert_eq!(jobs3[2].spec.targets[1].output_path, PathBuf::from("/render/video_3.mp4"));
+    }
+
+    #[test]
+    fn increment_handles_maximum_suffix_without_overflow() {
+        let path = PathBuf::from("/render/video_18446744073709551615.mp4");
+        assert_eq!(increment_path_stem(&path, &[]), PathBuf::from("/render/video_18446744073709551615_1.mp4"));
+        assert_eq!(increment_id("job_18446744073709551615", &[]), "job_18446744073709551615_1");
+    }
+
+    #[test]
+    fn test_find_output_path_collisions() {
+        let queue = QueueManager::new_in_memory();
+        let mut spec1 = make_test_spec("job-c1", JobPriority::Normal);
+        let mut spec2 = make_test_spec("job-c2", JobPriority::Normal);
+        let shared_path = PathBuf::from("/render/collision.mp4");
+        spec1.targets[0].output_path = shared_path.clone();
+        spec2.targets[0].output_path = shared_path.clone();
+
+        queue.submit_job(spec1).unwrap();
+        queue.submit_job(spec2).unwrap();
+
+        let collisions = queue.find_output_path_collisions();
+        assert_eq!(collisions.len(), 1);
+        assert_eq!(collisions[0].0, shared_path);
+        assert_eq!(collisions[0].1, vec!["job-c1", "job-c2"]);
     }
 }

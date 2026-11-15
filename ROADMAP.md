@@ -2,7 +2,7 @@
 
 > **Stage: Complete Implementation (v0.1.0-alpha.2 Release)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-08 · **Last updated:** 2026-11-08 · **Change:** Complete M0–M41 implementation suite, ecosystem codec harvest, broadcast MPEG-TS & Spatial Video, and v0.1.0-alpha.2 release  
+> **Last reviewed:** 2026-11-13 · **Last updated:** 2026-11-13 · **Change:** Added proposed M46 planning for user-installable codec providers after reviewing open issues and milestones  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -12,7 +12,8 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 - [docs/inter-app-dispatch-protocol.md](docs/inter-app-dispatch-protocol.md) (inter-app IPC and streaming protocol)
 - [docs/preset-system-and-watchfolders.md](docs/preset-system-and-watchfolders.md) (preset engine & automated ingest)
 - [docs/craft-libs-codecs-migration-plan.md](docs/craft-libs-codecs-migration-plan.md) (unifying codecs into craft-libs as One True Source)
-- [docs/implementation-milestones.md](docs/implementation-milestones.md) (M0 through M36 execution plan)
+- [docs/implementation-milestones.md](docs/implementation-milestones.md) (implementation milestones and execution plan)
+- [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) (proposed user-installable codec provider system, M46)
 
 ---
 
@@ -334,6 +335,16 @@ Tracked under Milestone [M41 - Production Workflow, UI/UX Polish & Adobe Media E
 - [x] **M41.9: Official Audio Metadata Lookup & Editor (#200)** – Full audio metadata editor for ID3/Vorbis/RIFF tags with automated lookup from official sources (MusicBrainz/ISRC).
 - [x] **M41.10: Distinctive Visual Media Kind Badges & Icons (#201)** – Render color-coded essence chips and distinctive icons (VID, AUD, IMG, DOC, 3D, SEQ) in the Queue Source column.
 - [x] **M41.11: Preset Browser Layout Bounds & Scrolling Overflow Fix (#202)** – Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
+
+## Proposed Milestone 46: User-Installable Codec Providers
+
+Open GitHub issues and milestones were reviewed on 2026-11-13. GitHub currently marks M39–M45 open; M39–M41 are documented as complete in this repository, while M42–M45 contain the current format, preview, and queue work. No pre-existing open issue or milestone defines a general runtime provider API. Adjacent docs do contemplate a specific optional system-FFmpeg subprocess bridge ([format matrix](docs/file-format-matrix.md), [plan-draft-00](docs/plan-draft-00.md), and the implementation risk table), but not provider manifests, multi-provider discovery, lifecycle controls, or a reusable protocol. GitHub [milestone M46](https://github.com/el-j/encoderCraft/milestone/24) and its nine scoped issues (#251–#259) now track the broader follow-on work without replacing or reprioritizing existing milestones.
+
+- **Goal:** Let users install compatible codecs absent from a release without rebuilding encoderCraft.
+- **Proposed design:** Local, versioned provider manifests and explicitly enabled, out-of-process workers; keep shipped codecs in-process and unchanged.
+- **Planned tasks:** [M46.1–M46.9](https://github.com/el-j/encoderCraft/milestone/24) cover the threat model/API, manifest/discovery, runtime registry, worker protocol, supervision, video vertical slice, audio/decode support, command/CLI/GUI management, and conformance/packaging/documentation.
+- **Scope guardrails:** No in-process Rust dynamic-library ABI, marketplace, auto-download, auto-enable, arbitrary engine replacement, or bundled third-party providers in v1. An enabled provider runs with the user's permissions; subprocess execution is not a security sandbox.
+- **Plan:** [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) contains the detailed architecture proposal, task definitions, completion gate, and open risks.
 
 ## Known Issues (alpha.1, tracked above)
 
