@@ -616,7 +616,13 @@ fn list_view(
                     }
 
                     // Icon + Name
-                    let icon = if e.kind == EntryKind::Folder { Icon::Folder } else { Icon::Preset };
+                    let icon = match e.kind {
+                        EntryKind::Folder => Icon::Folder,
+                        EntryKind::Video => Icon::Film,
+                        EntryKind::Audio => Icon::Audio,
+                        EntryKind::Image => Icon::Image,
+                        EntryKind::Other => Icon::Preset,
+                    };
                     let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());
                     icons::paint(ui.painter(), icon_rect, icon, if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary });
 

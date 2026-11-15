@@ -38,6 +38,17 @@ pub enum Icon {
     ListView,
     GridView,
     Info,
+    // Canonical media & UI glyphs shared with FilmCraft:
+    Film,
+    Sequence,
+    Audio,
+    Image,
+    Speaker,
+    Mute,
+    Lock,
+    Unlock,
+    Captions,
+    ExternalLink,
 }
 
 /// 16×16 grid pixel-snapped vector painter for crisp UI rendering.
@@ -271,6 +282,61 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.line(&[(8.0, 7.0), (8.0, 11.5)]);
             pen.dot(8.0, 4.8, 0.9);
         }
+        Film => {
+            pen.rect(2.0, 3.0, 14.0, 13.0);
+            for y in [5.0, 8.0, 11.0] {
+                pen.dot(3.8, y, 0.6);
+                pen.dot(12.2, y, 0.6);
+            }
+            pen.line(&[(5.5, 3.0), (5.5, 13.0)]);
+            pen.line(&[(10.5, 3.0), (10.5, 13.0)]);
+        }
+        Sequence => {
+            pen.rect(1.5, 3.5, 14.5, 12.5);
+            pen.rect_fill(3.0, 5.5, 9.0, 7.5);
+            pen.rect_fill(6.0, 9.0, 13.0, 11.0);
+        }
+        Audio => {
+            for (i, h) in [3.0, 6.0, 9.0, 5.0, 7.0, 3.0].iter().enumerate() {
+                let x = 2.5 + i as f32 * 2.2;
+                pen.line(&[(x, 8.0 - h / 2.0), (x, 8.0 + h / 2.0)]);
+            }
+        }
+        Image => {
+            pen.rect(2.0, 3.0, 14.0, 13.0);
+            pen.line(&[(2.5, 12.0), (6.0, 8.0), (9.0, 11.0), (11.0, 9.0), (13.5, 12.0)]);
+            pen.dot(10.5, 6.0, 1.1);
+        }
+        Speaker | Mute => {
+            pen.fill(&[(2.0, 6.0), (5.0, 6.0), (9.0, 2.5), (9.0, 13.5), (5.0, 10.0), (2.0, 10.0)]);
+            if icon == Mute {
+                pen.line(&[(10.5, 6.0), (14.0, 10.0)]);
+                pen.line(&[(14.0, 6.0), (10.5, 10.0)]);
+            } else {
+                pen.arc(9.0, 8.0, 3.0, -50.0, 50.0);
+                pen.arc(9.0, 8.0, 5.5, -50.0, 50.0);
+            }
+        }
+        Lock | Unlock => {
+            pen.rect(3.5, 7.0, 12.5, 14.0);
+            if icon == Lock {
+                pen.arc(8.0, 7.0, 3.0, 180.0, 360.0);
+            } else {
+                pen.arc(8.0, 5.0, 3.0, 180.0, 330.0);
+            }
+            pen.dot(8.0, 10.5, 1.0);
+        }
+        Captions => {
+            pen.rect(1.5, 3.0, 14.5, 13.0);
+            pen.line(&[(4.0, 9.0), (7.0, 9.0)]);
+            pen.line(&[(9.0, 9.0), (12.0, 9.0)]);
+            pen.line(&[(4.0, 11.0), (12.0, 11.0)]);
+        }
+        ExternalLink => {
+            pen.line(&[(6.0, 3.0), (2.0, 3.0), (2.0, 14.0), (13.0, 14.0), (13.0, 10.0)]);
+            pen.line(&[(7.0, 9.0), (14.0, 2.0)]);
+            pen.line(&[(9.0, 2.0), (14.0, 2.0), (14.0, 7.0)]);
+        }
     }
 }
 
@@ -463,6 +529,16 @@ mod tests {
         Icon::ListView,
         Icon::GridView,
         Icon::Info,
+        Icon::Film,
+        Icon::Sequence,
+        Icon::Audio,
+        Icon::Image,
+        Icon::Speaker,
+        Icon::Mute,
+        Icon::Lock,
+        Icon::Unlock,
+        Icon::Captions,
+        Icon::ExternalLink,
     ];
 
     fn drawn_shapes(icon: Icon, ppp: f32, size: f32) -> Vec<Shape> {
