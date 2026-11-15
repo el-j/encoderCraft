@@ -791,21 +791,46 @@ flowchart LR
 11. [x] **Preset Browser Layout Bounds & Scrolling Overflow Fix ([#202](https://github.com/el-j/encoderCraft/issues/202)):**
     - Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
 
+### Milestone 45: Queue Duplication, Collision Safety & Real Multi-Domain Conversions
+
+**Objective:** Implement collision-safe queue job/target duplication with auto-incrementing suffixes, visible duplicate destination warning alerts and auto-rename actions; replace all document and spatial placeholder pipelines with real OpenXML DOCX reading/writing, multi-page PDF/X-4 rendering, Markdown/HTML5 generation, ASCII/Binary STL auto-detection, and ISO 10303 STEP CAD ingestion; display In/Out trim points and trimmed lengths in queue rows and add table header column configuration; expand factory presets with universal document and 3D publishing targets.
+
+Tracked under GitHub Milestone 45.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **Queue Duplication Auto-Increment & Collision Detection ([#228](https://github.com/el-j/encoderCraft/issues/228)):**
+   - Automatically increment destination file stems with numeric counters (`_1`, `_2`) on job and target duplication.
+   - Detect conflicting active destinations across jobs, surface prominent toolbar warning alerts and row badges, and provide one-click "Auto-Rename Collisions" tool.
+2. [x] **Real DOCX OpenXML Reader & Multi-Page PDF Pipeline ([#229](https://github.com/el-j/encoderCraft/issues/229)):**
+   - Implemented real OpenXML DOCX ingestion via ZIP extraction, paragraph/run parsing, and text flow into `DocumentCanvas`.
+   - Real multi-page PDF/X-4 rendering, DOCX OpenXML re-generation, and Markdown/HTML5 export without any stub, empty, or placeholder code.
+3. [x] **3D STL (ASCII & Binary) and ISO 10303 STEP CAD Ingestion ([#225](https://github.com/el-j/encoderCraft/issues/225)):**
+   - Auto-detect ASCII and Binary STL triangle meshes; parse and serialize ISO 10303-21 STEP CAD geometry.
+   - Integrate with 3D transcode pipeline for GLB, USDZ, OBJ, and STEP format exchange.
+4. [x] **Universal Document & Publishing Factory Presets ([#226](https://github.com/el-j/encoderCraft/issues/226)):**
+   - Added core container types `Step`, `Markdown`, `Html` to `ContainerType` and conversion target matrices.
+   - Added built-in presets: DOCX to PDF/X-4, DOCX to Markdown, DOCX to Clean HTML5, Markdown to Universal PDF, and ISO 10303 STEP CAD Mesh.
+5. [x] **Queue In/Out Display, Trimmed Length & Table Header Column Picker ([#224](https://github.com/el-j/encoderCraft/issues/224)):**
+   - Display In/Out timecodes, frame ranges, and active trimmed durations in queue rows with distinct `✂ <range>` chips.
+   - Surface target page ranges for document jobs (`Pages 1–5`).
+   - Add header column picker menu (`⚙ Columns ▾`) and right-click context menu on all table header cells.
+   - Skip layout allocation for hidden columns (`width <= 0.0`).
+
 ---
 
 ### Milestone 42: Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews
 **Objective:** Enhance the Media Browser with production desktop file management (rename, new folder, move), interactive resizable table columns, strictly left-aligned filenames in list view, table header column chooser, and rich thumbnail cards with folder visuals, media previews, audio waveforms, and corner format badges. Tracked under Milestone [M42 - Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews](https://github.com/el-j/encoderCraft/milestone/20).
 
 #### Deliverables & Sub-Tasks:
-1. [ ] **File & Folder Operations in Media Browser ([#216](https://github.com/el-j/encoderCraft/issues/216)):**
+1. [x] **File & Folder Operations in Media Browser ([#216](https://github.com/el-j/encoderCraft/issues/216)):**
    - Context menus and keyboard shortcuts for renaming files and folders (`Cmd+R` / Enter).
    - "New Folder" creation action (`Cmd+Shift+N` / toolbar button).
    - Move files and folders via drag-and-drop or clipboard cut/paste.
-2. [ ] **Resizable Columns, Left-Aligned Names & Header Column Picker ([#217](https://github.com/el-j/encoderCraft/issues/217)):**
+2. [x] **Resizable Columns, Left-Aligned Names & Header Column Picker ([#217](https://github.com/el-j/encoderCraft/issues/217)):**
    - Column boundary drag handles with min/max bounds for responsive resizing.
    - Left-aligned filenames in list view table.
    - Right-click column show/hide selector: Name, Type, Size, Date Modified, Date Created, Duration, Codec, Bitrate.
-3. [ ] **Rich Thumbnail View with Folder Cards & Format Badges ([#218](https://github.com/el-j/encoderCraft/issues/218)):**
+3. [x] **Rich Thumbnail View with Folder Cards & Format Badges ([#218](https://github.com/el-j/encoderCraft/issues/218)):**
    - Dedicated folder card geometry and icons with child counters.
    - Cached thumbnail textures for video and still image formats.
    - Waveform/audio visualizer for audio files.
@@ -817,14 +842,14 @@ flowchart LR
 **Objective:** Fix desktop window maximization on titlebar double-click, eliminate Preset Browser overscroll/detached popup clipping, make Settings dialog resizable in height, filter options by active hardware, and ensure atomic journal parent directories exist. Tracked under Milestone [M43 - Desktop Shell, Window Behavior & Settings Parity](https://github.com/el-j/encoderCraft/milestone/21).
 
 #### Deliverables & Sub-Tasks:
-1. [ ] **Preset Browser Overscroll & Detached Item Popup Fix ([#219](https://github.com/el-j/encoderCraft/issues/219)):**
+1. [x] **Preset Browser Overscroll & Detached Item Popup Fix ([#219](https://github.com/el-j/encoderCraft/issues/219)):**
    - Clip preset rows strictly within dock pane boundaries and eliminate floating items over the toolbar and Media Browser.
-2. [ ] **Resizable Settings Window Height & Hardware-Relevant Filtering ([#220](https://github.com/el-j/encoderCraft/issues/220)):**
+2. [x] **Resizable Settings Window Height & Hardware-Relevant Filtering ([#220](https://github.com/el-j/encoderCraft/issues/220)):**
    - Enable vertical/horizontal resizing for the Settings modal dialog.
    - Filter hardware accelerators based on host discovery (`available_renderers()`).
-3. [ ] **Automatic Parent Directory Creation on State Journal Commit ([#221](https://github.com/el-j/encoderCraft/issues/221)):**
+3. [x] **Automatic Parent Directory Creation on State Journal Commit ([#221](https://github.com/el-j/encoderCraft/issues/221)):**
    - Ensure parent directory exists before atomic rename in `encodercraft-engine` state journaling.
-4. [ ] **Window Maximize / Restore Toggle on Title Bar Double-Click ([#222](https://github.com/el-j/encoderCraft/issues/222)):**
+4. [x] **Window Maximize / Restore Toggle on Title Bar Double-Click ([#222](https://github.com/el-j/encoderCraft/issues/222)):**
    - Double-clicking empty areas of the custom header bar toggles window maximize and restore across desktop platforms.
 
 ---

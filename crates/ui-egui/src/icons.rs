@@ -38,6 +38,11 @@ pub enum Icon {
     ListView,
     GridView,
     Info,
+    Film,
+    Image,
+    AudioWaveform,
+    Document,
+    Spatial3D,
 }
 
 /// 16×16 grid pixel-snapped vector painter for crisp UI rendering.
@@ -271,6 +276,37 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.line(&[(8.0, 7.0), (8.0, 11.5)]);
             pen.dot(8.0, 4.8, 0.9);
         }
+        Film => {
+            pen.rect(2.0, 3.5, 14.0, 12.5);
+            pen.line(&[(2.0, 6.5), (14.0, 6.5)]);
+            pen.line(&[(2.0, 9.5), (14.0, 9.5)]);
+            pen.line(&[(5.0, 3.5), (5.0, 6.5)]);
+            pen.line(&[(11.0, 3.5), (11.0, 6.5)]);
+            pen.line(&[(5.0, 9.5), (5.0, 12.5)]);
+            pen.line(&[(11.0, 9.5), (11.0, 12.5)]);
+        }
+        Image => {
+            pen.rect(2.5, 3.5, 13.5, 12.5);
+            pen.line(&[(4.5, 10.5), (7.5, 7.5), (9.5, 9.5), (11.5, 7.5), (13.5, 9.5)]);
+            pen.dot(5.5, 6.0, 0.8);
+        }
+        AudioWaveform => {
+            for (x, h) in [(3.0, 3.0), (5.5, 6.0), (8.0, 9.0), (10.5, 5.0), (13.0, 2.5)] {
+                pen.line(&[(x, 8.0 - h * 0.5), (x, 8.0 + h * 0.5)]);
+            }
+        }
+        Document => {
+            pen.closed(&[(3.5, 2.5), (9.5, 2.5), (12.5, 5.5), (12.5, 13.5), (3.5, 13.5)]);
+            pen.line(&[(9.5, 2.5), (9.5, 5.5), (12.5, 5.5)]);
+            pen.line(&[(5.5, 8.0), (10.5, 8.0)]);
+            pen.line(&[(5.5, 10.5), (9.0, 10.5)]);
+        }
+        Spatial3D => {
+            pen.closed(&[(8.0, 2.5), (13.5, 5.5), (13.5, 11.5), (8.0, 14.5), (2.5, 11.5), (2.5, 5.5)]);
+            pen.line(&[(8.0, 8.5), (8.0, 14.5)]);
+            pen.line(&[(8.0, 8.5), (13.5, 5.5)]);
+            pen.line(&[(8.0, 8.5), (2.5, 5.5)]);
+        }
     }
 }
 
@@ -463,6 +499,11 @@ mod tests {
         Icon::ListView,
         Icon::GridView,
         Icon::Info,
+        Icon::Film,
+        Icon::Image,
+        Icon::AudioWaveform,
+        Icon::Document,
+        Icon::Spatial3D,
     ];
 
     fn drawn_shapes(icon: Icon, ppp: f32, size: f32) -> Vec<Shape> {

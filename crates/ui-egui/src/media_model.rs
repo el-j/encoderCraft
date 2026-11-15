@@ -16,6 +16,9 @@ pub enum EntryKind {
     Video,
     Audio,
     Image,
+    Spatial3D,
+    Vector,
+    Document,
     Other,
 }
 
@@ -26,13 +29,24 @@ impl EntryKind {
             EntryKind::Video => "Video",
             EntryKind::Audio => "Audio",
             EntryKind::Image => "Image",
+            EntryKind::Spatial3D => "3D Model",
+            EntryKind::Vector => "Vector",
+            EntryKind::Document => "Document",
             EntryKind::Other => "Other",
         }
     }
 
     /// Kinds the encoder can take as sources.
     pub fn is_media(self) -> bool {
-        matches!(self, EntryKind::Video | EntryKind::Audio | EntryKind::Image)
+        matches!(
+            self,
+            EntryKind::Video
+                | EntryKind::Audio
+                | EntryKind::Image
+                | EntryKind::Spatial3D
+                | EntryKind::Vector
+                | EntryKind::Document
+        )
     }
 }
 
@@ -45,7 +59,12 @@ pub fn kind_of(path: &Path, is_dir: bool) -> EntryKind {
     match ext.as_str() {
         "mp4" | "mov" | "mkv" | "webm" | "mxf" | "avi" | "m4v" | "mpg" | "mpeg" | "ts" => EntryKind::Video,
         "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" => EntryKind::Audio,
-        "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "bmp" | "gif" => EntryKind::Image,
+        "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "bmp" | "gif" | "hdr" => EntryKind::Image,
+        "stl" | "step" | "stp" | "obj" | "glb" | "gltf" | "usdz" | "usdc" | "ply" | "fbx" | "dae" | "abc" | "splat" => {
+            EntryKind::Spatial3D
+        }
+        "svg" | "eps" | "ai" => EntryKind::Vector,
+        "pdf" | "docx" | "md" | "markdown" | "html" | "htm" | "idml" | "indd" | "epub" | "pptx" => EntryKind::Document,
         _ => EntryKind::Other,
     }
 }
@@ -57,6 +76,8 @@ pub struct Entry {
     pub kind: EntryKind,
     pub size: u64,
     pub modified: Option<SystemTime>,
+    pub created: Option<SystemTime>,
+    pub extension: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -66,6 +87,8 @@ pub enum SortBy {
     Kind,
     Size,
     Modified,
+    Created,
+    Extension,
 }
 
 /// A fixed-capacity cache that evicts the least recently inserted entry.
@@ -275,6 +298,8 @@ impl BrowserModel {
                 SortBy::Kind => a.kind.label().cmp(b.kind.label()).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
                 SortBy::Size => a.size.cmp(&b.size),
                 SortBy::Modified => a.modified.cmp(&b.modified),
+                SortBy::Created => a.created.cmp(&b.created),
+                SortBy::Extension => a.extension.cmp(&b.extension).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
             };
             folders.then(if self.descending { by.reverse() } else { by })
         });
@@ -298,12 +323,15 @@ fn read_dir_bounded(path: &Path) -> Result<(Vec<Entry>, bool), String> {
         let p = item.path();
         let Ok(meta) = std::fs::metadata(&p) else { continue };
         let name = item.file_name().to_string_lossy().into_owned();
+        let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_uppercase).unwrap_or_default();
         entries.push(Entry {
             kind: kind_of(&p, meta.is_dir()),
             name,
             path: p,
             size: if meta.is_dir() { 0 } else { meta.len() },
             modified: meta.modified().ok(),
+            created: meta.created().ok(),
+            extension: ext,
         });
     }
     Ok((entries, truncated))
