@@ -516,6 +516,152 @@ impl CommandRegistry {
             q.stop_worker();
             Ok(serde_json::json!({ "success": true }))
         }));
+
+        // provider.list
+        self.register(CommandSpec::new(
+            "provider.list",
+            "List Codec Providers",
+            "Lists all discovered user-installable codec providers and their runtime status",
+            |q, _| {
+                let providers_lock = q.provider_registry();
+                let registry = providers_lock.lock().unwrap_or_else(PoisonError::into_inner);
+                let list = registry.list();
+                let result: Vec<Value> = list
+                    .into_iter()
+                    .map(|record| {
+                        serde_json::json!({
+                            "id": record.manifest.id,
+                            "name": record.manifest.name,
+                            "version": record.manifest.version,
+                            "protocolVersion": record.manifest.protocol_version,
+                            "description": record.manifest.description,
+                            "author": record.manifest.author,
+                            "license": record.manifest.license,
+                            "homepage": record.manifest.homepage,
+                            "enabled": record.enabled,
+                            "rootDir": record.root_dir.to_string_lossy(),
+                            "executablePath": record.executable_path.to_string_lossy(),
+                            "operations": record.manifest.operations,
+                        })
+                    })
+                    .collect();
+                Ok(Value::Array(result))
+            },
+        ));
+
+        // provider.inspect
+        self.register(CommandSpec::new(
+            "provider.inspect",
+            "Inspect Codec Provider",
+            "Inspects a specific codec provider manifest, parameters, and trust information",
+            |q, params| {
+                let provider_id = required_string(&params, "providerId")?;
+                let providers_lock = q.provider_registry();
+                let registry = providers_lock.lock().unwrap_or_else(PoisonError::into_inner);
+                let record = registry.get(&provider_id).ok_or_else(|| EncoderError::InvalidJobSpec(format!("provider '{provider_id}' not found")))?;
+                Ok(serde_json::json!({
+                    "id": record.manifest.id,
+                    "name": record.manifest.name,
+                    "version": record.manifest.version,
+                    "protocolVersion": record.manifest.protocol_version,
+                    "description": record.manifest.description,
+                    "author": record.manifest.author,
+                    "license": record.manifest.license,
+                    "homepage": record.manifest.homepage,
+                    "enabled": record.enabled,
+                    "rootDir": record.root_dir.to_string_lossy(),
+                    "executablePath": record.executable_path.to_string_lossy(),
+                    "operations": record.manifest.operations,
+                }))
+            },
+        ));
+
+        // provider.enable
+        self.register(CommandSpec::new(
+            "provider.enable",
+            "Enable Codec Provider",
+            "Enables an installed codec provider and persists the approval in user preferences",
+            |q, params| {
+                let provider_id = required_string(&params, "providerId")?;
+                {
+                    let providers_lock = q.provider_registry();
+                    let mut registry = providers_lock.lock().unwrap_or_else(PoisonError::into_inner);
+                    registry.enable(&provider_id).map_err(|e| EncoderError::InvalidJobSpec(e.to_string()))?;
+                    let enabled_set = registry.export_enabled_set();
+                    if let Ok(mut prefs) = q.app_preferences() {
+                        prefs.enabled_providers = enabled_set;
+                        let _ = q.save_app_preferences(prefs);
+                    }
+                }
+                Ok(serde_json::json!({ "success": true, "providerId": provider_id, "enabled": true }))
+            },
+        ));
+
+        // provider.disable
+        self.register(CommandSpec::new(
+            "provider.disable",
+            "Disable Codec Provider",
+            "Disables a codec provider and removes it from active resolution",
+            |q, params| {
+                let provider_id = required_string(&params, "providerId")?;
+                {
+                    let providers_lock = q.provider_registry();
+                    let mut registry = providers_lock.lock().unwrap_or_else(PoisonError::into_inner);
+                    registry.disable(&provider_id).map_err(|e| EncoderError::InvalidJobSpec(e.to_string()))?;
+                    let enabled_set = registry.export_enabled_set();
+                    if let Ok(mut prefs) = q.app_preferences() {
+                        prefs.enabled_providers = enabled_set;
+                        let _ = q.save_app_preferences(prefs);
+                    }
+                }
+                Ok(serde_json::json!({ "success": true, "providerId": provider_id, "enabled": false }))
+            },
+        ));
+
+        // provider.test
+        self.register(CommandSpec::new(
+            "provider.test",
+            "Test Codec Provider",
+            "Conducts an out-of-process protocol handshake and ping test with the provider",
+            |q, params| {
+                let provider_id = required_string(&params, "providerId")?;
+                let (exec_path, op_kind, codec_id) = {
+                    let providers_lock = q.provider_registry();
+                    let registry = providers_lock.lock().unwrap_or_else(PoisonError::into_inner);
+                    let record =
+                        registry.get(&provider_id).ok_or_else(|| EncoderError::InvalidJobSpec(format!("provider '{provider_id}' not found")))?;
+                    let first_op =
+                        record.manifest.operations.first().ok_or_else(|| EncoderError::InvalidJobSpec("provider declares no operations".into()))?;
+                    (record.executable_path.clone(), first_op.operation_kind, first_op.codec_id.clone())
+                };
+
+                let mut worker = crate::provider::CodecWorkerProcess::spawn_and_handshake(
+                    &provider_id,
+                    &exec_path,
+                    op_kind,
+                    &codec_id,
+                    Some(64),
+                    Some(64),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    std::collections::HashMap::new(),
+                )?;
+                let fourcc = worker.fourcc().map(|f| String::from_utf8_lossy(&f).to_string());
+                let config_len = worker.config_record().len();
+                let _ = worker.terminate();
+
+                Ok(serde_json::json!({
+                    "success": true,
+                    "providerId": provider_id,
+                    "codecId": codec_id,
+                    "fourcc": fourcc,
+                    "configRecordBytes": config_len,
+                }))
+            },
+        ));
     }
 
     fn register_application_commands(&mut self, presets: Arc<Mutex<encodercraft_presets::PresetRegistry>>) {

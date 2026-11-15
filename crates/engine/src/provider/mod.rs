@@ -6,8 +6,8 @@ pub mod protocol;
 pub mod registry;
 pub mod worker;
 
-pub use adapter::ProviderVideoEncoder;
+pub use adapter::{ProviderAudioDecoder, ProviderAudioEncoder, ProviderVideoDecoder, ProviderVideoEncoder};
 pub use harness::MockCodecWorker;
 pub use protocol::{HostMessage, WorkerMessage, read_message, write_message};
-pub use registry::{CodecResolutionError, ProviderRecord, ProviderRegistry, ResolvedCodec};
+pub use registry::{CodecResolutionError, ProviderRecord, ProviderRegistry, ResolvedAudioCodec, ResolvedCodec, ResolvedDecoder};
 pub use worker::CodecWorkerProcess;

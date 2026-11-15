@@ -17,6 +17,7 @@ pub enum PrefsCategory {
     Performance,
     Audio,
     Shortcuts,
+    CodecProviders,
 }
 
 impl PrefsCategory {
@@ -28,6 +29,7 @@ impl PrefsCategory {
             Self::Performance => "Memory & Performance",
             Self::Audio => "Audio",
             Self::Shortcuts => "Keyboard Shortcuts",
+            Self::CodecProviders => "Codec Providers",
         }
     }
 }
@@ -145,6 +147,7 @@ pub fn render_prefs_dialog(
                             PrefsCategory::Performance,
                             PrefsCategory::Audio,
                             PrefsCategory::Shortcuts,
+                            PrefsCategory::CodecProviders,
                         ];
                         for cat in categories {
                             let is_selected = state.selected_category == cat;
@@ -364,6 +367,37 @@ pub fn render_prefs_dialog(
                                     if let Some(message) = &state.shortcut_message {
                                         ui.label(RichText::new(message).small().color(tokens.text_secondary));
                                     }
+                                });
+                            }
+                            PrefsCategory::CodecProviders => {
+                                egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
+                                    ui.label(RichText::new("User-Installable Codec Providers").strong());
+                                    ui.label(RichText::new("External out-of-process codec engines. Providers run in isolated processes with explicit user enablement (ADR 0002).").weak().size(11.0));
+                                    ui.add_space(8.0);
+
+                                    if state.prefs.enabled_providers.is_empty() {
+                                        ui.label(RichText::new("No external codec providers currently enabled.").italics());
+                                    } else {
+                                        ui.label(RichText::new(format!("Enabled Providers ({}):", state.prefs.enabled_providers.len())).strong());
+                                        let mut to_remove = Vec::new();
+                                        for id in &state.prefs.enabled_providers {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(id).monospace());
+                                                if ui.button("Disable").clicked() {
+                                                    to_remove.push(id.clone());
+                                                }
+                                            });
+                                        }
+                                        for id in to_remove {
+                                            state.prefs.enabled_providers.remove(&id);
+                                        }
+                                    }
+
+                                    ui.add_space(8.0);
+                                    ui.separator();
+                                    ui.add_space(4.0);
+                                    ui.label(RichText::new("Provider Directories").strong());
+                                    ui.label(RichText::new("Drop compatible provider bundles into ~/.config/encodercraft/providers/ to install.").weak().size(11.0));
                                 });
                             }
                         };

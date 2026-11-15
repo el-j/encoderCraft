@@ -42,6 +42,7 @@ fn run() -> Result<(), EncoderError> {
         Some("--containers") | Some("containers") => print!("{}", encodercraft_video_codecs::capabilities::render_container_matrix_markdown()),
         Some("--formats") | Some("formats") => print!("{}", encodercraft_video_codecs::capabilities::render_text()),
         Some("queue") => cmd_queue(&args[2..])?,
+        Some("provider") => cmd_provider(&args[2..])?,
         Some("command") => cmd_command(&args[2..])?,
         Some("watch") => cmd_watch(&args[2..])?,
         Some("daemon") => cmd_daemon(&args[2..])?,
@@ -105,6 +106,7 @@ fn print_usage() {
     println!("  presets                                 List all factory presets");
     println!("  --formats                               Show the codec decode/encode capability table");
     println!("  queue [list|start|pause|clear|cancel <id>|log] Interact with running daemon queue");
+    println!("  provider <list|inspect|enable|disable|test> Manage external codec providers");
     println!("  command list                            List shared commands from a running instance");
     println!("  command execute <id> [json-params]     Execute a shared command on the running instance");
     println!("  watch <dir> -p <preset> -o <out_dir>    Start automated directory monitor");
@@ -933,6 +935,54 @@ fn cmd_command(args: &[String]) -> Result<(), EncoderError> {
             println!("{}", serde_json::to_string_pretty(&result).map_err(|error| EncoderError::Internal(error.to_string()))?);
         }
         _ => return Err(EncoderError::InvalidJobSpec("usage: encodercraft command list | command execute <id> [json-params]".into())),
+    }
+    Ok(())
+}
+
+fn cmd_provider(args: &[String]) -> Result<(), EncoderError> {
+    let client = DispatchClient::connect_default();
+    match args.first().map(String::as_str) {
+        Some("list") => {
+            let res = client.execute_command("provider.list", serde_json::json!({}))?;
+            if let Some(list) = res.as_array() {
+                println!("encoderCraft Codec Providers: {} installed\n", list.len());
+                for (idx, p) in list.iter().enumerate() {
+                    let id = p.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let ver = p.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+                    let enabled = p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let status = if enabled { "[ENABLED] " } else { "[DISABLED]" };
+                    let lic = p.get("license").and_then(|v| v.as_str()).unwrap_or("custom");
+                    println!(" [{:>2}] {} {:<24} {:<12} {:<18} ({})", idx + 1, status, id, ver, name, lic);
+                }
+            } else {
+                println!("No codec providers installed or discovered.");
+            }
+        }
+        Some("inspect") => {
+            let provider_id = args.get(1).ok_or_else(|| EncoderError::InvalidJobSpec("missing provider ID to inspect".into()))?;
+            let res = client.execute_command("provider.inspect", serde_json::json!({ "providerId": provider_id }))?;
+            println!("{}", serde_json::to_string_pretty(&res).map_err(|e| EncoderError::Internal(e.to_string()))?);
+        }
+        Some("enable") => {
+            let provider_id = args.get(1).ok_or_else(|| EncoderError::InvalidJobSpec("missing provider ID to enable".into()))?;
+            let _ = client.execute_command("provider.enable", serde_json::json!({ "providerId": provider_id }))?;
+            println!("Provider '{provider_id}' enabled successfully.");
+        }
+        Some("disable") => {
+            let provider_id = args.get(1).ok_or_else(|| EncoderError::InvalidJobSpec("missing provider ID to disable".into()))?;
+            let _ = client.execute_command("provider.disable", serde_json::json!({ "providerId": provider_id }))?;
+            println!("Provider '{provider_id}' disabled.");
+        }
+        Some("test") => {
+            let provider_id = args.get(1).ok_or_else(|| EncoderError::InvalidJobSpec("missing provider ID to test".into()))?;
+            println!("Testing codec provider '{provider_id}' handshake and protocol conformance...");
+            let res = client.execute_command("provider.test", serde_json::json!({ "providerId": provider_id }))?;
+            println!("Conformance test PASSED:\n{}", serde_json::to_string_pretty(&res).map_err(|e| EncoderError::Internal(e.to_string()))?);
+        }
+        _ => {
+            println!("Usage: encodercraft-cli provider <list | inspect <id> | enable <id> | disable <id> | test <id>>");
+        }
     }
     Ok(())
 }

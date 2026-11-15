@@ -105,6 +105,47 @@ impl MockCodecWorker {
                     let packet = WorkerMessage::Packet { pts, dts, is_keyframe: pts == 0, duration_ticks, payload_bytes: packet_data.len() as u32 };
                     write_message(writer, &packet, Some(&packet_data))?;
                 }
+                HostMessage::EncodeAudio { pts, frames: _, payload_bytes } => {
+                    let mut audio_data = vec![0u8; payload_bytes as usize];
+                    reader.read_exact(&mut audio_data).map_err(|e| EncoderError::Io(format!("failed reading audio bytes: {e}")))?;
+
+                    let chunk_data = vec![0xFF, 0xF1, 0x50, 0x80]; // simulated AAC ADTS frame
+                    let chunk = WorkerMessage::AudioChunk { pts, payload_bytes: chunk_data.len() as u32 };
+                    write_message(writer, &chunk, Some(&chunk_data))?;
+                }
+                HostMessage::DecodePacket { pts, dts: _, payload_bytes } => {
+                    let mut packet_data = vec![0u8; payload_bytes as usize];
+                    reader.read_exact(&mut packet_data).map_err(|e| EncoderError::Io(format!("failed reading packet bytes: {e}")))?;
+
+                    if self.codec_id.contains("audio") {
+                        // Return simulated decoded audio
+                        let frames = 256;
+                        let channels = 2;
+                        let pcm_data = vec![0u8; frames * channels * 4];
+                        let decoded = WorkerMessage::DecodedAudio {
+                            pts,
+                            sample_rate: 48000,
+                            channels: channels as u16,
+                            frames: frames as u32,
+                            payload_bytes: pcm_data.len() as u32,
+                        };
+                        write_message(writer, &decoded, Some(&pcm_data))?;
+                    } else {
+                        // Return simulated decoded video
+                        let width = 64;
+                        let height = 64;
+                        let frame_bytes = width * height * 4;
+                        let raw_frame = vec![0u8; frame_bytes];
+                        let decoded = WorkerMessage::DecodedFrame {
+                            pts,
+                            width: width as u32,
+                            height: height as u32,
+                            pixel_format: encodercraft_color::PixelFormat::Rgba8,
+                            payload_bytes: raw_frame.len() as u32,
+                        };
+                        write_message(writer, &decoded, Some(&raw_frame))?;
+                    }
+                }
                 HostMessage::Flush => {
                     write_message(writer, &WorkerMessage::FlushAck, None)?;
                     break;
@@ -255,6 +296,105 @@ mod tests {
             other => panic!("expected Error, got {other:?}"),
         }
 
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn mock_worker_audio_encode_roundtrip() {
+        let (mut host_out, mut worker_in) = pipe();
+        let (mut worker_out, mut host_in) = pipe();
+
+        let handle = std::thread::spawn(move || {
+            let mut worker = MockCodecWorker::new("mock-aac");
+            worker.run(&mut worker_in, &mut worker_out).unwrap();
+        });
+
+        let hello = HostMessage::Hello {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
+            codec_id: "mock-aac".into(),
+            operation_kind: ProviderOperationKind::AudioEncode,
+            width: None,
+            height: None,
+            fps: None,
+            pixel_format: None,
+            bitrate_kbps: Some(192),
+            sample_rate: Some(48000),
+            channels: Some(2),
+            parameters: HashMap::new(),
+        };
+        write_message(&mut host_out, &hello, None).unwrap();
+
+        let (ack, _): (WorkerMessage, _) = read_message(&mut host_in, None).unwrap();
+        assert!(matches!(ack, WorkerMessage::HelloAck { .. }));
+
+        let pcm_bytes = vec![0u8; 1024 * 4];
+        let audio_msg = HostMessage::EncodeAudio { pts: 0, frames: 1024, payload_bytes: pcm_bytes.len() as u32 };
+        write_message(&mut host_out, &audio_msg, Some(&pcm_bytes)).unwrap();
+
+        let (resp, _): (WorkerMessage, _) = read_message(&mut host_in, None).unwrap();
+        match resp {
+            WorkerMessage::AudioChunk { pts, payload_bytes } => {
+                assert_eq!(pts, 0);
+                assert_eq!(payload_bytes, 4);
+                let mut data = vec![0u8; payload_bytes as usize];
+                host_in.read_exact(&mut data).unwrap();
+                assert_eq!(data, vec![0xFF, 0xF1, 0x50, 0x80]);
+            }
+            other => panic!("expected AudioChunk, got {other:?}"),
+        }
+
+        write_message(&mut host_out, &HostMessage::Cancel, None).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn mock_worker_decode_roundtrip() {
+        let (mut host_out, mut worker_in) = pipe();
+        let (mut worker_out, mut host_in) = pipe();
+
+        let handle = std::thread::spawn(move || {
+            let mut worker = MockCodecWorker::new("mock-video-decoder");
+            worker.run(&mut worker_in, &mut worker_out).unwrap();
+        });
+
+        let hello = HostMessage::Hello {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
+            codec_id: "mock-video-decoder".into(),
+            operation_kind: ProviderOperationKind::VideoDecode,
+            width: Some(64),
+            height: Some(64),
+            fps: None,
+            pixel_format: Some(PixelFormat::Rgba8),
+            bitrate_kbps: None,
+            sample_rate: None,
+            channels: None,
+            parameters: HashMap::new(),
+        };
+        write_message(&mut host_out, &hello, None).unwrap();
+
+        let (ack, _): (WorkerMessage, _) = read_message(&mut host_in, None).unwrap();
+        assert!(matches!(ack, WorkerMessage::HelloAck { .. }));
+
+        let packet = vec![0x00, 0x00, 0x01, 0x67];
+        let dec_msg = HostMessage::DecodePacket { pts: 100, dts: 100, payload_bytes: packet.len() as u32 };
+        write_message(&mut host_out, &dec_msg, Some(&packet)).unwrap();
+
+        let (resp, _): (WorkerMessage, _) = read_message(&mut host_in, None).unwrap();
+        match resp {
+            WorkerMessage::DecodedFrame { pts, width, height, pixel_format, payload_bytes } => {
+                assert_eq!(pts, 100);
+                assert_eq!(width, 64);
+                assert_eq!(height, 64);
+                assert_eq!(pixel_format, PixelFormat::Rgba8);
+                assert_eq!(payload_bytes, 64 * 64 * 4);
+                let mut data = vec![0u8; payload_bytes as usize];
+                host_in.read_exact(&mut data).unwrap();
+                assert_eq!(data.len(), 64 * 64 * 4);
+            }
+            other => panic!("expected DecodedFrame, got {other:?}"),
+        }
+
+        write_message(&mut host_out, &HostMessage::Cancel, None).unwrap();
         handle.join().unwrap();
     }
 
