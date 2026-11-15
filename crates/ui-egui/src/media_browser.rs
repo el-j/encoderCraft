@@ -34,14 +34,8 @@ impl Default for MediaBrowserTreeState {
     }
 }
 
-pub const MEDIA_COLUMNS: [(&str, &str); 6] = [
-    ("name", "Name"),
-    ("kind", "Type"),
-    ("size", "Size"),
-    ("modified", "Date Modified"),
-    ("created", "Date Created"),
-    ("format", "Format"),
-];
+pub const MEDIA_COLUMNS: [(&str, &str); 6] =
+    [("name", "Name"), ("kind", "Type"), ("size", "Size"), ("modified", "Date Modified"), ("created", "Date Created"), ("format", "Format")];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MediaBrowserColumnSettings {
@@ -453,14 +447,7 @@ pub fn render_media_browser(
             ui,
             |ui| {
                 ui.selectable_value(&mut state.model.kind_filter, None, "All types");
-                for k in [
-                    EntryKind::Video,
-                    EntryKind::Audio,
-                    EntryKind::Image,
-                    EntryKind::Spatial3D,
-                    EntryKind::Vector,
-                    EntryKind::Document,
-                ] {
+                for k in [EntryKind::Video, EntryKind::Audio, EntryKind::Image, EntryKind::Spatial3D, EntryKind::Vector, EntryKind::Document] {
                     ui.selectable_value(&mut state.model.kind_filter, Some(k), k.label());
                 }
             },
@@ -474,11 +461,9 @@ pub fn render_media_browser(
     });
 
     if state.creating_folder {
-        egui::Window::new("Create New Folder")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ui.ctx(), |ui| {
+        egui::Window::new("Create New Folder").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
+            ui.ctx(),
+            |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Folder Name:");
                     ui.text_edit_singleline(&mut state.new_folder_input);
@@ -505,31 +490,28 @@ pub fn render_media_browser(
                         state.creating_folder = false;
                     }
                 });
-            });
+            },
+        );
     }
 
     if let Some((target_path, mut target_name)) = state.rename_target.clone() {
         let mut close = false;
         let mut commit = false;
-        egui::Window::new("Rename Item")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ui.ctx(), |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("New Name:");
-                    ui.text_edit_singleline(&mut target_name);
-                });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Rename").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        commit = true;
-                    }
-                    if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        close = true;
-                    }
-                });
+        egui::Window::new("Rename Item").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ui.ctx(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("New Name:");
+                ui.text_edit_singleline(&mut target_name);
             });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Rename").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    commit = true;
+                }
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    close = true;
+                }
+            });
+        });
         if commit {
             let trimmed = target_name.trim();
             if !trimmed.is_empty() {
@@ -735,25 +717,15 @@ fn media_column_picker(ui: &mut Ui, settings: &mut MediaBrowserColumnSettings) {
     }
 }
 
-fn media_column_header(
-    ui: &mut Ui,
-    label: &str,
-    sort_by: SortBy,
-    model: &mut BrowserModel,
-    width: &mut f32,
-    tokens: &Tokens,
-) {
+fn media_column_header(ui: &mut Ui, label: &str, sort_by: SortBy, model: &mut BrowserModel, width: &mut f32, tokens: &Tokens) {
     let current_sort = model.sort;
     let is_desc = model.descending;
-    let arrow = if current_sort == sort_by {
-        if is_desc { " \u{25be}" } else { " \u{25b4}" }
-    } else {
-        ""
-    };
+    let arrow = if current_sort == sort_by { if is_desc { " \u{25be}" } else { " \u{25b4}" } } else { "" };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(*width, 20.0), egui::Sense::click());
     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
     header_ui.set_clip_rect(rect);
-    header_ui.add(egui::Label::new(RichText::new(format!("{label}{arrow}")).small().strong().color(tokens.text_primary)).selectable(false).truncate());
+    header_ui
+        .add(egui::Label::new(RichText::new(format!("{label}{arrow}")).small().strong().color(tokens.text_primary)).selectable(false).truncate());
     if resp.clicked() {
         model.descending = model.sort == sort_by && !model.descending;
         model.sort = sort_by;
@@ -832,7 +804,8 @@ fn list_view(
 
                     // Icon + Name (strictly left-aligned)
                     let (name_rect, resp) = ui.allocate_exact_size(Vec2::new(cols.name, 18.0), egui::Sense::click());
-                    let mut name_ui = ui.new_child(egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    let mut name_ui =
+                        ui.new_child(egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
                     name_ui.set_clip_rect(name_rect);
 
                     let icon = match e.kind {
@@ -843,7 +816,12 @@ fn list_view(
                         _ => Icon::Preset,
                     };
                     let (icon_rect, _) = name_ui.allocate_exact_size(Vec2::new(14.0, 14.0), egui::Sense::hover());
-                    icons::paint(name_ui.painter(), icon_rect, icon, if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary });
+                    icons::paint(
+                        name_ui.painter(),
+                        icon_rect,
+                        icon,
+                        if e.kind == EntryKind::Folder { tokens.text_dim } else { tokens.accent_primary },
+                    );
                     name_ui.add_space(4.0);
 
                     let name_label = RichText::new(&e.name).small().color(tokens.text_primary);
@@ -852,7 +830,8 @@ fn list_view(
                     // Type
                     if cols.kind > 0.0 {
                         let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.kind, 18.0), egui::Sense::hover());
-                        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
                         cell_ui.set_clip_rect(rect);
                         cell_ui.add(egui::Label::new(RichText::new(e.kind.label()).small().color(tokens.text_dim)).truncate());
                     }
@@ -860,7 +839,8 @@ fn list_view(
                     // Size
                     if cols.size > 0.0 {
                         let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.size, 18.0), egui::Sense::hover());
-                        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
                         cell_ui.set_clip_rect(rect);
                         let size_str = if e.kind == EntryKind::Folder { "--".to_string() } else { format_size(e.size) };
                         cell_ui.add(egui::Label::new(RichText::new(size_str).small().color(tokens.text_dim)).truncate());
@@ -869,7 +849,8 @@ fn list_view(
                     // Modified
                     if cols.date > 0.0 {
                         let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.date, 18.0), egui::Sense::hover());
-                        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
                         cell_ui.set_clip_rect(rect);
                         let date_str = format_age(e.modified, now);
                         cell_ui.add(egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
@@ -878,7 +859,8 @@ fn list_view(
                     // Created
                     if cols.created > 0.0 {
                         let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.created, 18.0), egui::Sense::hover());
-                        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
                         cell_ui.set_clip_rect(rect);
                         let date_str = format_age(e.created, now);
                         cell_ui.add(egui::Label::new(RichText::new(date_str).small().color(tokens.text_dim)).truncate());
@@ -887,7 +869,8 @@ fn list_view(
                     // Format
                     if cols.format > 0.0 {
                         let (rect, _) = ui.allocate_exact_size(Vec2::new(cols.format, 18.0), egui::Sense::hover());
-                        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        let mut cell_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
                         cell_ui.set_clip_rect(rect);
                         cell_ui.add(egui::Label::new(RichText::new(&e.extension).small().color(tokens.text_dim)).truncate());
                     }

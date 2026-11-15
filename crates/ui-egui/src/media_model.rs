@@ -38,15 +38,7 @@ impl EntryKind {
 
     /// Kinds the encoder can take as sources.
     pub fn is_media(self) -> bool {
-        matches!(
-            self,
-            EntryKind::Video
-                | EntryKind::Audio
-                | EntryKind::Image
-                | EntryKind::Spatial3D
-                | EntryKind::Vector
-                | EntryKind::Document
-        )
+        matches!(self, EntryKind::Video | EntryKind::Audio | EntryKind::Image | EntryKind::Spatial3D | EntryKind::Vector | EntryKind::Document)
     }
 }
 
@@ -60,9 +52,7 @@ pub fn kind_of(path: &Path, is_dir: bool) -> EntryKind {
         "mp4" | "mov" | "mkv" | "webm" | "mxf" | "avi" | "m4v" | "mpg" | "mpeg" | "ts" => EntryKind::Video,
         "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" => EntryKind::Audio,
         "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "bmp" | "gif" | "hdr" => EntryKind::Image,
-        "stl" | "step" | "stp" | "obj" | "glb" | "gltf" | "usdz" | "usdc" | "ply" | "fbx" | "dae" | "abc" | "splat" => {
-            EntryKind::Spatial3D
-        }
+        "stl" | "step" | "stp" | "obj" | "glb" | "gltf" | "usdz" | "usdc" | "ply" | "fbx" | "dae" | "abc" | "splat" => EntryKind::Spatial3D,
         "svg" | "eps" | "ai" => EntryKind::Vector,
         "pdf" | "docx" | "md" | "markdown" | "html" | "htm" | "idml" | "indd" | "epub" | "pptx" => EntryKind::Document,
         _ => EntryKind::Other,
