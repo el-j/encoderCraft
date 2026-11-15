@@ -198,7 +198,7 @@ impl VideoInput {
     /// Loudness normalisation needs the whole track, which must fit `limits`; otherwise the audio is
     /// delivered in bounded windows.
     pub(crate) fn audio_feed(&self, target: &OutputTarget, limits: &PipelineLimits) -> Result<Option<AudioFeed<'_>>, EncoderError> {
-        if self.still {
+        if self.still || !target.is_audio_enabled() {
             return Ok(None);
         }
         let Some(stream) = self.reader.probe().audio.first() else {

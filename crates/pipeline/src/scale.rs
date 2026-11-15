@@ -1,7 +1,7 @@
 //! Multi-threaded video frame scaling and aspect ratio letterbox/pillarbox placement.
 
 use encodercraft_color::PixelFormat;
-use encodercraft_core::{EncoderError, ScalingFilter, VideoFrame};
+use encodercraft_core::{CropConfig, EncoderError, ScalingFilter, VideoFrame};
 use encodercraft_geom::{Dimensions, ScaleMode, calculate_scale_placement};
 
 /// Bilinear video frame scaler with automatic aspect ratio preservation.
@@ -30,17 +30,24 @@ impl FrameScaler {
 
     /// Resizes a `VideoFrame` to the destination canvas dimensions.
     pub fn scale(&self, src: &VideoFrame, target_dims: Dimensions) -> Result<VideoFrame, EncoderError> {
-        if src.dimensions == target_dims {
-            return Ok(src.clone());
-        }
+        self.scale_cropped(src, target_dims, None)
+    }
+
+    /// Resizes a `VideoFrame` to the destination canvas dimensions with optional pre-scale cropping.
+    pub fn scale_cropped(&self, src: &VideoFrame, target_dims: Dimensions, crop: Option<&CropConfig>) -> Result<VideoFrame, EncoderError> {
         let mut dest = VideoFrame::new_allocated(target_dims, src.format, src.color_space, src.pts, src.duration, src.timebase)?;
-        self.scale_into(src, &mut dest)?;
+        self.scale_cropped_into(src, &mut dest, crop)?;
         Ok(dest)
     }
 
     /// Resizes `src` into the existing frame `dest`, which defines the canvas size. `dest` must be
     /// cleared by the caller when it is reused, since letterbox bars are not redrawn.
     pub fn scale_into(&self, src: &VideoFrame, dest: &mut VideoFrame) -> Result<(), EncoderError> {
+        self.scale_cropped_into(src, dest, None)
+    }
+
+    /// Resizes `src` into the existing frame `dest` with optional pre-scale source raster cropping (AME Parity).
+    pub fn scale_cropped_into(&self, src: &VideoFrame, dest: &mut VideoFrame, crop: Option<&CropConfig>) -> Result<(), EncoderError> {
         let target_dims = dest.dimensions;
         if src.format != dest.format {
             return Err(EncoderError::Internal("scale_into: source and destination formats differ".into()));
@@ -50,13 +57,34 @@ impl FrameScaler {
         dest.timebase = src.timebase;
         dest.color_space = src.color_space;
         dest.keyframe = src.keyframe;
-        if src.dimensions == target_dims {
+
+        let effective_crop = crop.filter(|c| c.enabled && (c.left > 0 || c.top > 0 || c.right > 0 || c.bottom > 0));
+
+        let (src_w, src_h, base_x, base_y) = if let Some(c) = effective_crop {
+            let total_horiz = c.left.saturating_add(c.right);
+            let total_vert = c.top.saturating_add(c.bottom);
+            if total_horiz >= src.dimensions.width || total_vert >= src.dimensions.height {
+                return Err(EncoderError::InvalidJobSpec(format!(
+                    "Crop margins (left={}, right={}, top={}, bottom={}) exceed source dimensions ({}x{})",
+                    c.left, c.right, c.top, c.bottom, src.dimensions.width, src.dimensions.height
+                )));
+            }
+            let cropped_w = src.dimensions.width - total_horiz;
+            let cropped_h = src.dimensions.height - total_vert;
+            (cropped_w, cropped_h, c.left as f32, c.top as f32)
+        } else {
+            (src.dimensions.width, src.dimensions.height, 0.0, 0.0)
+        };
+
+        if effective_crop.is_none() && src.dimensions == target_dims {
             if src.data().len() != dest.data().len() {
                 return Err(EncoderError::Internal("scale_into: buffer sizes differ".into()));
             }
             dest.data_mut().copy_from_slice(src.data());
             return Ok(());
         }
+
+        let cropped_dims = Dimensions::new(src_w, src_h).map_err(|e| EncoderError::InvalidJobSpec(format!("invalid cropped dimensions: {e}")))?;
 
         let (channels, bytes_per_component) = match src.format {
             PixelFormat::Rgb8 => (3, 1),
@@ -67,7 +95,7 @@ impl FrameScaler {
             }
         };
 
-        let rect = calculate_scale_placement(src.dimensions, target_dims, self.scale_mode)
+        let rect = calculate_scale_placement(cropped_dims, target_dims, self.scale_mode)
             .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to calculate scale placement: {e}")))?;
 
         let (src_data, src_stride) = src.plane(0)?;
@@ -75,28 +103,28 @@ impl FrameScaler {
 
         let bpp = channels * bytes_per_component;
 
-        let src_w = src.dimensions.width as f32;
-        let src_h = src.dimensions.height as f32;
         let fill = self.scale_mode == ScaleMode::Fill;
         let center = self.scale_mode == ScaleMode::Center;
         let draw_width = if fill { target_dims.width } else { rect.width };
         let draw_height = if fill { target_dims.height } else { rect.height };
-        let scale_x = if center { 1.0 } else { src_w / rect.width.max(1) as f32 };
-        let scale_y = if center { 1.0 } else { src_h / rect.height.max(1) as f32 };
-        let source_x = if center {
-            (src_w - draw_width as f32).max(0.0) / 2.0
-        } else if fill {
-            rect.width.saturating_sub(target_dims.width) as f32 * scale_x / 2.0
-        } else {
-            0.0
-        };
-        let source_y = if center {
-            (src_h - draw_height as f32).max(0.0) / 2.0
-        } else if fill {
-            rect.height.saturating_sub(target_dims.height) as f32 * scale_y / 2.0
-        } else {
-            0.0
-        };
+        let scale_x = if center { 1.0 } else { src_w as f32 / rect.width.max(1) as f32 };
+        let scale_y = if center { 1.0 } else { src_h as f32 / rect.height.max(1) as f32 };
+        let source_x = base_x
+            + if center {
+                (src_w as f32 - draw_width as f32).max(0.0) / 2.0
+            } else if fill {
+                rect.width.saturating_sub(target_dims.width) as f32 * scale_x / 2.0
+            } else {
+                0.0
+            };
+        let source_y = base_y
+            + if center {
+                (src_h as f32 - draw_height as f32).max(0.0) / 2.0
+            } else if fill {
+                rect.height.saturating_sub(target_dims.height) as f32 * scale_y / 2.0
+            } else {
+                0.0
+            };
 
         let offset_x = rect.x;
         let offset_y = rect.y;
@@ -313,5 +341,29 @@ mod tests {
         assert_ne!(bicubic.data(), lanczos.data());
         assert_eq!(&bicubic.data()[..3], &[0, 0, 0]);
         assert_eq!(&lanczos.data()[12..15], &[255, 255, 255]);
+    }
+
+    #[test]
+    fn test_scale_cropped_into_extracts_subregion() {
+        let src_dims = Dimensions::new(4, 4).unwrap();
+        let dst_dims = Dimensions::new(2, 2).unwrap();
+        let mut src = VideoFrame::new_allocated(src_dims, PixelFormat::Rgb8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        let (plane, stride) = src.plane_mut(0).unwrap();
+        // Fill row by row with distinguishable values
+        for y in 0..4 {
+            for x in 0..4 {
+                let val = ((y * 10) + x) as u8;
+                plane[y * stride + x * 3..y * stride + x * 3 + 3].fill(val);
+            }
+        }
+
+        // Crop margins: left=1, right=1, top=1, bottom=1 -> extracts middle 2x2: (x=1..3, y=1..3)
+        let crop = CropConfig { enabled: true, left: 1, top: 1, right: 1, bottom: 1 };
+        let output = FrameScaler::new(ScaleMode::Stretch).scale_cropped(&src, dst_dims, Some(&crop)).unwrap();
+        assert_eq!(output.dimensions, dst_dims);
+
+        // Margin crop exceeding dimensions returns InvalidJobSpec error
+        let bad_crop = CropConfig { enabled: true, left: 2, top: 2, right: 2, bottom: 2 };
+        assert!(FrameScaler::new(ScaleMode::Stretch).scale_cropped(&src, dst_dims, Some(&bad_crop)).is_err());
     }
 }

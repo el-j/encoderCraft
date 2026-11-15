@@ -377,6 +377,18 @@ Open GitHub issues and milestones were reviewed on 2026-11-13. GitHub currently 
 - **Scope guardrails:** No in-process Rust dynamic-library ABI, marketplace, auto-download, auto-enable, arbitrary engine replacement, or bundled third-party providers in v1. An enabled provider runs with the user's permissions; subprocess execution is not a security sandbox.
 - **Plan:** [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) contains the detailed architecture proposal, task definitions, completion gate, and open risks.
 
+## Milestone 47: Export Settings Parity: Audio Configuration, Stream Toggles, Cropping & Multi-Format Controls
+
+Tracked under Milestone [M47 - Export Settings Parity: Audio Configuration, Stream Toggles, Cropping & Multi-Format Controls](https://github.com/el-j/encoderCraft/milestone/25) addressing issues [#260](https://github.com/el-j/encoderCraft/issues/260) and [#265](https://github.com/el-j/encoderCraft/issues/265)–[#271](https://github.com/el-j/encoderCraft/issues/271).
+
+- [x] **M47.1: Master Stream Export Toggles ([#265](https://github.com/el-j/encoderCraft/issues/265))** – Implemented `export_video` and `export_audio` master stream toggles with container capability gating and automatic tab filtering for audio-only, video-only, and mixed deliverables.
+- [x] **M47.2: Pre-Scale Source Raster Cropping ([#266](https://github.com/el-j/encoderCraft/issues/266))** – True subregion raster extraction in `FrameScaler` (`scale_cropped_into`) prior to scaling and aspect conform, eliminating black padding bars.
+- [x] **M47.3: Interactive Preview Monitor Crop Tool ([#267](https://github.com/el-j/encoderCraft/issues/267))** – Interactive on-monitor crop box with translucent mask, rule-of-thirds grid, corner drag handles, and aspect ratio constraint presets (1:1, 4:3, 16:9, 9:16, 2.39:1, Custom).
+- [x] **M47.4: Dynamic Interactive Audio Parameters & Persistence ([#268](https://github.com/el-j/encoderCraft/issues/268))** – Fully interactive audio codec selection from container capabilities, sample rate, channel layout, bitrate, bit depth (16/24/32-bit), and lip-sync delay with immediate persistence to job targets.
+- [x] **M47.5: Multi-Format Audio-Only Pipeline Support ([#269](https://github.com/el-j/encoderCraft/issues/269))** – Direct export of audio-only streams into MP4/M4A and MKV/WebM containers from video, audio, or DAW sources.
+- [x] **M47.6: Still Image & Advanced Video Rate Controls ([#270](https://github.com/el-j/encoderCraft/issues/270))** – Still image quality slider (1-100), GOP distance, consecutive B-frames, codec profile selection, and pixel format depth options.
+- [x] **M47.7: Queue & Preset Synchronization ([#271](https://github.com/el-j/encoderCraft/issues/271))** – Synchronized stream capabilities and presets when container formats are changed across the queue panel and inspector.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).

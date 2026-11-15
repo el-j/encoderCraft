@@ -505,6 +505,54 @@ impl ContainerType {
         self.valid_conversion_targets().contains(&target)
     }
 
+    /// Returns true if this container format can carry video streams.
+    pub fn supports_video(&self) -> bool {
+        matches!(
+            self,
+            Self::IsoBmffMp4
+                | Self::QuickTimeMov
+                | Self::MatroskaMkv
+                | Self::WebM
+                | Self::MpegTs
+                | Self::MxfOp1a
+                | Self::MxfOpAtom
+                | Self::AnimatedGif
+                | Self::StillSequence
+                | Self::AdobePremierePrproj
+                | Self::AdobeAfterEffectsAep
+                | Self::ArtcraftFilmcraft
+                | Self::ArtcraftEffectcraft
+                | Self::ArtcraftAnicraft
+        )
+    }
+
+    /// Returns true if this container format can carry audio streams.
+    pub fn supports_audio(&self) -> bool {
+        matches!(
+            self,
+            Self::IsoBmffMp4
+                | Self::QuickTimeMov
+                | Self::MatroskaMkv
+                | Self::WebM
+                | Self::MpegTs
+                | Self::MxfOp1a
+                | Self::MxfOpAtom
+                | Self::Wave
+                | Self::Aiff
+                | Self::Flac
+                | Self::OggAudio
+                | Self::Mp3
+                | Self::Caf
+                | Self::Opus
+                | Self::AdobeAuditionSesx
+                | Self::AdobePremierePrproj
+                | Self::AdobeAfterEffectsAep
+                | Self::ArtcraftSoundcraft
+                | Self::ArtcraftFilmcraft
+                | Self::ArtcraftEffectcraft
+        )
+    }
+
     /// User-friendly display name.
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -1100,9 +1148,16 @@ pub struct AudioEncodeSettings {
     pub sample_rate: Option<u32>,
     pub layout: Option<ChannelLayout>,
     pub bitrate_kbps: Option<u32>,
+    /// Bit depth for uncompressed PCM or lossless formats (16, 24, 32).
+    #[serde(default)]
+    pub bit_depth: Option<u8>,
     /// Delay or advance applied to the audio stream in milliseconds (lip-sync compensation).
     #[serde(default)]
     pub delay_ms: i32,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 /// Output target specifications.
@@ -1113,6 +1168,12 @@ pub struct OutputTarget {
     pub output_path: PathBuf,
     pub preset_name: String,
     pub container: ContainerType,
+    /// Master toggle for video stream export (AME Parity: Export Video checkbox).
+    #[serde(default = "default_true")]
+    pub export_video: bool,
+    /// Master toggle for audio stream export (AME Parity: Export Audio checkbox).
+    #[serde(default = "default_true")]
+    pub export_audio: bool,
     #[serde(default)]
     pub custom_width: Option<u32>,
     #[serde(default)]
@@ -1178,6 +1239,18 @@ pub struct OutputTarget {
     pub audio_mapping: Option<crate::audio::AudioChannelMapping>,
 }
 
+impl OutputTarget {
+    /// Returns true if video stream export is active and supported by the container.
+    pub fn is_video_enabled(&self) -> bool {
+        self.export_video && self.container.supports_video()
+    }
+
+    /// Returns true if audio stream export is active and supported by the container.
+    pub fn is_audio_enabled(&self) -> bool {
+        self.export_audio && self.container.supports_audio()
+    }
+}
+
 impl Default for OutputTarget {
     fn default() -> Self {
         Self {
@@ -1185,6 +1258,8 @@ impl Default for OutputTarget {
             output_path: PathBuf::new(),
             preset_name: String::new(),
             container: ContainerType::IsoBmffMp4,
+            export_video: true,
+            export_audio: true,
             custom_width: None,
             custom_height: None,
             custom_frame_rate: None,
@@ -1480,5 +1555,76 @@ mod tests {
 
         assert!(MediaStreamKind::ProjectTimeline.is_project_timeline());
         assert!(MediaStreamKind::ProjectTimeline.has_video());
+    }
+
+    #[test]
+    fn test_stream_support_and_toggles() {
+        assert!(ContainerType::IsoBmffMp4.supports_video());
+        assert!(ContainerType::IsoBmffMp4.supports_audio());
+        assert!(ContainerType::Wave.supports_audio());
+        assert!(!ContainerType::Wave.supports_video());
+        assert!(ContainerType::Png.media_kind().is_image());
+        assert!(!ContainerType::Png.supports_video());
+        assert!(!ContainerType::Png.supports_audio());
+
+        let mut target = OutputTarget {
+            container: ContainerType::IsoBmffMp4,
+            export_video: true,
+            export_audio: true,
+            audio: Some(AudioEncodeSettings {
+                codec: Some("aac".into()),
+                sample_rate: Some(48_000),
+                layout: Some(ChannelLayout::Stereo),
+                bitrate_kbps: Some(320),
+                bit_depth: None,
+                delay_ms: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(target.is_video_enabled());
+        assert!(target.is_audio_enabled());
+
+        target.export_video = false;
+        assert!(!target.is_video_enabled());
+        assert!(target.is_audio_enabled());
+
+        target.export_audio = false;
+        assert!(!target.is_audio_enabled());
+
+        // Audio container with export_video=true should still report video disabled
+        let audio_target = OutputTarget {
+            container: ContainerType::Wave,
+            export_video: true,
+            export_audio: true,
+            audio: Some(AudioEncodeSettings {
+                codec: Some("pcm_s24le".into()),
+                sample_rate: Some(96_000),
+                layout: Some(ChannelLayout::Stereo),
+                bitrate_kbps: None,
+                bit_depth: Some(24),
+                delay_ms: 0,
+            }),
+            ..Default::default()
+        };
+        assert!(!audio_target.is_video_enabled());
+        assert!(audio_target.is_audio_enabled());
+        assert_eq!(audio_target.audio.as_ref().and_then(|a| a.bit_depth), Some(24));
+
+        // Test backward-compatible JSON deserialization without exportVideo/exportAudio fields
+        let legacy_json = r#"{
+            "targetId": "legacy",
+            "outputPath": "/tmp/out.mp4",
+            "presetName": "Legacy MP4",
+            "container": "IsoBmffMp4"
+        }"#;
+        let deserialized: OutputTarget = serde_json::from_str(legacy_json).unwrap();
+        assert!(deserialized.export_video);
+        assert!(deserialized.export_audio);
+        assert!(deserialized.is_video_enabled());
+        assert!(deserialized.is_audio_enabled());
+
+        let mut disabled_audio = deserialized;
+        disabled_audio.export_audio = false;
+        assert!(!disabled_audio.is_audio_enabled());
     }
 }

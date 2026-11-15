@@ -373,6 +373,7 @@ fn mp3_and_ogg_vorbis_pipeline_transcode() {
         sample_rate: Some(44100),
         layout: Some(encodercraft_core::ChannelLayout::Mono),
         bitrate_kbps: Some(192),
+        bit_depth: None,
         delay_ms: 0,
     });
     mp3_target.metadata =
@@ -384,6 +385,7 @@ fn mp3_and_ogg_vorbis_pipeline_transcode() {
         sample_rate: Some(44100),
         layout: Some(encodercraft_core::ChannelLayout::Mono),
         bitrate_kbps: Some(160),
+        bit_depth: None,
         delay_ms: 0,
     });
 
@@ -417,6 +419,7 @@ fn mp3_and_ogg_vorbis_pipeline_transcode() {
         sample_rate: Some(44100),
         layout: Some(encodercraft_core::ChannelLayout::Mono),
         bitrate_kbps: None,
+        bit_depth: None,
         delay_ms: 0,
     });
     run(job(&wav_path, caf_target)).unwrap();
@@ -434,6 +437,7 @@ fn mp3_and_ogg_vorbis_pipeline_transcode() {
         sample_rate: Some(48000),
         layout: Some(encodercraft_core::ChannelLayout::Mono),
         bitrate_kbps: Some(128),
+        bit_depth: None,
         delay_ms: 0,
     });
     opus_target.metadata =
@@ -643,4 +647,78 @@ fn broadcast_mpeg_ts_and_apple_spatial_video_pipeline_transcode() {
     assert!(spatial_data.windows(4).any(|w| w == b"svhd"), "Missing svhd spatial header box");
     assert!(spatial_data.windows(4).any(|w| w == b"st3d"), "Missing st3d stereoscopic 3D box");
     assert!(spatial_data.windows(4).any(|w| w == b"lhvC"), "Missing lhvC layered HEVC config box");
+}
+
+#[test]
+fn test_stream_toggles_and_pre_scale_cropping() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_mp4 = dir.path().join("source.mp4");
+    write_source(&src_mp4);
+
+    // 1. Video-only MP4 (export_audio: false)
+    let vo_path = dir.path().join("video_only.mp4");
+    let mut vo_target = small_target(&vo_path, ContainerType::IsoBmffMp4, "YouTube 1080p Full HD");
+    vo_target.export_video = true;
+    vo_target.export_audio = false;
+    run(job(&src_mp4, vo_target)).unwrap();
+    let vo_reader = MediaReader::open(&vo_path).unwrap();
+    assert!(vo_reader.frame_count() > 0);
+    assert_eq!(vo_reader.probe().audio.len(), 0, "Video-only output must contain zero audio tracks");
+
+    // 2. Audio-only MP4 (export_video: false) from an audio-carrying source
+    let wav_path = dir.path().join("source.wav");
+    let mut pcm_bytes = Vec::new();
+    for i in 0..44100 {
+        let sample = ((i as f32 * 440.0 * 2.0 * std::f32::consts::PI / 44100.0).sin() * 16384.0) as i16;
+        pcm_bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    let mut wav_file = Vec::new();
+    wav_file.extend_from_slice(b"RIFF");
+    let total_size = (36 + pcm_bytes.len()) as u32;
+    wav_file.extend_from_slice(&total_size.to_le_bytes());
+    wav_file.extend_from_slice(b"WAVEfmt ");
+    wav_file.extend_from_slice(&16u32.to_le_bytes());
+    wav_file.extend_from_slice(&1u16.to_le_bytes());
+    wav_file.extend_from_slice(&1u16.to_le_bytes());
+    wav_file.extend_from_slice(&44100u32.to_le_bytes());
+    wav_file.extend_from_slice(&(44100u32 * 2).to_le_bytes());
+    wav_file.extend_from_slice(&2u16.to_le_bytes());
+    wav_file.extend_from_slice(&16u16.to_le_bytes());
+    wav_file.extend_from_slice(b"data");
+    wav_file.extend_from_slice(&(pcm_bytes.len() as u32).to_le_bytes());
+    wav_file.extend_from_slice(&pcm_bytes);
+    std::fs::write(&wav_path, &wav_file).unwrap();
+
+    let ao_path = dir.path().join("audio_only.m4a");
+    let mut ao_target = small_target(&ao_path, ContainerType::IsoBmffMp4, "YouTube 1080p Full HD");
+    ao_target.export_video = false;
+    ao_target.export_audio = true;
+    ao_target.audio = Some(encodercraft_core::AudioEncodeSettings {
+        codec: Some("aac".into()),
+        sample_rate: Some(48_000),
+        layout: Some(encodercraft_core::ChannelLayout::Stereo),
+        bitrate_kbps: Some(192),
+        bit_depth: None,
+        delay_ms: 0,
+    });
+    run(job(&wav_path, ao_target)).unwrap();
+    let ao_reader = MediaReader::open(&ao_path).unwrap();
+    assert_eq!(ao_reader.frame_count(), 0, "Audio-only output must contain zero video frames");
+    let ao_samples = ao_reader.read_all_audio(48_000).unwrap();
+    assert!(ao_samples.samples_per_channel() > 0, "Audio-only output must contain audio samples");
+
+    // 3. Both disabled: rejected with InvalidJobSpec
+    let bad_path = dir.path().join("bad.mp4");
+    let mut bad_target = small_target(&bad_path, ContainerType::IsoBmffMp4, "YouTube 1080p Full HD");
+    bad_target.export_video = false;
+    bad_target.export_audio = false;
+    assert!(run(job(&src_mp4, bad_target)).is_err());
+
+    // 4. Pre-scale source raster cropping
+    let crop_path = dir.path().join("cropped.mp4");
+    let mut crop_target = small_target(&crop_path, ContainerType::IsoBmffMp4, "YouTube 1080p Full HD");
+    crop_target.crop = Some(encodercraft_core::CropConfig { enabled: true, left: 8, top: 8, right: 8, bottom: 8 });
+    run(job(&src_mp4, crop_target)).unwrap();
+    let crop_reader = MediaReader::open(&crop_path).unwrap();
+    assert!(crop_reader.frame_count() > 0);
 }

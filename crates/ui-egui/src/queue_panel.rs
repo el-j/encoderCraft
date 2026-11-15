@@ -1269,6 +1269,8 @@ fn render_grouped_job_row(
                                 {
                                     let mut updated = target_t.clone();
                                     updated.container = current_container;
+                                    updated.export_video = current_container.supports_video();
+                                    updated.export_audio = current_container.supports_audio();
                                     let ext = current_container.file_extension();
                                     let mut p = updated.output_path.clone();
                                     p.set_extension(ext);
@@ -1480,6 +1482,8 @@ fn render_grouped_job_row(
                                     if let Some(target_t) = sel_job.spec.targets.get(target_idx) {
                                         let mut updated = target_t.clone();
                                         updated.container = current_container;
+                                        updated.export_video = current_container.supports_video();
+                                        updated.export_audio = current_container.supports_audio();
                                         let ext = current_container.file_extension();
                                         let mut p = updated.output_path.clone();
                                         p.set_extension(ext);

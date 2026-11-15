@@ -93,7 +93,7 @@ pub(crate) struct FrameProcessor {
 
 impl FrameProcessor {
     pub(crate) fn apply(&self, index: u64, src: &VideoFrame, out: &mut VideoFrame) -> Result<(), EncoderError> {
-        self.scaler.scale_into(src, out)?;
+        self.scaler.scale_cropped_into(src, out, self.crop.as_ref())?;
         if let Some(sdr) = &self.sdr_conform
             && sdr.enabled
         {
@@ -106,11 +106,6 @@ impl FrameProcessor {
             && limiter.enabled
         {
             crate::overlay::apply_video_limiter(out, limiter)?;
-        }
-        if let Some(crop) = &self.crop
-            && crop.enabled
-        {
-            crate::overlay::apply_crop(out, crop)?;
         }
         if let Some(wm) = &self.watermark {
             wm.draw(out)?;
