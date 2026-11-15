@@ -722,3 +722,96 @@ fn test_stream_toggles_and_pre_scale_cropping() {
     let crop_reader = MediaReader::open(&crop_path).unwrap();
     assert!(crop_reader.frame_count() > 0);
 }
+
+#[test]
+fn test_document_format_conformance() {
+    let dir = tempdir().unwrap();
+
+    // 1. Create a DOCX source file using DocumentCanvas
+    let mut doc = encodercraft_pipeline::DocumentCanvas::new("Executive Report");
+    doc.pages[0].add_text(54.0, 720.0, 500.0, 24.0, "Quarterly Strategy", 20.0);
+    doc.pages[0].add_text(54.0, 680.0, 500.0, 16.0, "Revenue and conversion integrity reached 100%.", 12.0);
+    let docx_bytes = doc.to_docx_bytes().unwrap();
+    let docx_path = dir.path().join("source.docx");
+    std::fs::write(&docx_path, &docx_bytes).unwrap();
+
+    // Transcode DOCX -> PDF/X-4
+    let pdf_path = dir.path().join("output.pdf");
+    let mut pdf_target = small_target(&pdf_path, ContainerType::Pdf, "PDF/X-4 Commercial Print");
+    pdf_target.export_video = false;
+    pdf_target.export_audio = false;
+    run(job(&docx_path, pdf_target)).unwrap();
+    assert!(pdf_path.exists());
+    let pdf_bytes = std::fs::read(&pdf_path).unwrap();
+    assert!(pdf_bytes.starts_with(b"%PDF-"));
+    let pdf_str = String::from_utf8_lossy(&pdf_bytes);
+    assert!(pdf_str.contains("Quarterly Strategy"));
+
+    // Transcode DOCX -> Markdown
+    let md_path = dir.path().join("output.md");
+    let mut md_target = small_target(&md_path, ContainerType::Markdown, "Custom");
+    md_target.export_video = false;
+    md_target.export_audio = false;
+    run(job(&docx_path, md_target)).unwrap();
+    assert!(md_path.exists());
+    let md_text = std::fs::read_to_string(&md_path).unwrap();
+    assert!(md_text.contains("Quarterly Strategy"));
+
+    // Transcode DOCX -> HTML
+    let html_path = dir.path().join("output.html");
+    let mut html_target = small_target(&html_path, ContainerType::Html, "Custom");
+    html_target.export_video = false;
+    html_target.export_audio = false;
+    run(job(&docx_path, html_target)).unwrap();
+    assert!(html_path.exists());
+    let html_text = std::fs::read_to_string(&html_path).unwrap();
+    assert!(html_text.contains("Quarterly Strategy"));
+
+    // 2. Create an EPUB source file
+    let epub_bytes = doc.to_epub_bytes().unwrap();
+    let epub_path = dir.path().join("book.epub");
+    std::fs::write(&epub_path, &epub_bytes).unwrap();
+
+    // Transcode EPUB -> PDF/X-4
+    let epub_pdf_path = dir.path().join("epub_output.pdf");
+    let mut epub_pdf_target = small_target(&epub_pdf_path, ContainerType::Pdf, "PDF/X-4 Commercial Print");
+    epub_pdf_target.export_video = false;
+    epub_pdf_target.export_audio = false;
+    run(job(&epub_path, epub_pdf_target)).unwrap();
+    assert!(epub_pdf_path.exists());
+    let epub_pdf_bytes = std::fs::read(&epub_pdf_path).unwrap();
+    assert!(epub_pdf_bytes.starts_with(b"%PDF-"));
+
+    // 3. Create a PPTX source file
+    let slide_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:txBody>
+          <a:bodyPr/>
+          <a:p><a:r><a:t>PowerPoint Slide Deck</a:t></a:r></a:p>
+          <a:p><a:r><a:t>High Performance Transcoding</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>"#;
+    let content_types: &[u8] = b"<Types></Types>";
+    let slide1_bytes: &[u8] = slide_xml.as_bytes();
+    let pptx_bytes = encodercraft_pipeline::create_zip_archive(&[("[Content_Types].xml", content_types), ("ppt/slides/slide1.xml", slide1_bytes)]);
+    let pptx_path = dir.path().join("presentation.pptx");
+    std::fs::write(&pptx_path, &pptx_bytes).unwrap();
+
+    // Transcode PPTX -> PDF/X-4
+    let pptx_pdf_path = dir.path().join("pptx_output.pdf");
+    let mut pptx_pdf_target = small_target(&pptx_pdf_path, ContainerType::Pdf, "PDF/X-4 Commercial Print");
+    pptx_pdf_target.export_video = false;
+    pptx_pdf_target.export_audio = false;
+    run(job(&pptx_path, pptx_pdf_target)).unwrap();
+    assert!(pptx_pdf_path.exists());
+    let pptx_pdf_bytes = std::fs::read(&pptx_pdf_path).unwrap();
+    assert!(pptx_pdf_bytes.starts_with(b"%PDF-"));
+    let pptx_pdf_str = String::from_utf8_lossy(&pptx_pdf_bytes);
+    assert!(pptx_pdf_str.contains("PowerPoint Slide Deck"));
+}

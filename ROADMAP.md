@@ -389,6 +389,18 @@ Tracked under Milestone [M47 - Export Settings Parity: Audio Configuration, Stre
 - [x] **M47.6: Still Image & Advanced Video Rate Controls ([#270](https://github.com/el-j/encoderCraft/issues/270))** – Still image quality slider (1-100), GOP distance, consecutive B-frames, codec profile selection, and pixel format depth options.
 - [x] **M47.7: Queue & Preset Synchronization ([#271](https://github.com/el-j/encoderCraft/issues/271))** – Synchronized stream capabilities and presets when container formats are changed across the queue panel and inspector.
 
+## Milestone 48: Universal Media Conversion Integrity, Real Codec Conformance & Desktop Shell Polish
+
+Tracked under Milestone [M48 - Universal Media Conversion Integrity, Real Codec Conformance & Desktop Shell Polish](https://github.com/el-j/encoderCraft/milestone/26) addressing issues [#275](https://github.com/el-j/encoderCraft/issues/275)–[#281](https://github.com/el-j/encoderCraft/issues/281).
+
+- [x] **M48.1: Robust DOCX Ingestion & Guaranteed PDF/X-4 Output ([#275](https://github.com/el-j/encoderCraft/issues/275))** – Tolerates non-fatal styling warnings in `designcraft_textimport` and provides direct OpenXML fallback parsing from `word/document.xml`, guaranteeing genuine multi-page PDF/X-4, Markdown, and HTML conversions.
+- [x] **M48.2: Real Zip-Package Content Extraction (EPUB & PPTX) ([#276](https://github.com/el-j/encoderCraft/issues/276))** – Replaced stub placeholder text with genuine content extraction for EPUB chapters (`html_to_text`) and PowerPoint slide XML paragraphs (`<a:p>` / `<a:t>`), plus robust `list_zip_entries` helper.
+- [x] **M48.3: Queue Duplication Counter & Overwrite Collision Protection ([#277](https://github.com/el-j/encoderCraft/issues/277))** – Automatic unique numeric suffix incrementing (`_1`, `_2`) when duplicating jobs or output targets, destination collision warning banners in queue panel, and one-click auto-renaming.
+- [x] **M48.4: Preset Browser Overscroll & Dock Boundary Constraining ([#278](https://github.com/el-j/encoderCraft/issues/278))** – Fixed floating/detached buttons during overscrolling by enforcing `ui.set_clip_rect` and row visibility culling (`ui.is_rect_visible`).
+- [x] **M48.5: Media Browser Polish: Left-Aligned Filenames & Resizable Headers ([#279](https://github.com/el-j/encoderCraft/issues/279))** – Fixed column divider misalignment between header and row cells by synchronizing `cols.name` with `settings.name`, drawing clear divider guide lines, and strictly left-aligning filename cells.
+- [x] **M48.6: Window Maximize / Restore on Header Double-Click ([#280](https://github.com/el-j/encoderCraft/issues/280))** – Protected egui's double-click pointer state in `titlebar::drag_area` so double-clicking anywhere on the top menu bar or header bar toggles window maximize and restore across desktop platforms.
+- [x] **M48.7: Upstream craft-libs Codec Ecosystem Expansion & End-to-End Tests ([#281](https://github.com/el-j/encoderCraft/issues/281))** – Eliminated dummy fallback projects in motion and timeline project executors in favor of typed errors, added comprehensive integration tests for DOCX, EPUB, and PPTX conversions in `presets_conformance.rs`.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).
