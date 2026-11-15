@@ -336,6 +336,37 @@ Tracked under Milestone [M41 - Production Workflow, UI/UX Polish & Adobe Media E
 - [x] **M41.10: Distinctive Visual Media Kind Badges & Icons (#201)** – Render color-coded essence chips and distinctive icons (VID, AUD, IMG, DOC, 3D, SEQ) in the Queue Source column.
 - [x] **M41.11: Preset Browser Layout Bounds & Scrolling Overflow Fix (#202)** – Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
 
+## Milestone 42: Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews
+
+Tracked under Milestone [M42 - Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews](https://github.com/el-j/encoderCraft/milestone/20).
+
+- [ ] **M42.1: File & Folder Operations in Media Browser (#216)** – Inline rename (`Cmd+R` / Enter), New Folder (`Cmd+Shift+N`), and file move operations.
+- [ ] **M42.2: Resizable Columns, Left-Aligned Names & Header Column Picker (#217)** – Interactive column divider resizing, left-aligned filenames in list view, and right-click column show/hide menu.
+- [ ] **M42.3: Rich Thumbnail View with Folder Cards & Format Badges (#218)** – Folder-styled cards, image/video thumbnail textures, audio waveforms, and corner format pills (`MP4`, `FLAC`, etc.).
+
+## Milestone 43: Desktop Shell, Window Behavior & Settings Parity
+
+Tracked under Milestone [M43 - Desktop Shell, Window Behavior & Settings Parity](https://github.com/el-j/encoderCraft/milestone/21).
+
+- [x] **M43.1: Preset Browser Overscroll & Detached Item Popup Fix (#219)** – Fix detached floating preset labels bleeding outside dock boundaries and constrain tree to scroll area.
+- [x] **M43.2: Resizable Settings Window Height & Hardware-Relevant Filtering (#220)** – Dynamic height resizing for preferences modal and filter accelerators by active host hardware.
+- [x] **M43.3: Automatic Parent Directory Creation on State Journal Commit (#221)** – Prevent atomic journal I/O failure on parallelism and settings mutations by ensuring parent directory exists.
+- [x] **M43.4: Window Maximize / Restore Toggle on Title Bar Double-Click (#222)** – Double-click on header bar toggles window maximize and restore across desktop platforms.
+
+## Milestone 44: Universal Preview Engine for All Media Domains
+
+Tracked under Milestone [M44 - Universal Preview Engine for All Media Domains](https://github.com/el-j/encoderCraft/milestone/22).
+
+- [ ] **M44.1: Universal Preview for Documents, Vector Graphics, 3D & Audio (#223)** – Render paginated document previews (DOCX, PDF, IDML, text), vector graphics (SVG, EPS, WMF), interactive 3D viewport (STL, OBJ, GLB, USDZ), and audio waveform scrubber in the Preview monitor.
+
+## Milestone 45: Queue In/Out Display, Table Customization & 3D/Document Presets
+
+Tracked under Milestone [M45 - Queue In/Out Display, Table Customization & 3D/Document Presets](https://github.com/el-j/encoderCraft/milestone/23).
+
+- [x] **M45.1: Queue In/Out Point & Trimmed Duration Display (#224)** – Display In mark, Out mark, and trimmed length directly in queue rows; add right-click column show/hide selector to queue table header.
+- [x] **M45.2: 3D Conversion Pipeline Audit & STEP/STP CAD Ingestion (#225)** – Ensure robust transcode across all 3D mesh formats (STL, OBJ, GLB, USDZ) and add ISO 10303 STEP/STP solid CAD ingestion.
+- [x] **M45.3: Document & Publishing Conversion Presets (#226)** – Built-in factory presets for DOCX to Markdown, DOCX to HTML, PDF to PNG sequence, Markdown to PDF, and Document to EPUB 3.
+
 ## Proposed Milestone 46: User-Installable Codec Providers
 
 Open GitHub issues and milestones were reviewed on 2026-11-13. GitHub currently marks M39–M45 open; M39–M41 are documented as complete in this repository, while M42–M45 contain the current format, preview, and queue work. No pre-existing open issue or milestone defines a general runtime provider API. Adjacent docs do contemplate a specific optional system-FFmpeg subprocess bridge ([format matrix](docs/file-format-matrix.md), [plan-draft-00](docs/plan-draft-00.md), and the implementation risk table), but not provider manifests, multi-provider discovery, lifecycle controls, or a reusable protocol. GitHub [milestone M46](https://github.com/el-j/encoderCraft/milestone/24) and its nine scoped issues (#251–#259) now track the broader follow-on work without replacing or reprioritizing existing milestones.

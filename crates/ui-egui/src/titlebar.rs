@@ -67,19 +67,29 @@ enum Caption {
 
 const CAPTIONS: [Caption; 3] = [Caption::Minimize, Caption::Maximize, Caption::Close];
 
-fn maximized(ctx: &egui::Context) -> bool {
-    ctx.input(|i| i.viewport().maximized.unwrap_or(false))
+pub fn maximized(ctx: &egui::Context) -> bool {
+    let id = Id::NULL.with("app_window_maximized_cached");
+    if let Some(value) = ctx.input(|i| i.viewport().maximized) {
+        ctx.data_mut(|d| d.insert_temp(id, value));
+        value
+    } else {
+        ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false)
+    }
 }
 
-fn toggle_maximize(ctx: &egui::Context) {
-    ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized(ctx)));
+pub fn toggle_maximize(ctx: &egui::Context) {
+    let id = Id::NULL.with("app_window_maximized_cached");
+    let current_max = maximized(ctx);
+    let next = !current_max;
+    ctx.data_mut(|d| d.insert_temp(id, next));
+    ctx.send_viewport_cmd(ViewportCommand::Maximized(next));
 }
 
 /// The bar's background: a press-and-drag on bare space moves the window, a double-click toggles
 /// maximize. Call it before laying out the bar so its widgets, registered later, take the clicks.
 pub fn drag_area(ui: &Ui, rect: Rect) {
     let ctx = ui.ctx();
-    let resp = ui.interact(rect, Id::unique("titlebar-drag"), Sense::CLICK | Sense::DRAG);
+    let resp = ui.interact(rect, ui.make_persistent_id("titlebar-drag"), Sense::CLICK | Sense::DRAG);
     // A drag that starts on a click-only widget (a menu title) is handed to the background below
     // it, so remember whether the press itself landed on bare background.
     if ctx.input(|i| i.pointer.any_pressed()) {
@@ -108,7 +118,7 @@ pub fn caption_buttons(ui: &mut Ui, tokens: &Tokens, bar: Rect) {
     let mut clicked = None;
     for (i, caption) in CAPTIONS.into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(bar.right() - WIDTH + i as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
-        let resp = ui.interact(r, Id::unique(("titlebar-caption", i)), Sense::click());
+        let resp = ui.interact(r, ui.make_persistent_id(("titlebar-caption", i)), Sense::click());
         let close = caption == Caption::Close;
         let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
             (true, _) if close => CLOSE_RED.gamma_multiply(0.8),
@@ -186,10 +196,10 @@ pub fn resize_zones(ui: &mut Ui) {
         return;
     }
     let w = ctx.content_rect();
-    let layer = LayerId::new(Order::Foreground, Id::unique("titlebar-resize"));
-    let zone_ui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
+    let layer = LayerId::new(Order::Foreground, ui.make_persistent_id("titlebar-resize"));
+    let zone_ui = ui.new_child(egui::UiBuilder::new().id_salt("titlebar-resize-zones").layer_id(layer).max_rect(w));
     for (i, (r, dir, cursor)) in zones(w).into_iter().enumerate() {
-        let resp = zone_ui.interact(r, Id::unique(("titlebar-resize", i)), Sense::DRAG).on_hover_cursor(cursor);
+        let resp = zone_ui.interact(r, zone_ui.make_persistent_id(("titlebar-resize", i)), Sense::DRAG).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
             ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
             handed_to_os(&ctx);
@@ -211,6 +221,27 @@ mod tests {
         assert_eq!(TitleBarStyle::Custom.trailing_inset(), WIDTH);
         assert!(TitleBarStyle::Custom.is_custom() && !TitleBarStyle::Integrated.is_custom());
         assert!(!TitleBarStyle::System.drags_window());
+    }
+
+    #[test]
+    fn test_toggle_maximize_updates_cached_state() {
+        let ctx = egui::Context::default();
+        assert!(!maximized(&ctx));
+        toggle_maximize(&ctx);
+        assert!(maximized(&ctx));
+        toggle_maximize(&ctx);
+        assert!(!maximized(&ctx));
+    }
+
+    #[test]
+    fn observed_maximize_changes_update_the_fallback() {
+        let ctx = egui::Context::default();
+        for (observed, expected) in [(Some(true), true), (None, true), (Some(false), false), (None, false)] {
+            let mut input = egui::RawInput::default();
+            input.viewports.entry(input.viewport_id).or_default().maximized = observed;
+            let mut output = ctx.run_ui(input, |ui| assert_eq!(maximized(ui.ctx()), expected));
+            output.textures_delta.clear();
+        }
     }
 
     #[test]

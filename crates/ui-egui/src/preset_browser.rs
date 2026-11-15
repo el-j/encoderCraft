@@ -208,11 +208,9 @@ pub fn render_preset_browser(
                             for row in &user_rows {
                                 let Some(preset) = user_presets.iter().find(|p| p.name == row.name) else { continue };
                                 let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 16.0 };
-                                ui.horizontal(|ui| {
-                                    if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
-                                        chosen_command = Some(cmd);
-                                    }
-                                });
+                                if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
+                                    chosen_command = Some(cmd);
+                                }
                             }
                         }
                     }
@@ -265,11 +263,9 @@ pub fn render_preset_browser(
                                 for row in &cat_rows {
                                     let Some(preset) = cat_presets.iter().find(|p| p.name == row.name) else { continue };
                                     let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 28.0 };
-                                    ui.horizontal(|ui| {
-                                        if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
-                                            chosen_command = Some(cmd);
-                                        }
-                                    });
+                                    if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
+                                        chosen_command = Some(cmd);
+                                    }
                                 }
                             }
                         }
@@ -446,16 +442,12 @@ fn render_preset_row(ui: &mut Ui, row: &PresetRow, preset: &EncodingPreset, ctx:
     ui.push_id(&preset.name, |ui| {
         ui.horizontal(|ui| {
             // Preset Name column (with internal tree indent)
-            let name_w = (ctx.cols.name - ctx.indent).max(40.0);
-            let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.name, ctx.tokens.row_height), egui::Sense::hover());
-            let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(cell_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-            cell_ui.set_clip_rect(cell_rect);
-
             if ctx.indent > 0.0 {
-                cell_ui.add_space(ctx.indent);
+                ui.add_space(ctx.indent);
             }
+            let name_w = (ctx.cols.name - ctx.indent).max(40.0);
             let name_btn = egui::Button::new(RichText::new(&row.name).small()).truncate().selected(is_sel);
-            let name_resp = cell_ui.add_sized([name_w, ctx.tokens.row_height], name_btn);
+            let name_resp = ui.add_sized([name_w, ctx.tokens.row_height], name_btn);
             if name_resp.clicked() {
                 ctx.state.selected_preset = Some(preset.clone());
             }
