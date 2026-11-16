@@ -61,6 +61,41 @@ pub struct QueuePanelState {
     pub pending_updates: Vec<(String, CraftJobSpec)>,
     pub status_message: Option<String>,
     pub confirm_collision_start: bool,
+    pub column_settings: QueueColumnSettings,
+}
+
+/// User-adjustable column width settings for Queue table with persistence (AME Parity).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct QueueColumnSettings {
+    pub source: Option<f32>,
+    pub in_out: f32,
+    pub trimmed_length: f32,
+    pub format: f32,
+    pub preset: f32,
+    pub output: f32,
+    pub status: f32,
+    pub eta: f32,
+    pub video_codec: f32,
+    pub audio_channels: f32,
+    pub bitrate: f32,
+}
+
+impl Default for QueueColumnSettings {
+    fn default() -> Self {
+        Self {
+            source: None,
+            in_out: QueueColumnWidths::IN_OUT,
+            trimmed_length: QueueColumnWidths::TRIMMED_LENGTH,
+            format: QueueColumnWidths::FORMAT,
+            preset: QueueColumnWidths::PRESET,
+            output: QueueColumnWidths::OUTPUT,
+            status: QueueColumnWidths::STATUS,
+            eta: QueueColumnWidths::ETA,
+            video_codec: QueueColumnWidths::VIDEO_CODEC,
+            audio_channels: QueueColumnWidths::AUDIO_CHANNELS,
+            bitrate: QueueColumnWidths::BITRATE,
+        }
+    }
 }
 
 fn execute_queue_command(
@@ -277,22 +312,48 @@ impl QueueColumnWidths {
     }
 
     pub fn calculate_for_columns(available_width: f32, spacing: f32, columns: &[String]) -> Self {
+        Self::calculate_for_columns_and_settings(available_width, spacing, columns, &QueueColumnSettings::default())
+    }
+
+    pub fn calculate_for_columns_and_settings(available_width: f32, spacing: f32, columns: &[String], settings: &QueueColumnSettings) -> Self {
         let visible = |id: &str| queue_column_visible(columns, id);
-        let src = if visible("source") { 160.0 } else { 0.0 };
-        let in_out = if visible("inOut") { Self::IN_OUT } else { 0.0 };
-        let trimmed_length = if visible("trimmedLength") { Self::TRIMMED_LENGTH } else { 0.0 };
-        let format = if visible("format") { Self::FORMAT } else { 0.0 };
-        let preset = if visible("preset") { Self::PRESET } else { 0.0 };
-        let output = if visible("output") { Self::OUTPUT } else { 0.0 };
-        let status = if visible("status") { Self::STATUS } else { 0.0 };
-        let eta = if visible("eta") { Self::ETA } else { 0.0 };
-        let video_codec = if visible("videoCodec") { Self::VIDEO_CODEC } else { 0.0 };
-        let audio_channels = if visible("audioChannels") { Self::AUDIO_CHANNELS } else { 0.0 };
-        let bitrate = if visible("bitrate") { Self::BITRATE } else { 0.0 };
+        let in_out = if visible("inOut") { settings.in_out } else { 0.0 };
+        let trimmed_length = if visible("trimmedLength") { settings.trimmed_length } else { 0.0 };
+        let format = if visible("format") { settings.format } else { 0.0 };
+        let preset = if visible("preset") { settings.preset } else { 0.0 };
+        let output = if visible("output") { settings.output } else { 0.0 };
+        let status = if visible("status") { settings.status } else { 0.0 };
+        let eta = if visible("eta") { settings.eta } else { 0.0 };
+        let video_codec = if visible("videoCodec") { settings.video_codec } else { 0.0 };
+        let audio_channels = if visible("audioChannels") { settings.audio_channels } else { 0.0 };
+        let bitrate = if visible("bitrate") { settings.bitrate } else { 0.0 };
         let fixed = in_out + trimmed_length + format + preset + output + status + eta + video_codec + audio_channels + bitrate;
         let gaps = spacing * QUEUE_COLUMNS.len().saturating_sub(1) as f32;
-        let src = if visible("source") { (available_width - fixed - gaps).max(160.0) } else { src };
+        let default_src = (available_width - fixed - gaps).max(120.0);
+        let src = if visible("source") { settings.source.unwrap_or(default_src).max(80.0) } else { 0.0 };
         Self { src, in_out, trimmed_length, format, preset, output, status, eta, video_codec, audio_channels, bitrate }
+    }
+}
+
+/// Applies a preset fully to an output target, updating its container, video/audio flags,
+/// encode parameters, and adjusting the output path extension (AME Parity).
+pub fn apply_preset_to_output_target(target: &mut encodercraft_core::OutputTarget, preset_name: &str) {
+    target.preset_name = preset_name.to_string();
+    let registry = encodercraft_presets::PresetRegistry::default();
+    if let Some(preset) = registry.find_by_name(preset_name) {
+        target.container = preset.container;
+        target.export_video = preset.container.supports_video();
+        target.export_audio = preset.container.supports_audio();
+        target.video = preset.video_encode_settings();
+        if let Some(video) = preset.video.as_ref()
+            && video.target_bitrate_kbps > 0
+        {
+            target.target_bitrate_kbps = Some(video.target_bitrate_kbps);
+        }
+        let ext = preset.container.file_extension();
+        let mut path = target.output_path.clone();
+        path.set_extension(ext);
+        target.output_path = path;
     }
 }
 
@@ -735,7 +796,12 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
         });
     }
 
-    let cols = QueueColumnWidths::calculate_for_columns(ui.available_width(), ui.spacing().item_spacing.x, visible_columns);
+    let cols = QueueColumnWidths::calculate_for_columns_and_settings(
+        ui.available_width(),
+        ui.spacing().item_spacing.x,
+        visible_columns,
+        &state.column_settings,
+    );
 
     ui.vertical(|ui| {
         if let Some(message) = &state.status_message {
@@ -1048,71 +1114,103 @@ fn column_picker_contents(ui: &mut Ui, visible_columns: &mut Vec<String>) {
     }
 }
 
+fn render_resizable_column_header<R>(ui: &mut Ui, width: &mut f32, tokens: &Tokens, add_contents: impl FnOnce(&mut Ui, f32) -> R) -> R {
+    let w = *width;
+    if w <= 0.0 {
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::ZERO, egui::Sense::hover());
+        let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        return add_contents(&mut cell_ui, w);
+    }
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 18.0), egui::Sense::hover());
+    let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    cell_ui.set_clip_rect(rect);
+    let result = add_contents(&mut cell_ui, w);
+
+    // Draggable resize divider handle on right edge
+    let handle_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 3.0, rect.min.y), egui::pos2(rect.max.x + 3.0, rect.max.y));
+    let handle_resp = ui.allocate_rect(handle_rect, egui::Sense::drag());
+    if handle_resp.dragged() {
+        *width = (*width + handle_resp.drag_delta().x).clamp(40.0, 800.0);
+    }
+    if handle_resp.hovered() || handle_resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+        ui.painter().vline(rect.max.x, rect.min.y..=rect.max.y, egui::Stroke::new(1.0, tokens.accent_primary));
+    } else {
+        ui.painter().vline(rect.max.x, rect.min.y + 2.0..=rect.max.y - 2.0, egui::Stroke::new(1.0, tokens.border_subtle));
+    }
+    result
+}
+
 fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens, cols: QueueColumnWidths, visible_columns: &mut Vec<String>) {
+    let mut sort_toggle: Option<QueueSortColumn> = None;
     let header = egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            // Source Column (expands)
-            render_column_cell(ui, cols.src, 18.0, |ui| {
-                let src_label = format!("Source Name{}", sort_indicator(state, QueueSortColumn::Source));
-                let src_resp = ui.add_sized([cols.src, 18.0], egui::Button::new(RichText::new(src_label).strong().small()).frame(false));
-                if src_resp.clicked() {
-                    state.toggle_sort(QueueSortColumn::Source);
-                }
+            // Source Column (expands or user-resized)
+            let mut src_w = cols.src;
+            let src_label = format!("Source Name{}", sort_indicator(state, QueueSortColumn::Source));
+            let src_clicked = render_resizable_column_header(ui, &mut src_w, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&src_label).strong().small()).frame(false)).clicked()
             });
+            if src_clicked {
+                sort_toggle = Some(QueueSortColumn::Source);
+            }
+            if (src_w - cols.src).abs() > 0.5 {
+                state.column_settings.source = Some(src_w);
+            }
 
-            render_column_cell(ui, cols.in_out, 18.0, |ui| {
+            render_resizable_column_header(ui, &mut state.column_settings.in_out, tokens, |ui, _| {
                 ui.label(RichText::new("In/Out Range").strong().small());
             });
-            render_column_cell(ui, cols.trimmed_length, 18.0, |ui| {
+            render_resizable_column_header(ui, &mut state.column_settings.trimmed_length, tokens, |ui, _| {
                 ui.label(RichText::new("Trimmed Length").strong().small());
             });
 
             // Format Column
-            render_column_cell(ui, cols.format, 18.0, |ui| {
-                let fmt_label = format!("Format{}", sort_indicator(state, QueueSortColumn::Format));
-                let fmt_resp = ui.add_sized([cols.format, 18.0], egui::Button::new(RichText::new(fmt_label).strong().small()).frame(false));
-                if fmt_resp.clicked() {
-                    state.toggle_sort(QueueSortColumn::Format);
-                }
+            let fmt_label = format!("Format{}", sort_indicator(state, QueueSortColumn::Format));
+            let fmt_clicked = render_resizable_column_header(ui, &mut state.column_settings.format, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&fmt_label).strong().small()).frame(false)).clicked()
             });
+            if fmt_clicked {
+                sort_toggle = Some(QueueSortColumn::Format);
+            }
 
             // Preset Column
-            render_column_cell(ui, cols.preset, 18.0, |ui| {
-                let pre_label = format!("Preset{}", sort_indicator(state, QueueSortColumn::Preset));
-                let pre_resp = ui.add_sized([cols.preset, 18.0], egui::Button::new(RichText::new(pre_label).strong().small()).frame(false));
-                if pre_resp.clicked() {
-                    state.toggle_sort(QueueSortColumn::Preset);
-                }
+            let pre_label = format!("Preset{}", sort_indicator(state, QueueSortColumn::Preset));
+            let pre_clicked = render_resizable_column_header(ui, &mut state.column_settings.preset, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&pre_label).strong().small()).frame(false)).clicked()
             });
+            if pre_clicked {
+                sort_toggle = Some(QueueSortColumn::Preset);
+            }
 
             // Output File Column
-            render_column_cell(ui, cols.output, 18.0, |ui| {
-                let out_label = format!("Output File{}", sort_indicator(state, QueueSortColumn::Output));
-                let out_resp = ui.add_sized([cols.output, 18.0], egui::Button::new(RichText::new(out_label).strong().small()).frame(false));
-                if out_resp.clicked() {
-                    state.toggle_sort(QueueSortColumn::Output);
-                }
+            let out_label = format!("Output File{}", sort_indicator(state, QueueSortColumn::Output));
+            let out_clicked = render_resizable_column_header(ui, &mut state.column_settings.output, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&out_label).strong().small()).frame(false)).clicked()
             });
+            if out_clicked {
+                sort_toggle = Some(QueueSortColumn::Output);
+            }
 
             // Status Column
-            render_column_cell(ui, cols.status, 18.0, |ui| {
-                let st_label = format!("Status{}", sort_indicator(state, QueueSortColumn::Status));
-                let st_resp = ui.add_sized([cols.status, 18.0], egui::Button::new(RichText::new(st_label).strong().small()).frame(false));
-                if st_resp.clicked() {
-                    state.toggle_sort(QueueSortColumn::Status);
-                }
+            let st_label = format!("Status{}", sort_indicator(state, QueueSortColumn::Status));
+            let st_clicked = render_resizable_column_header(ui, &mut state.column_settings.status, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&st_label).strong().small()).frame(false)).clicked()
             });
+            if st_clicked {
+                sort_toggle = Some(QueueSortColumn::Status);
+            }
 
-            render_column_cell(ui, cols.eta, 18.0, |ui| {
+            render_resizable_column_header(ui, &mut state.column_settings.eta, tokens, |ui, _| {
                 ui.label(RichText::new("ETA").strong().small());
             });
-            render_column_cell(ui, cols.video_codec, 18.0, |ui| {
+            render_resizable_column_header(ui, &mut state.column_settings.video_codec, tokens, |ui, _| {
                 ui.label(RichText::new("Video Codec").strong().small());
             });
-            render_column_cell(ui, cols.audio_channels, 18.0, |ui| {
+            render_resizable_column_header(ui, &mut state.column_settings.audio_channels, tokens, |ui, _| {
                 ui.label(RichText::new("Audio Channels").strong().small());
             });
-            render_column_cell(ui, cols.bitrate, 18.0, |ui| {
+            render_resizable_column_header(ui, &mut state.column_settings.bitrate, tokens, |ui, _| {
                 ui.label(RichText::new("Target Bitrate").strong().small());
             });
 
@@ -1123,6 +1221,9 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
             });
         });
     });
+    if let Some(col) = sort_toggle {
+        state.toggle_sort(col);
+    }
     header.response.interact(egui::Sense::click()).context_menu(|ui| {
         column_picker_contents(ui, visible_columns);
     });
@@ -1325,7 +1426,7 @@ fn render_grouped_job_row(
                                     && let Some(target_t) = target_job.spec.targets.first()
                                 {
                                     let mut updated = target_t.clone();
-                                    updated.preset_name = chosen_preset.clone();
+                                    apply_preset_to_output_target(&mut updated, &chosen_preset);
                                     execute_queue_command(
                                         state,
                                         commands,
@@ -1538,7 +1639,7 @@ fn render_grouped_job_row(
                                                 let target_idx = if sel_id == job_id { idx } else { 0 };
                                                 if let Some(target_t) = sel_job.spec.targets.get(target_idx) {
                                                     let mut updated = target_t.clone();
-                                                    updated.preset_name = preset_name.to_string();
+                                                    apply_preset_to_output_target(&mut updated, preset_name);
                                                     execute_queue_command(
                                                         state,
                                                         commands,

@@ -140,7 +140,7 @@ struct StillPixels {
 
 /// Extensions decoded by the shared photocraft still-image codecs (EXIF orientation applied, 16-bit,
 /// float and CMYK sources converted to RGBA8).
-pub const STILL_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp", "tga", "exr", "hdr", "gif"];
+pub const STILL_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp", "tga", "exr", "hdr", "gif", "dpx", "jxl", "dcm", "fits"];
 
 /// Returns true when `ext` is a known still-image format extension.
 pub fn is_still_extension(ext: &str) -> bool {

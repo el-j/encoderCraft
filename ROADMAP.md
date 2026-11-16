@@ -411,6 +411,16 @@ Tracked under Milestone [M49 - v0.1.0 First Stable Release Readiness & Final Gap
 - [x] **M49.4: Parity Documentation Refresh & Cross-Repository Project Linking ([#285](https://github.com/el-j/encoderCraft/issues/285))** – Complete refresh of README, ROADMAP, target app parity, and implementation milestones.
 - [x] **M49.5: Multi-Platform Release Smoke & Zero-Panic Stress Verification Gate ([#286](https://github.com/el-j/encoderCraft/issues/286))** – Full clean-room audit, xtask CI validation (>300 tests passed, strict layering, clippy clean).
 
+## Milestone 50: Production Blackbox Codec Matrix, Column Drag Ergonomics & Ingestion Integrity
+
+Tracked under Milestone [M50 - Production Blackbox Codec Matrix, Column Drag Ergonomics & Ingestion Integrity](https://github.com/el-j/encoderCraft/milestone/28) addressing issues [#300](https://github.com/el-j/encoderCraft/issues/300)–[#304](https://github.com/el-j/encoderCraft/issues/304).
+
+- [x] **M50.1: Draggable resizable column divider handles in Queue Window ([#300](https://github.com/el-j/encoderCraft/issues/300))** – Added custom `QueueColumnSettings` with draggable right-edge divider handles, `ResizeColumn` cursor feedback, hover highlighting, and width persistence.
+- [x] **M50.2: Draggable column dividers and left-aligned preset names in Preset Browser ([#301](https://github.com/el-j/encoderCraft/issues/301))** – Added resizable column headers to the preset browser and replaced centered buttons with left-aligned row layouts matching desktop conventions.
+- [x] **M50.3: Robust visual preview rendering for still images and multi-page PDFs ([#302](https://github.com/el-j/encoderCraft/issues/302))** – Integrated high-fidelity PDF page rasterization into GPU textures with egui repaint triggers and interactive scrubbing across document pages.
+- [x] **M50.4: Preset selection container & file extension synchronization with PDF multi-format rasterization ([#303](https://github.com/el-j/encoderCraft/issues/303))** – Synchronized preset dropdowns with target container, export flags, codec settings, and output file extension (`.jpg`, `.tif`, etc.), routing all still image formats through the universal PDF renderer.
+- [x] **M50.5: Comprehensive blackbox codec-to-codec conversion matrix test suite ([#304](https://github.com/el-j/encoderCraft/issues/304))** – Comprehensive end-to-end blackbox test suite covering video-to-video, audio-to-audio, PDF-to-images/markdown, vector graphics, still image conversion, and 3D spatial mesh conversion with synthetic verification.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).

@@ -957,6 +957,23 @@ Achieve full completion of all remaining release blockers for the v0.1.0 First S
 
 ---
 
+### Milestone 50: Production Blackbox Codec Matrix, Column Drag Ergonomics & Ingestion Integrity
+Tracked under Milestone [M50 - Production Blackbox Codec Matrix, Column Drag Ergonomics & Ingestion Integrity](https://github.com/el-j/encoderCraft/milestone/28) addressing issues [#300](https://github.com/el-j/encoderCraft/issues/300)–[#304](https://github.com/el-j/encoderCraft/issues/304).
+
+#### Objective & Context
+Guarantee rock-solid media transcoding and desktop ergonomics by delivering resizable column divider handles across Queue and Preset panels, left-aligned preset names, visual monitor preview for still images and multi-page PDFs, synchronized container presets, and a comprehensive end-to-end blackbox codec-to-codec conversion matrix test suite covering video, audio, document, vector, still image, and 3D spatial domains.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **M50.1: Draggable resizable column divider handles in Queue Window ([#300](https://github.com/el-j/encoderCraft/issues/300))** — Implemented `QueueColumnSettings` in `queue_panel.rs` with interactive right-edge drag dividers, `egui::CursorIcon::ResizeColumn` cursor feedback, visual hover indicators, and custom width clamping.
+2. [x] **M50.2: Draggable column dividers and left-aligned preset names in Preset Browser ([#301](https://github.com/el-j/encoderCraft/issues/301))** — Added resizable column headers via `render_resizable_preset_header` in `preset_browser.rs` and converted centered buttons into left-to-right aligned layouts matching standard desktop design guidelines.
+3. [x] **M50.3: Robust visual preview rendering for still images and multi-page PDFs ([#302](https://github.com/el-j/encoderCraft/issues/302))** — Integrated `render_pdf_page_to_rgba` and `pdf_page_count` in `preview_panel.rs`, caching GPU textures per page with interactive scrubbing, egui repaint requests, and aspect-correct display.
+4. [x] **M50.4: Preset selection container & file extension synchronization with PDF multi-format rasterization ([#303](https://github.com/el-j/encoderCraft/issues/303))** — Added `apply_preset_to_output_target` to automatically synchronize target container, video/audio export toggles, bitrate, and output path extension upon preset selection; routed all still image containers (JPEG, PNG, TIFF, WebP, BMP, OpenEXR, etc.) through the universal PDF renderer when ingesting PDF documents.
+5. [x] **M50.5: Comprehensive blackbox codec-to-codec conversion matrix test suite ([#304](https://github.com/el-j/encoderCraft/issues/304))** — Created synthetic blackbox test suite in `tests/test_blackbox_codec_matrix.rs` verifying video-to-video (MP4 -> ProRes MOV, WebM VP9), audio-to-audio (WAV -> MP3, FLAC, AIFF, OGG, CAF, Opus), PDF-to-images/markdown, vector graphics (SVG -> EPS, VectorCraft), still image conversion (PNG -> JPEG, WebP, TIFF, BMP), and 3D spatial mesh conversion (STL -> GLB, OBJ, PLY).
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

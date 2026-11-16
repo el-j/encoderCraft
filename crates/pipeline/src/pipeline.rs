@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use effectcraft_opusenc::OpusEncoder;
 use encodercraft_audio_dsp::{AacEncoderWrapper, SincResampler, normalize_loudness, remix_channels};
-use encodercraft_color::PixelFormat;
+use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor, VideoFrame};
 use encodercraft_geom::{Dimensions, ScaleMode};
 use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
@@ -22,7 +22,6 @@ use encodercraft_video_codecs::{EncodeParams, VideoCodecKind, VideoEncoder, crea
 use hayro::hayro_interpret::InterpreterSettings;
 use hayro::hayro_syntax::Pdf;
 use hayro::{RenderCache, RenderSettings, render};
-use image::ImageEncoder;
 
 use crate::input::{VideoInput, load_audio_required};
 use crate::progress::JobProgress;
@@ -471,8 +470,8 @@ impl TranscodePipeline {
             | ContainerType::Collada
             | ContainerType::Splat
             | ContainerType::Step => self.execute_spatial_3d(target, start_time)?,
-            ContainerType::Png => self.execute_pdf_or_image_transcode(target, start_time)?,
-            ContainerType::Jpeg
+            ContainerType::Png
+            | ContainerType::Jpeg
             | ContainerType::WebP
             | ContainerType::Tiff
             | ContainerType::OpenExr
@@ -482,8 +481,14 @@ impl TranscodePipeline {
             | ContainerType::Jxl
             | ContainerType::RadianceHdr
             | ContainerType::Dicom
-            | ContainerType::Fits
-            | ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
+            | ContainerType::Fits => {
+                if self.is_pdf_source() {
+                    self.execute_pdf_image_sequence(target, start_time)?
+                } else {
+                    self.execute_image_transcode(target, start_time)?
+                }
+            }
+            ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
             ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => {
                 self.execute_layered_image(target, start_time)?
             }
@@ -558,21 +563,27 @@ impl TranscodePipeline {
         load_audio_required(&self.spec.source, target)
     }
 
-    fn execute_pdf_or_image_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let is_pdf = match &self.spec.source {
+    fn is_pdf_source(&self) -> bool {
+        match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
-                let mut file = File::open(path).map_err(|error| EncoderError::Io(format!("failed to open source `{}`: {error}", path.display())))?;
-                let mut header = [0u8; 5];
-                let read =
-                    file.read(&mut header).map_err(|error| EncoderError::Io(format!("failed to inspect source `{}`: {error}", path.display())))?;
-                header.get(..read) == Some(b"%PDF-".as_slice())
+                if let Some(ext) = path.extension().and_then(|s| s.to_str())
+                    && ext.eq_ignore_ascii_case("pdf")
+                {
+                    return true;
+                }
+                if let Ok(mut file) = File::open(path) {
+                    let mut header = [0u8; 5];
+                    if let Ok(read) = file.read(&mut header) {
+                        return header.get(..read) == Some(b"%PDF-".as_slice());
+                    }
+                }
+                false
             }
             _ => false,
-        };
-        if is_pdf { self.execute_pdf_png_sequence(target, start_time) } else { self.execute_image_transcode(target, start_time) }
+        }
     }
 
-    fn execute_pdf_png_sequence(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+    fn execute_pdf_image_sequence(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
         const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
         const MAX_PDF_PAGES: usize = 10_000;
         let path = match &self.spec.source {
@@ -648,10 +659,17 @@ impl TranscodePipeline {
             if rendered.data_as_u8_slice().len() != expected_bytes {
                 return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} renderer returned an invalid RGBA buffer")));
             }
-            let mut png_bytes = Vec::new();
-            image::codecs::png::PngEncoder::new(&mut png_bytes)
-                .write_image(rendered.data_as_u8_slice(), width, height, image::ExtendedColorType::Rgba8)
-                .map_err(|error| EncoderError::InvalidContainer(format!("failed to encode PDF page {page_number} as PNG: {error}")))?;
+
+            let frame = VideoFrame::from_raw_bytes(
+                Dimensions::new(width, height)?,
+                PixelFormat::Rgba8,
+                ColorSpaceTag::SRGB,
+                0,
+                1,
+                Rational64 { num: 1, den: 1 },
+                rendered.data_as_u8_slice().to_vec(),
+            )?;
+
             let output_path = pdf_page_output_path(&target.output_path, page_number, selected_page_count)?;
             if let Some(parent) = output_path.parent()
                 && !parent.as_os_str().is_empty()
@@ -659,8 +677,7 @@ impl TranscodePipeline {
                 std::fs::create_dir_all(parent)
                     .map_err(|error| EncoderError::Io(format!("failed to create output directory `{}`: {error}", parent.display())))?;
             }
-            std::fs::write(&output_path, png_bytes)
-                .map_err(|error| EncoderError::Io(format!("failed to write PDF page PNG `{}`: {error}", output_path.display())))?;
+            self.write_still(target, frame, &output_path)?;
             self.progress.advance_frame(start_time);
         }
         Ok(())
@@ -3475,6 +3492,29 @@ mod tests {
     }
 
     #[test]
+    fn pdf_to_jpeg_and_tiff_renders_cleanly() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source_single.pdf");
+        let jpeg_out = dir.path().join("rendered.jpg");
+        let tiff_out = dir.path().join("rendered.tif");
+        let mut pdf_doc = crate::document::DocumentCanvas::new("Single page PDF");
+        pdf_doc.pages[0].add_text(54.0, 720.0, 500.0, 20.0, "JPEG & TIFF export test", 12.0);
+        std::fs::write(&source, pdf_doc.to_pdf_x4_bytes().unwrap()).unwrap();
+
+        // 1. PDF -> JPEG
+        TranscodePipeline::new(selection_spec(source.clone(), jpeg_out.clone(), ContainerType::Jpeg, Default::default())).execute().unwrap();
+        assert!(jpeg_out.exists(), "JPEG output file should exist");
+        let jpg_bytes = std::fs::read(&jpeg_out).unwrap();
+        assert!(jpg_bytes.starts_with(&[0xFF, 0xD8, 0xFF]), "JPEG file should start with SOI marker");
+
+        // 2. PDF -> TIFF
+        TranscodePipeline::new(selection_spec(source, tiff_out.clone(), ContainerType::Tiff, Default::default())).execute().unwrap();
+        assert!(tiff_out.exists(), "TIFF output file should exist");
+        let tif_bytes = std::fs::read(&tiff_out).unwrap();
+        assert!(tif_bytes.starts_with(b"II*\0") || tif_bytes.starts_with(b"MM\0*"), "TIFF file should start with TIFF magic");
+    }
+
+    #[test]
     fn test_execute_spatial_3d_ascii_stl_and_step_to_glb() {
         let dir = tempdir().unwrap();
 
@@ -4314,10 +4354,13 @@ fn pdf_page_output_path(path: &Path, page_number: usize, selected_page_count: us
     if selected_page_count == 1 {
         return Ok(path.to_path_buf());
     }
-    let stem =
-        path.file_stem().and_then(|stem| stem.to_str()).ok_or_else(|| EncoderError::InvalidJobSpec("PDF PNG output path has no file name".into()))?;
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| EncoderError::InvalidJobSpec("PDF image output path has no file name".into()))?;
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
-    Ok(parent.join(format!("{stem}_{page_number:04}.png")))
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    Ok(parent.join(format!("{stem}_{page_number:04}.{ext}")))
 }
 
 /// An output path with a printf-style frame number field, e.g. `out/shot_%04d.png`.

@@ -54,6 +54,29 @@ pub struct PresetBrowserState {
     pub status: Option<String>,
     pub pending_updates: Vec<(String, CraftJobSpec)>,
     pub expanded_groups: std::collections::HashSet<String>,
+    pub column_settings: PresetColumnSettings,
+}
+
+/// User-adjustable column width settings for Preset Browser table (AME Parity).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PresetColumnSettings {
+    pub name: Option<f32>,
+    pub format: f32,
+    pub frame_size: f32,
+    pub frame_rate: f32,
+    pub target_rate: f32,
+}
+
+impl Default for PresetColumnSettings {
+    fn default() -> Self {
+        Self {
+            name: None,
+            format: PresetColumnWidths::FORMAT,
+            frame_size: PresetColumnWidths::FRAME_SIZE,
+            frame_rate: PresetColumnWidths::FRAME_RATE,
+            target_rate: PresetColumnWidths::TARGET_RATE,
+        }
+    }
 }
 
 impl Default for PresetBrowserState {
@@ -73,6 +96,7 @@ impl Default for PresetBrowserState {
             status: None,
             pending_updates: Vec::new(),
             expanded_groups,
+            column_settings: PresetColumnSettings::default(),
         }
     }
 }
@@ -145,7 +169,7 @@ pub fn render_preset_browser(
             }
         };
 
-        let cols = PresetColumnWidths::compute(ui.available_width());
+        let cols = PresetColumnWidths::compute_with_settings(ui.available_width(), &state.column_settings);
 
         // Fixed Table Header (AME Parity: stays visible when scrolling presets)
         render_preset_table_header(ui, state, tokens, cols);
@@ -396,9 +420,14 @@ impl PresetColumnWidths {
     pub const TARGET_RATE: f32 = 65.0;
 
     pub fn compute(available_width: f32) -> Self {
-        let fixed = Self::FORMAT + Self::FRAME_SIZE + Self::FRAME_RATE + Self::TARGET_RATE + 24.0;
-        let name = (available_width - fixed).max(110.0);
-        Self { name, format: Self::FORMAT, frame_size: Self::FRAME_SIZE, frame_rate: Self::FRAME_RATE, target_rate: Self::TARGET_RATE }
+        Self::compute_with_settings(available_width, &PresetColumnSettings::default())
+    }
+
+    pub fn compute_with_settings(available_width: f32, settings: &PresetColumnSettings) -> Self {
+        let fixed = settings.format + settings.frame_size + settings.frame_rate + settings.target_rate + 24.0;
+        let default_name = (available_width - fixed).max(110.0);
+        let name = settings.name.unwrap_or(default_name).max(80.0);
+        Self { name, format: settings.format, frame_size: settings.frame_size, frame_rate: settings.frame_rate, target_rate: settings.target_rate }
     }
 
     pub fn total_width(&self) -> f32 {
@@ -406,29 +435,111 @@ impl PresetColumnWidths {
     }
 }
 
+fn render_resizable_preset_header<R>(ui: &mut Ui, width: &mut f32, tokens: &Tokens, add_contents: impl FnOnce(&mut Ui, f32) -> R) -> R {
+    let w = *width;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 18.0), egui::Sense::hover());
+    let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    cell_ui.set_clip_rect(rect);
+    let result = add_contents(&mut cell_ui, w);
+
+    let handle_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 3.0, rect.min.y), egui::pos2(rect.max.x + 3.0, rect.max.y));
+    let handle_resp = ui.allocate_rect(handle_rect, egui::Sense::drag());
+    if handle_resp.dragged() {
+        *width = (*width + handle_resp.drag_delta().x).clamp(40.0, 600.0);
+    }
+    if handle_resp.hovered() || handle_resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+        ui.painter().vline(rect.max.x, rect.min.y..=rect.max.y, egui::Stroke::new(1.0, tokens.accent_primary));
+    } else {
+        ui.painter().vline(rect.max.x, rect.min.y + 2.0..=rect.max.y - 2.0, egui::Stroke::new(1.0, tokens.border_subtle));
+    }
+    result
+}
+
 fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, tokens: &Tokens, cols: PresetColumnWidths) {
+    let mut sort_toggle: Option<SortColumn> = None;
     egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            for (label, col, width) in [
-                ("Preset Name", SortColumn::Name, cols.name),
-                ("Format", SortColumn::Format, cols.format),
-                ("Frame Size", SortColumn::FrameSize, cols.frame_size),
-                ("Frame Rate", SortColumn::FrameRate, cols.frame_rate),
-                ("Target Rate", SortColumn::TargetRate, cols.target_rate),
-            ] {
-                let arrow = match (state.sort_column == Some(col), state.sort_descending) {
-                    (true, true) => " ▼",
-                    (true, false) => " ▲",
-                    _ => "",
-                };
-                let resp = ui.add_sized([width, 18.0], egui::Button::new(RichText::new(format!("{label}{arrow}")).small().strong()).frame(false));
-                if resp.clicked() {
-                    state.sort_descending = state.sort_column == Some(col) && !state.sort_descending;
-                    state.sort_column = Some(col);
-                }
+            // Preset Name
+            let mut name_w = cols.name;
+            let arrow_name = match (state.sort_column == Some(SortColumn::Name), state.sort_descending) {
+                (true, true) => " ▼",
+                (true, false) => " ▲",
+                _ => "",
+            };
+            let name_label = format!("Preset Name{arrow_name}");
+            let name_clicked = render_resizable_preset_header(ui, &mut name_w, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&name_label).small().strong()).frame(false)).clicked()
+            });
+            if name_clicked {
+                sort_toggle = Some(SortColumn::Name);
+            }
+            if (name_w - cols.name).abs() > 0.5 {
+                state.column_settings.name = Some(name_w);
+            }
+
+            // Format
+            let arrow_fmt = match (state.sort_column == Some(SortColumn::Format), state.sort_descending) {
+                (true, true) => " ▼",
+                (true, false) => " ▲",
+                _ => "",
+            };
+            let fmt_label = format!("Format{arrow_fmt}");
+            let fmt_clicked = render_resizable_preset_header(ui, &mut state.column_settings.format, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&fmt_label).small().strong()).frame(false)).clicked()
+            });
+            if fmt_clicked {
+                sort_toggle = Some(SortColumn::Format);
+            }
+
+            // Frame Size
+            let arrow_size = match (state.sort_column == Some(SortColumn::FrameSize), state.sort_descending) {
+                (true, true) => " ▼",
+                (true, false) => " ▲",
+                _ => "",
+            };
+            let size_label = format!("Frame Size{arrow_size}");
+            let size_clicked = render_resizable_preset_header(ui, &mut state.column_settings.frame_size, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&size_label).small().strong()).frame(false)).clicked()
+            });
+            if size_clicked {
+                sort_toggle = Some(SortColumn::FrameSize);
+            }
+
+            // Frame Rate
+            let arrow_rate = match (state.sort_column == Some(SortColumn::FrameRate), state.sort_descending) {
+                (true, true) => " ▼",
+                (true, false) => " ▲",
+                _ => "",
+            };
+            let rate_label = format!("Frame Rate{arrow_rate}");
+            let rate_clicked = render_resizable_preset_header(ui, &mut state.column_settings.frame_rate, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&rate_label).small().strong()).frame(false)).clicked()
+            });
+            if rate_clicked {
+                sort_toggle = Some(SortColumn::FrameRate);
+            }
+
+            // Target Rate
+            let arrow_target = match (state.sort_column == Some(SortColumn::TargetRate), state.sort_descending) {
+                (true, true) => " ▼",
+                (true, false) => " ▲",
+                _ => "",
+            };
+            let target_label = format!("Target Rate{arrow_target}");
+            let target_clicked = render_resizable_preset_header(ui, &mut state.column_settings.target_rate, tokens, |ui, w| {
+                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&target_label).small().strong()).frame(false)).clicked()
+            });
+            if target_clicked {
+                sort_toggle = Some(SortColumn::TargetRate);
             }
         });
     });
+
+    if let Some(col) = sort_toggle {
+        state.sort_descending = state.sort_column == Some(col) && !state.sort_descending;
+        state.sort_column = Some(col);
+    }
 }
 
 struct PresetRowContext<'a> {
@@ -454,13 +565,22 @@ fn render_preset_row(ui: &mut Ui, row: &PresetRow, preset: &EncodingPreset, ctx:
 
     ui.push_id(&preset.name, |ui| {
         ui.horizontal(|ui| {
-            // Preset Name column (with internal tree indent)
+            // Preset Name column (with internal tree indent and left-aligned text)
             if ctx.indent > 0.0 {
                 ui.add_space(ctx.indent);
             }
             let name_w = (ctx.cols.name - ctx.indent).max(40.0);
-            let name_btn = egui::Button::new(RichText::new(&row.name).small()).truncate().selected(is_sel);
-            let name_resp = ui.add_sized([name_w, ctx.tokens.row_height], name_btn);
+            let (name_rect, name_resp) = ui.allocate_exact_size(egui::vec2(name_w, ctx.tokens.row_height), egui::Sense::click());
+            if is_sel {
+                ui.painter().rect_filled(name_rect, 2.0, ctx.tokens.bg_surface_active);
+            } else if name_resp.hovered() {
+                ui.painter().rect_filled(name_rect, 2.0, ctx.tokens.bg_surface);
+            }
+            let mut name_ui = ui.new_child(egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            name_ui.set_clip_rect(name_rect);
+            let text_color = if is_sel { ctx.tokens.accent_primary } else { ctx.tokens.text_primary };
+            name_ui.add(egui::Label::new(RichText::new(&row.name).small().color(text_color)).selectable(false).truncate());
+
             if name_resp.clicked() {
                 ctx.state.selected_preset = Some(preset.clone());
             }
