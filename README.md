@@ -20,7 +20,7 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 `encoderCraft` has transitioned from initial workspace foundations into a battle-tested, production-ready universal media transcoding suite. Below is an executive overview of what has landed and what is actively in development.
 
-### ✅ What is Already Done (Milestones M0 – M49, v0.1.0 Stable Release)
+### ✅ What is Already Done (Milestones M0 – M49, v0.1.0-beta.1 Release)
 
 - **Universal Creative Suite Interoperability (Milestone 30 & 39):**
   - Clean-room ingestion, parsing, and conversion for standard Adobe project files: Premiere Pro (`.prproj` gzipped XML), After Effects (`.aep` RIFX chunks), InDesign (`.indd` / `.idml`), Illustrator (`.ai` dual-stream PDF/PGF), Photoshop (`.psd` / `.psb` layer trees), and Audition (`.sesx` multitrack XML).
@@ -74,7 +74,7 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 ---
 
-- **Universal Media Integrity & Sibling App Job Ingestion (Milestones 47 – 49, v0.1.0 Stable Release):**
+- **Universal Media Integrity & Sibling App Job Ingestion (Milestones 47 – 49, v0.1.0-beta.1 Release):**
   - Production Unix Domain Socket (`/tmp/encodercraft-$UID.sock`) and TCP (`127.0.0.1:8998`) IPC listener for instant, zero-copy job submission and headless project rendering across FilmCraft, EffectCraft, SoundCraft, DesignCraft, and CadCraft.
   - Synchronized real-time preview audio playback controls with interactive volume slider and instant mute/unmute toggle.
   - Export settings parity: Master `[x] Export Video` and `[x] Export Audio` stream toggles, pre-scale source raster cropping, and interactive on-monitor crop tool with aspect constraint presets (1:1, 4:3, 16:9, 9:16, 2.39:1).
@@ -87,11 +87,11 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 ```mermaid
 flowchart LR
-    subgraph Completed ["✅ Completed (M0 - M49 · v0.1.0 Stable Release)"]
+    subgraph Completed ["✅ Completed (M0 - M49 · v0.1.0-beta.1)"]
         M30_41["M30-M41: Formats, Codecs & Transforms"]
         M42_46["M42-M46: Providers & Universal Preview"]
         M47_48["M47-M48: Export Settings & Media Integrity"]
-        M49["M49: v0.1.0 Stable Release & Sibling Ingestion"]
+        M49["M49: v0.1.0-beta.1 & Sibling Ingestion"]
     end
 
     subgraph Next ["🛠️ v0.2.0"]

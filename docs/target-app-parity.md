@@ -42,7 +42,7 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 └──────────────────────────┴─────────────┴────────────────────────────────────────────────┘
 ```
 
-### Implementation status (v0.1.0 First Stable Release)
+### Implementation status (v0.1.0-beta.1 Release)
 
 | Area | Status | Tracking |
 |---|---|---|
