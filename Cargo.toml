@@ -131,7 +131,7 @@ thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 hayro = "0.7.1"
-lopdf = "0.45.0"
+lopdf = "0.47.0"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 rayon = "1"
