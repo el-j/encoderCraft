@@ -644,7 +644,8 @@ impl TranscodePipeline {
                 page,
                 &cache,
                 &InterpreterSettings::default(),
-                &RenderSettings { x_scale: scale, y_scale: scale, ..RenderSettings::default() },
+                &RenderSettings::default(),
+                &hayro::PixmapSettings { x_scale: scale, y_scale: scale, ..hayro::PixmapSettings::default() },
             );
             let width = u32::from(rendered.width());
             let height = u32::from(rendered.height());
