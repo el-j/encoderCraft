@@ -759,6 +759,10 @@ impl ContainerType {
                     Self::AutocadDxf,
                     Self::WindowsMetafile,
                     Self::Png,
+                    Self::Jpeg,
+                    Self::WebP,
+                    Self::Tiff,
+                    Self::Bmp,
                     Self::AdobeIllustratorAi,
                 ]
             }
@@ -773,7 +777,10 @@ impl ContainerType {
                     Self::Epub,
                     Self::Pptx,
                     Self::Png,
+                    Self::Jpeg,
+                    Self::WebP,
                     Self::Tiff,
+                    Self::Bmp,
                 ]
             }
             MediaStreamKind::Spatial3D => vec![
@@ -790,7 +797,19 @@ impl ContainerType {
                 Self::Step,
             ],
             MediaStreamKind::Cad2D => {
-                vec![Self::ArtcraftCadcraft, Self::AutocadDxf, Self::AutocadDwg, Self::Svg, Self::Pdf, Self::HpglPlotter, Self::Png]
+                vec![
+                    Self::ArtcraftCadcraft,
+                    Self::AutocadDxf,
+                    Self::AutocadDwg,
+                    Self::Svg,
+                    Self::Pdf,
+                    Self::HpglPlotter,
+                    Self::Png,
+                    Self::Jpeg,
+                    Self::WebP,
+                    Self::Tiff,
+                    Self::Bmp,
+                ]
             }
             MediaStreamKind::MotionGraph => vec![
                 Self::ArtcraftEffectcraft,

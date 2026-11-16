@@ -435,21 +435,23 @@ impl PresetColumnWidths {
     }
 }
 
-fn render_resizable_preset_header<R>(ui: &mut Ui, width: &mut f32, tokens: &Tokens, add_contents: impl FnOnce(&mut Ui, f32) -> R) -> R {
+fn render_resizable_preset_header<R>(ui: &mut Ui, col_id: &str, width: &mut f32, tokens: &Tokens, add_contents: impl FnOnce(&mut Ui, f32) -> R) -> R {
     let w = *width;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 18.0), egui::Sense::hover());
     let mut cell_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
     cell_ui.set_clip_rect(rect);
     let result = add_contents(&mut cell_ui, w);
 
-    let handle_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 3.0, rect.min.y), egui::pos2(rect.max.x + 3.0, rect.max.y));
-    let handle_resp = ui.allocate_rect(handle_rect, egui::Sense::drag());
+    let handle_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 4.0, rect.min.y - 2.0), egui::pos2(rect.max.x + 4.0, rect.max.y + 2.0));
+    let handle_id = ui.scope_id().with("preset_col_divider").with(col_id);
+    let handle_resp = ui.interact(handle_rect, handle_id, egui::Sense::click_and_drag());
     if handle_resp.dragged() {
         *width = (*width + handle_resp.drag_delta().x).clamp(40.0, 600.0);
+        ui.ctx().request_repaint();
     }
     if handle_resp.hovered() || handle_resp.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
-        ui.painter().vline(rect.max.x, rect.min.y..=rect.max.y, egui::Stroke::new(1.0, tokens.accent_primary));
+        ui.painter().vline(rect.max.x, rect.min.y..=rect.max.y, egui::Stroke::new(1.5, tokens.accent_primary));
     } else {
         ui.painter().vline(rect.max.x, rect.min.y + 2.0..=rect.max.y - 2.0, egui::Stroke::new(1.0, tokens.border_subtle));
     }
@@ -468,8 +470,8 @@ fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, token
                 _ => "",
             };
             let name_label = format!("Preset Name{arrow_name}");
-            let name_clicked = render_resizable_preset_header(ui, &mut name_w, tokens, |ui, w| {
-                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&name_label).small().strong()).frame(false)).clicked()
+            let name_clicked = render_resizable_preset_header(ui, "name", &mut name_w, tokens, |ui, _| {
+                ui.add(egui::Button::new(RichText::new(&name_label).small().strong()).frame(false)).clicked()
             });
             if name_clicked {
                 sort_toggle = Some(SortColumn::Name);
@@ -485,8 +487,8 @@ fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, token
                 _ => "",
             };
             let fmt_label = format!("Format{arrow_fmt}");
-            let fmt_clicked = render_resizable_preset_header(ui, &mut state.column_settings.format, tokens, |ui, w| {
-                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&fmt_label).small().strong()).frame(false)).clicked()
+            let fmt_clicked = render_resizable_preset_header(ui, "format", &mut state.column_settings.format, tokens, |ui, _| {
+                ui.add(egui::Button::new(RichText::new(&fmt_label).small().strong()).frame(false)).clicked()
             });
             if fmt_clicked {
                 sort_toggle = Some(SortColumn::Format);
@@ -499,8 +501,8 @@ fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, token
                 _ => "",
             };
             let size_label = format!("Frame Size{arrow_size}");
-            let size_clicked = render_resizable_preset_header(ui, &mut state.column_settings.frame_size, tokens, |ui, w| {
-                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&size_label).small().strong()).frame(false)).clicked()
+            let size_clicked = render_resizable_preset_header(ui, "size", &mut state.column_settings.frame_size, tokens, |ui, _| {
+                ui.add(egui::Button::new(RichText::new(&size_label).small().strong()).frame(false)).clicked()
             });
             if size_clicked {
                 sort_toggle = Some(SortColumn::FrameSize);
@@ -513,8 +515,8 @@ fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, token
                 _ => "",
             };
             let rate_label = format!("Frame Rate{arrow_rate}");
-            let rate_clicked = render_resizable_preset_header(ui, &mut state.column_settings.frame_rate, tokens, |ui, w| {
-                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&rate_label).small().strong()).frame(false)).clicked()
+            let rate_clicked = render_resizable_preset_header(ui, "rate", &mut state.column_settings.frame_rate, tokens, |ui, _| {
+                ui.add(egui::Button::new(RichText::new(&rate_label).small().strong()).frame(false)).clicked()
             });
             if rate_clicked {
                 sort_toggle = Some(SortColumn::FrameRate);
@@ -527,8 +529,8 @@ fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, token
                 _ => "",
             };
             let target_label = format!("Target Rate{arrow_target}");
-            let target_clicked = render_resizable_preset_header(ui, &mut state.column_settings.target_rate, tokens, |ui, w| {
-                ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&target_label).small().strong()).frame(false)).clicked()
+            let target_clicked = render_resizable_preset_header(ui, "target", &mut state.column_settings.target_rate, tokens, |ui, _| {
+                ui.add(egui::Button::new(RichText::new(&target_label).small().strong()).frame(false)).clicked()
             });
             if target_clicked {
                 sort_toggle = Some(SortColumn::TargetRate);
@@ -601,21 +603,33 @@ fn render_preset_row(ui: &mut Ui, row: &PresetRow, preset: &EncodingPreset, ctx:
                 }
             });
 
-            // Format column
+            // Format column (left-aligned)
             let format_label = RichText::new(&row.format).small().color(ctx.tokens.text_secondary);
-            ui.add_sized([ctx.cols.format, ctx.tokens.row_height], egui::Label::new(format_label).truncate());
+            let (fmt_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.format, ctx.tokens.row_height), egui::Sense::hover());
+            let mut fmt_ui = ui.new_child(egui::UiBuilder::new().max_rect(fmt_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            fmt_ui.set_clip_rect(fmt_rect);
+            fmt_ui.add(egui::Label::new(format_label).selectable(false).truncate());
 
-            // Frame Size column
+            // Frame Size column (left-aligned)
             let size_label = RichText::new(&row.frame_size).small().color(ctx.tokens.text_secondary);
-            ui.add_sized([ctx.cols.frame_size, ctx.tokens.row_height], egui::Label::new(size_label).truncate());
+            let (sz_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.frame_size, ctx.tokens.row_height), egui::Sense::hover());
+            let mut sz_ui = ui.new_child(egui::UiBuilder::new().max_rect(sz_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            sz_ui.set_clip_rect(sz_rect);
+            sz_ui.add(egui::Label::new(size_label).selectable(false).truncate());
 
-            // Frame Rate column
+            // Frame Rate column (left-aligned)
             let rate_label = RichText::new(&row.frame_rate).small().color(ctx.tokens.text_secondary);
-            ui.add_sized([ctx.cols.frame_rate, ctx.tokens.row_height], egui::Label::new(rate_label).truncate());
+            let (fps_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.frame_rate, ctx.tokens.row_height), egui::Sense::hover());
+            let mut fps_ui = ui.new_child(egui::UiBuilder::new().max_rect(fps_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            fps_ui.set_clip_rect(fps_rect);
+            fps_ui.add(egui::Label::new(rate_label).selectable(false).truncate());
 
-            // Target Rate column
+            // Target Rate column (left-aligned)
             let target_label = RichText::new(&row.target_rate).small().color(ctx.tokens.text_secondary);
-            ui.add_sized([ctx.cols.target_rate, ctx.tokens.row_height], egui::Label::new(target_label).truncate());
+            let (bit_rect, _) = ui.allocate_exact_size(egui::vec2(ctx.cols.target_rate, ctx.tokens.row_height), egui::Sense::hover());
+            let mut bit_ui = ui.new_child(egui::UiBuilder::new().max_rect(bit_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            bit_ui.set_clip_rect(bit_rect);
+            bit_ui.add(egui::Label::new(target_label).selectable(false).truncate());
         });
     });
 

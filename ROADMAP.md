@@ -2,7 +2,7 @@
 
 > **Stage: Beta Release (v0.1.0-beta.1)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-15 · **Last updated:** 2026-11-15 · **Change:** Completed Milestone 49 (v0.1.0 First Stable Release Readiness & Final Gap Closure)  
+> **Last reviewed:** 2026-11-16 · **Last updated:** 2026-11-16 · **Change:** Completed Milestone 51 (Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity)  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -425,11 +425,11 @@ Tracked under Milestone [M50 - Production Blackbox Codec Matrix, Column Drag Erg
 
 Tracked under Milestone [M51 - Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity](https://github.com/el-j/encoderCraft/milestone/29) addressing issues [#307](https://github.com/el-j/encoderCraft/issues/307)–[#311](https://github.com/el-j/encoderCraft/issues/311).
 
-- [ ] **M51.1: Universal Preset Expansion across all 62 container formats and media domains ([#307](https://github.com/el-j/encoderCraft/issues/307))** – Factory presets for all 24 missing container formats (MKV, WebM, GIF, CAF, Opus, DPX, JXL, DDS, DICOM, FITS, EPS, AI, Lottie, USDC, FBX, Alembic, Collada, Splat, PPTX, DOCX, HTML, IDML, PSD, PSB, DXF, DWG, HPGL, and ArtCraft native containers).
-- [ ] **M51.2: Universal CAD & Technical Blueprint Preview Engine in Preview Monitor ([#308](https://github.com/el-j/encoderCraft/issues/308))** – 2D vector CAD viewport for DXF, DWG, HPGL, and CadCraft with interactive pan/zoom.
-- [ ] **M51.3: Layered Graphics (PSD/PSB/PhotoCraft) & Motion Project Preview in Monitor ([#309](https://github.com/el-j/encoderCraft/issues/309))** – Composite RGBA previews, layer hierarchy inspection, and project reference inspection.
-- [ ] **M51.4: High-Fidelity Multi-Page Document Page Previews (DOCX, PPTX, EPUB, Markdown) ([#310](https://github.com/el-j/encoderCraft/issues/310))** – Styled page rasterization and GPU texture caching with interactive scrubbing.
-- [ ] **M51.5: End-to-End Blackbox Codec Matrix Conformance for all newly added Presets ([#311](https://github.com/el-j/encoderCraft/issues/311))** – Blackbox synthetic test verification covering every new preset format.
+- [x] **M51.1: Universal Preset Expansion across all 62 container formats and media domains ([#307](https://github.com/el-j/encoderCraft/issues/307))** – Added factory presets for all container formats (MKV, WebM, GIF, CAF, Opus, DPX, JXL, DDS, DICOM, FITS, EPS, AI, Lottie, USDC, FBX, Alembic, Collada, Splat, PPTX, DOCX, HTML, IDML, PSD, PSB, DXF, DWG, HPGL, and ArtCraft native containers), bringing total system presets to 73.
+- [x] **M51.2: Universal CAD & Technical Blueprint Preview Engine in Preview Monitor ([#308](https://github.com/el-j/encoderCraft/issues/308))** – Implemented universal CAD reader and stream synthesizer rendering 2D vector CAD entities (DXF, DWG, HPGL, CadCraft) with interactive preview.
+- [x] **M51.3: Layered Graphics (PSD/PSB/PhotoCraft) & Motion Project Preview in Monitor ([#309](https://github.com/el-j/encoderCraft/issues/309))** – Added composite RGBA raster decoding for layered images (PSD, PSB, PhotoCraft) and motion/timeline project inspection.
+- [x] **M51.4: High-Fidelity Multi-Page Document Page Previews (DOCX, PPTX, EPUB, Markdown) ([#310](https://github.com/el-j/encoderCraft/issues/310))** – Implemented document page extraction and raster generation for PDF, DOCX, PPTX, EPUB, and Markdown, allowing multi-format still exports (JPEG, PNG, WebP, TIFF).
+- [x] **M51.5: End-to-End Blackbox Codec Matrix Conformance for all newly added Presets ([#311](https://github.com/el-j/encoderCraft/issues/311))** – Blackbox synthetic test suite (`test_universal_conversions_e2e.rs`) and user interaction suite (`test_user_interaction_suite.rs`) verifying all presets, column resizing, left-aligned preset tables, and UI controls.
 
 ## Known Issues (alpha.1, tracked above)
 

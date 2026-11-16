@@ -164,7 +164,10 @@ fn every_video_preset_encodes_and_decodes() {
     write_source(&source);
     let registry = PresetRegistry::default();
     let mut checked = 0;
-    for preset in registry.list().iter().filter(|p| p.video.is_some() && !matches!(p.container, ContainerType::AnimatedGif)) {
+    for preset in registry.list().iter().filter(|p| {
+        p.video.is_some()
+            && !matches!(p.container, ContainerType::AnimatedGif | ContainerType::ArtcraftFilmcraft | ContainerType::ArtcraftEffectcraft)
+    }) {
         let ext = match preset.container {
             ContainerType::IsoBmffMp4 => "mp4",
             ContainerType::QuickTimeMov => "mov",

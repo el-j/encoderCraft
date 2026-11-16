@@ -48,6 +48,12 @@ pub fn render_pdf_page_to_rgba(bytes: &[u8], page_index: usize, max_dim: f32) ->
     Ok((width, height, rendered.data_as_u8_slice().to_vec()))
 }
 
+/// Renders a page of a [`DocumentCanvas`] to RGBA8 pixels via high-fidelity rasterization.
+pub fn render_canvas_page_to_rgba(canvas: &DocumentCanvas, page_index: usize, max_dim: f32) -> Result<(u32, u32, Vec<u8>), EncoderError> {
+    let pdf_bytes = canvas.to_pdf_x4_bytes()?;
+    render_pdf_page_to_rgba(&pdf_bytes, page_index, max_dim)
+}
+
 /// Document layout item placed on a page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DocumentItem {
