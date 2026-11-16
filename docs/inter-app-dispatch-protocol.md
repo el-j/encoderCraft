@@ -64,6 +64,31 @@ To accommodate different media types, file sizes, and hardware constraints, the 
   3. `encoderCraft` consumes the stream directly into its encoder pipelines without touching disk storage.
 - **Overhead:** Memory bandwidth only; instantaneous startup.
 
+The encoderCraft-local transport primitive uses an iceoryx2 shared-memory service. Its versioned `ECST` packet header carries the packet kind, PTS, duration, and payload length; payloads are capped at 512 MiB and the service applies two-sample bounded buffering with retry-until-delivered backpressure. A received packet borrows its payload from the shared-memory sample rather than copying it into a `Vec`.
+
+`SourceDescriptor::Pipe` is consumed by the transcode pipeline (`encodercraft_source::pipe::PipeSource`). The producer declares the format in the job (`width`, `height`, `frame_rate`, `sample_rate`, `channels`) and follows this protocol: create the publisher, `wait_for_subscriber`, publish packets, then `finish` (publishes end-of-stream and waits for the receiver to detach so unread packets are not discarded). Video packets carry tightly packed RGBA8 (`width * height * 4` bytes); audio packets carry interleaved little-endian f32 frames. Wrong-sized packets, non-finite samples, invalid declarations, streams above 1 GiB and streams idle for 30 s are rejected with typed errors. A stream is consumed once; the pipeline holds it open for the whole job and releases it afterwards. `crates/pipeline/tests/conformance.rs` encodes a streamed source to a decodable MP4. Project-reference rendering (`SourceDescriptor::ProjectReference`) is not connected yet.
+
+**Producing a stream.** Rust applications use `encodercraft_source::pipe::PipeProducer`, which performs the protocol and validates every packet before it is published:
+
+```rust
+let mut producer = PipeProducer::create(format)?;     // same fields as the job's Pipe source
+assert!(producer.wait_for_receiver(Duration::from_secs(60)));
+producer.send_video(&rgba_frame)?;                     // width * height * 4 bytes
+producer.send_audio(&interleaved_f32)?;                // whole frames of `channels` samples
+producer.finish(Duration::from_secs(60))?;             // end-of-stream, then wait for the receiver
+```
+
+**Scope and status of this contract.** It is push/subscribe, not request-by-time, so it does not replace the frame-request direction in storytold/filmcraft#1024. It is local, CPU RGBA/f32 only, and has no clock-domain, capability negotiation, GPU-surface or reconnect semantics. It lives in encoderCraft (`crates/shared-stream`, `crates/source/src/pipe.rs`) and will move to craft-libs only once a second application links it (maintainer guidance on storytold/craft-libs#230); until then the header and protocol may change. The control channel for job hand-off is intended to ride on `craft-ipc` (storytold/craft-libs#433).
+
+**Trying it from the command line.** In one terminal run the receiving job, in another a synthetic producer:
+
+```sh
+encodercraft-cli stream-encode --endpoint encodercraft/demo --size 1280x720 --fps 30 --audio 48000:2 -o out.mp4
+encodercraft-cli stream-test   --endpoint encodercraft/demo --size 1280x720 --fps 30 --audio 48000:2 --seconds 5
+```
+
+`stream-encode` accepts `-p <preset>` (default `Match Source - High Bitrate`). Both sides must pass the same declaration.
+
 ### Mode C: Headless Project Delegation (Deferred Rendering)
 - **Use Case:** The user queues a complex project in `encoderCraft` and closes the host application completely (freeing GPU/RAM).
 - **Mechanism:**
@@ -172,8 +197,8 @@ All communication uses standard JSON (or Bincode for internal binary IPC). Every
 
 | Platform | Primary Transport | Path / Address | Security / Isolation |
 |---|---|---|---|
-| **macOS & Linux** | Unix Domain Socket | `/tmp/encodercraft-$UID.sock` (or `$XDG_RUNTIME_DIR/encodercraft.sock`) | File system permissions `0600` (current user only). |
-| **Windows** | Named Pipe | `\\.\pipe\encodercraft-%USERNAME%` | Access control list restricted to user SID. |
+| **macOS & Linux** | Unix Domain Socket | `/tmp/encodercraft-$UID.sock` (UID from the OS; `encodercraft_dispatch::default_socket_path()` is shared by server and clients) | Socket file is created with mode `0600` (current user only); the server refuses to replace a non-socket file at that path. |
+| **Windows** | Loopback TCP JSON-RPC (named pipes are not implemented) | `127.0.0.1:8998` (fallback `8999` in the desktop app) | Loopback-only binding. |
 | **Local Network / Web** | Loopback TCP JSON-RPC | `127.0.0.1:8998` | Bearer token stored in `~/.config/encodercraft/token`. |
 | **Shell & Automation** | Headless CLI command | `encodercraft queue add --spec <file>` | Subprocess exit codes and stdout JSON response. |
 | **AI Coding Agents** | Model Context Protocol (MCP) | `stdio` or SSE | Strict tool schemas for agent inspection and submission. |
@@ -340,4 +365,3 @@ Every application across the entire ArtCraft creative suite has a dedicated comp
 - **Video Codecs Centralization:** [storytold/craft-libs#503](https://github.com/storytold/craft-libs/issues/503) / [storytold/craft-libs#504](https://github.com/storytold/craft-libs/pull/504)
 - **Sibling Codec Migration PRs:** [storytold/filmcraft#3941](https://github.com/storytold/filmcraft/pull/3941), [storytold/effectcraft#2814](https://github.com/storytold/effectcraft/pull/2814), [storytold/soundcraft#1275](https://github.com/storytold/soundcraft/pull/1275)
 - **Master `encoderCraft` Issue:** [el-j/encoderCraft#1](https://github.com/el-j/encoderCraft/issues/1)
-

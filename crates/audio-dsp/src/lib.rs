@@ -7,15 +7,21 @@
 #![forbid(unsafe_code)]
 
 pub mod aac;
+pub mod delay;
 pub mod io;
 pub mod limiter;
 pub mod loudness;
+pub mod matrix;
 pub mod remix;
 pub mod resample;
+pub mod session;
 
 pub use aac::AacEncoderWrapper;
-pub use io::{decode_audio, encode_audio_aiff, encode_audio_flac};
+pub use delay::apply_audio_delay;
+pub use io::{decode_audio, encode_audio_aiff, encode_audio_caf, encode_audio_flac, encode_audio_mp3, encode_audio_ogg_vorbis, encode_audio_opus};
 pub use limiter::PeakLimiter;
 pub use loudness::{LoudnessStats, measure_loudness, normalize_loudness};
+pub use matrix::apply_audio_matrix;
 pub use remix::remix_channels;
 pub use resample::SincResampler;
+pub use session::{DawClip, DawSession, DawTrack, DawTrackType};

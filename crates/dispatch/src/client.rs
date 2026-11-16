@@ -104,6 +104,28 @@ impl DispatchClient {
         response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty list response".into()))
     }
 
+    /// Lists the shared engine commands exposed by the running encoderCraft instance.
+    pub fn list_commands(&self) -> Result<serde_json::Value, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "command.list", json!({}));
+        let response = self.send_request(&request)?;
+        if let Some(error) = response.error {
+            return Err(EncoderError::InvalidJobSpec(error));
+        }
+        response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty command list response".into()))
+    }
+
+    /// Executes a shared engine command on the running encoderCraft instance.
+    pub fn execute_command(&self, command_id: &str, params: serde_json::Value) -> Result<serde_json::Value, EncoderError> {
+        let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
+        let request = IpcRequest::new(req_id, "command.execute", json!({ "commandId": command_id, "params": params }));
+        let response = self.send_request(&request)?;
+        if let Some(error) = response.error {
+            return Err(EncoderError::InvalidJobSpec(error));
+        }
+        response.result.ok_or_else(|| EncoderError::InvalidJobSpec("empty command response".into()))
+    }
+
     /// Pings the running encoderCraft daemon.
     pub fn ping(&self) -> Result<bool, EncoderError> {
         let req_id = self.req_counter.fetch_add(1, Ordering::SeqCst);
@@ -205,29 +227,49 @@ impl DispatchClient {
     }
 }
 
-/// Returns the default platform Unix socket path: `/tmp/encodercraft-<uid>.sock`.
+/// Returns the per-user Unix socket path `/tmp/encodercraft-<uid>.sock`.
+///
+/// The server and every local client share this single definition. The UID comes
+/// from the OS (not the environment) so it cannot be missing or spoofed.
+#[cfg(unix)]
 pub fn default_socket_path() -> PathBuf {
-    #[cfg(unix)]
-    {
-        let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-        let sock = PathBuf::from(tmp).join("encodercraft.sock");
-        if sock.exists() {
-            return sock;
-        }
-        let uid = get_uid();
-        let fallback = PathBuf::from(format!("/tmp/encodercraft-{uid}.sock"));
-        if fallback.exists() {
-            return fallback;
-        }
-        PathBuf::from("/tmp/encodercraft.sock")
-    }
-    #[cfg(not(unix))]
-    {
-        PathBuf::from(r"\\.\pipe\encodercraft")
-    }
+    socket_path_for_uid(rustix::process::getuid().as_raw())
 }
 
+/// Builds the socket path for an explicit UID.
 #[cfg(unix)]
-fn get_uid() -> u32 {
-    std::env::var("UID").ok().and_then(|s| s.parse().ok()).unwrap_or(1000)
+pub fn socket_path_for_uid(uid: u32) -> PathBuf {
+    PathBuf::from(format!("/tmp/encodercraft-{uid}.sock"))
+}
+
+/// Named pipes are not implemented; non-Unix clients use loopback TCP (`connect_default`). This address is informational only.
+#[cfg(not(unix))]
+pub fn default_socket_path() -> PathBuf {
+    PathBuf::from(r"\\.\pipe\encodercraft")
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_embeds_uid() {
+        assert_eq!(socket_path_for_uid(501), PathBuf::from("/tmp/encodercraft-501.sock"));
+        assert_eq!(socket_path_for_uid(0), PathBuf::from("/tmp/encodercraft-0.sock"));
+    }
+
+    #[test]
+    fn default_path_uses_real_uid_and_ignores_env() {
+        let uid = rustix::process::getuid().as_raw();
+        assert_eq!(default_socket_path(), socket_path_for_uid(uid));
+        let name = default_socket_path().to_string_lossy().into_owned();
+        assert!(name.starts_with("/tmp/encodercraft-") && name.ends_with(".sock"));
+        assert!(!name.contains("TMPDIR"));
+    }
+
+    #[test]
+    fn client_default_endpoint_matches_server_path() {
+        let client = DispatchClient::connect_default();
+        assert!(matches!(client.endpoint, Endpoint::UnixSocket(ref p) if *p == default_socket_path()));
+    }
 }

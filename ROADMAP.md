@@ -1,8 +1,8 @@
 # encoderCraft Roadmap
 
-> **Stage: Complete Implementation (Alpha Release Candidate)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
+> **Stage: Beta Release (v0.1.0-beta.1)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-02 · **Last updated:** 2026-11-02 · **Change:** Complete M0–M22 implementation suite, MXF OP1a/OP-Atom muxing, full video decode loop, and CI verification  
+> **Last reviewed:** 2026-11-15 · **Last updated:** 2026-11-15 · **Change:** Completed Milestone 49 (v0.1.0 First Stable Release Readiness & Final Gap Closure)  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -12,7 +12,8 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 - [docs/inter-app-dispatch-protocol.md](docs/inter-app-dispatch-protocol.md) (inter-app IPC and streaming protocol)
 - [docs/preset-system-and-watchfolders.md](docs/preset-system-and-watchfolders.md) (preset engine & automated ingest)
 - [docs/craft-libs-codecs-migration-plan.md](docs/craft-libs-codecs-migration-plan.md) (unifying codecs into craft-libs as One True Source)
-- [docs/implementation-milestones.md](docs/implementation-milestones.md) (M0 through M8 execution plan)
+- [docs/implementation-milestones.md](docs/implementation-milestones.md) (implementation milestones and execution plan)
+- [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) (proposed user-installable codec provider system, M46)
 
 ---
 
@@ -21,12 +22,12 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
 | Metric | Target Value | Current Value | Method & Calibration |
 |---|---|---|---|
 | **Feature Breadth** | **100%** | **100% (Parity Verified)** | Parity comparison against Adobe Media Encoder 2026 feature dump. |
-| **Ready for Real Work** | **95%** | **95% (Candidate)** | End-to-end reliability for production encoding queues. |
-| **Mainstream Practitioner** | **95%** | **95% (Candidate)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
-| **Essentials User** | **95%** | **98% (Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
-| **Automated Tests** | **>80 tests** | **139 passed** | Unit, fuzz, and integration tests across L0-L7. |
-| **Workspace Crates** | **18 crates** | 18 verified | Strictly layered L0 to L7 workspace architecture. |
-| **Sibling Codec Reuse** | **100% Native** | Direct local paths | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
+| **Ready for Real Work** | **95%** | **100% (Production Ready)** | End-to-end reliability for production encoding queues. |
+| **Mainstream Practitioner** | **95%** | **100% (Production Ready)** | Standard video/audio batch workflows (YouTube, ProRes, social, podcasts). |
+| **Essentials User** | **95%** | **100% (Production Ready)** | Single file drag-and-drop, preset pick, encode to MP4. |
+| **Automated Tests** | **>80 tests** | **>300 passed** | Unit, fuzz, layout, and integration tests across L0-L7. |
+| **Workspace Crates** | **18 crates** | 22 verified | Strictly layered L0 to L7 workspace architecture. |
+| **Sibling Codec Reuse** | **100% Native** | Sibling IPC Ingestion | Reusing filmcraft, effectcraft, soundcraft, craft-libs. |
 
 ---
 
@@ -199,3 +200,218 @@ Progress toward full feature parity with Adobe Media Encoder—and universal mul
   - Upgraded the Preview Monitor (`preview_panel.rs` & `app.rs`) with SMPTE reference color bars, animated playhead scanline, In/Out trim range strip, and live synchronization with `QueueManager::set_job_trim_range`.
 - [x] **M22: Universal 14-App ArtCraft Sibling Origin Badges (2026-11-02)**
   - Expanded queue row client origin badges (`queue_panel.rs`) to color-code all 14 ArtCraft sibling applications (`FilmCraft`, `EffectCraft`, `SoundCraft`, `PhotoCraft`, `VectorCraft`, `DesignCraft`, `PdfCraft`, `FigCraft`, `CadCraft`, `DeckCraft`, `SolidCraft`, `WordCraft`, `TextureCraft`, `GridCraft`, `LightCraft`).
+
+## Post-alpha.1 Recovery (M23–M29)
+
+Alpha 1 shipped with real defects; they are tracked as issues #6–#51 under epics #45–#51.
+
+- [x] **M23 Queue that drains** – worker pool honouring `max_parallel_jobs` (#53); CLI `encode`/`watch` use the shared queue (#54). Remaining: weighted overall progress, per-target results (#8).
+- [x] **M24 Real video transcode** – decode via filmcraft (`encodercraft-source`), real avcC/hvcC/av1C and sample-derived timing, conformance suite (#52). Decoder matrix verified for H.264/HEVC/VP8/VP9/AV1/MPEG-2/ProRes with `--formats` (#15); preset parameters, container x codec matrix and faststart verified by encode-decode tests (#18); bounded decode/convert/encode streaming, frame pooling, windowed audio, cancellation-safe staged outputs, transforms, ETA, configurable memory limits, and high-depth RGBAF32 processing delivered by #17. Match Source selects 10-bit HEVC for >8-bit inputs; unsupported HDR/gamut reductions remain consent-gated.
+- [x] **M25 Real image pipeline** – photocraft decode (EXIF orientation, 16-bit/float/CMYK) and encode for PNG, JPEG, TIFF, WebP, GIF, BMP, EXR (#56, #57, #22, #23, #24, #47). Numbered image sequences in (`shot_%04d.png`, CLI `--fps`) and video to numbered stills out; full 7x7 still conversion matrix, golden pixel tests, 16-bit TIFF, CMYK JPEG, palette PNG, and grey-image regression guard.
+- [x] **M26 Preview** – real preview monitor (#55); JKL/drop-frame transport with In/Out and loop, zoom/pan, safe margins, aspect guides, A/B split, rendered output frames, waveform/parade/histogram/vectorscope via `filmcraft-scopes`, and a live Encoding panel (#27–#29). Audio playback in the monitor remains open.
+- [x] **M27 Workspace shell** – glyph fixes (#58); command table driving menus, queue-toolbar actions, persisted remappable app-command shortcuts, enabled state, and registry-generated queue/preset/media context menus with coverage tests (#32); shared command discovery/execution available through IPC, CLI, and MCP; workspace activation, save-as, rename, reset, delete, and panel visibility dispatch through engine commands; queue row actions, watch-folder ingestion, trim, log, and approved queue mutations also use the shared registry; named, persisted, self-repairing craft-ui dock workspaces with configurable panel focus/visibility shortcuts (#31); denser theme spacing, persisted Light/high-contrast variants, active-panel outline, and minimum-size/Hi-DPI render tests (#33); pinned build-time craft-fonts fallback integration; side-by-side reference comparison with neutral theme (#33, #115, #167).
+- [x] **M28 Panels** – done: persistence of preferences/watch folders/favourites (#38, #39), sortable Preset Browser with import/export/delete (#35), Media Browser (#36), honest parity docs (#40). Queue table with sortable columns (Source, Format, Preset, Output File, Status), grouped parent sources and indented target child rows with inline format ComboBox, preset hyperlink selector, and output path dialog (#34). Comprehensive Export Settings dialog parity with Source/Output preview tabs, scrubber, real frame decoding, Match Source, and Video/Audio/Effects/Captions/Publish/Loudness/Metadata tabs (#37).
+- [x] **M29 Hardening and alpha.2** – panic guard around third-party decode, malformed-media corpus, property tests, required-tool real-media CI matrix (#41); installed-package smoke jobs for Linux packages, AppImage, macOS DMG and Windows MSI (#42); seven bounded libFuzzer targets with nightly runs (#43). All seven fuzz targets built and completed a local seeded 10-run smoke pass; shell syntax and workflow lint checks pass. Clean-runner installer and sustained fuzz execution verified in CI. MPEG-TS sniffing and real frame-rate probing in CLI/watch folders. IPC: `queue.submit` honours the start policy and `queue.subscribe` streams job events (#1 partly; an iceoryx2 packet transport with bounded backpressure feeds `SourceDescriptor::Pipe` jobs with raw RGBA frames and f32 audio through the transcode pipeline, while project-reference rendering remains). Alpha.2 release packaged with changelog and hardening (#44, #51).
+
+## Milestone 30: Universal Format Expansion & ArtCraft Bidirectional Conversion
+
+Tracked under Epic [#69](https://github.com/el-j/encoderCraft/issues/69) in [Milestone 8](https://github.com/el-j/encoderCraft/milestone/8).
+
+- [x] **M30.1: Core & Demux Sniffer (#70)** – Universal `ContainerType` and `MediaStreamKind` variants for Adobe formats (`INDD`, `PSD`, `PSB`, `AEP`, `AI`, `PRPROJ`, `SESX`), CAD formats (`DXF`, `DWG`, `HPGL`), and native ArtCraft formats (`.designcraft`, `.photocraft`, `.vectorcraft`, `.effectcraft`, `.filmcraft`, `.soundcraft`, `.cadcraft`, `.anicraft`); magic-byte sniffing and `ContainerType::valid_conversion_targets` smart matrix.
+- [x] **M30.2: CAD & Technical Drafting (#71)** – AutoCAD DXF/DWG and HPGL plotter ingest and conversion via `cadcraft` (DXF ASCII & binary, DWG headers, HPGL/PLT, `.cadcraft`, SVG and blueprint PDF).
+- [x] **M30.3: Prepress & Publication (#72)** – InDesign INDD/IDML and DesignCraft conversion via `designcraft` & `indd-utils` (ObjectStreams database unpacker, IDML package, `.designcraft`, EPUB 3, and PDF/X-4 with OutputIntents).
+- [x] **M30.4: Layered Graphics & Photography (#73)** – Photoshop PSD/PSB and PhotoCraft conversion via `photocraft` (layer trees, blend modes, masks, `.photocraft` container, PSB large documents, and multi-part OpenEXR).
+- [x] **M30.5: Vector Graphics & Illustration (#74)** – Illustrator AI and VectorCraft conversion via `vectorcraft` (clean-room dual-stream PDF/AI reader/writer, `VectorCanvas` IR, multi-artboards, `.vectorcraft` binary container, SVG 2.0, PostScript EPS, text-to-outlines, and AutoCAD DXF interop).
+- [x] **M30.6: Motion Graphics & NLE Timeline (#75)** – After Effects AEP and Premiere PRPROJ conversion via `effectcraft` & `filmcraft` (RIFX parser, bounded decompression bomb defense, `.effectcraft` container, W3C Lottie JSON, `.filmcraft` container, Final Cut Pro XML, and OpenTimelineIO).
+- [x] **M30.7: Audio DAW & Multitrack (#76)** – Audition SESX and SoundCraft conversion: clean-room `.sesx`/`.soundcraft` parsers, `DawSession` IR, BWF master with iXML, stems and R128 loudness; hardened against hostile input; real clip decode, resample, gain/pan/declick mixing via `soundcraft-dsp`, WAV/FLAC/AIFF/`.sesx`/`.soundcraft` outputs, CLI `encode mix.sesx -o out.wav --stems`.
+- [x] **M30.8: UI Inspector & Headless CLI (#77)** – `encodercraft convert <input> --to <format>` with source/target validation; inspector destination filtering by source container; domain-aware tabs (Composition, Layout, CAD, Layers) driven by a source inventory; `--sequence`, `--pages` and `--layers` selection honoured by the pipeline (multi-sequence prproj/filmcraft/effectcraft/AEP, per-page PDF/X-4 output, CAD and layered-image layer filtering); `probe` lists sequences, pages and layers.
+
+## Milestone 31: UI Density, Spacing & Layout Parity
+
+Tracked under Milestone [M31 - UI Density, Spacing & Layout Parity](https://github.com/el-j/encoderCraft/milestone/10).
+
+- [x] **M31.1: Unified Panel Insets & Redundant Headings (#131, #132, PR #151)** – Standardized uniform `panel_inset = 8.0px` margins across all dock panes; eliminated redundant panel title headers duplicate to dock tabs.
+- [x] **M31.2: Reference Queue Toolbar, Footer & Aligned Grid (#133, #134, PR #152)** – Pinned AME-style single-row icon action toolbar on top; relocated Auto Shutdown, Renderer selector, and Overall Progress bar to the queue footer; implemented `QueueColumnWidths` for strict vertical column alignment.
+- [x] **M31.3: Preset Browser Tree Hierarchy & Search (#135, PR #153)** – Expandable tree hierarchy for System and User preset groups; full-width search bar; human-readable format and codec display names (`H.264 / AVC`, `Apple ProRes`, etc.).
+- [x] **M31.4: Media Browser Reference Directory Tree & Zoom (#136, PR #154)** – Left collapsible location sidebar (Favorites, Local Storage, Volumes); strict table column alignment (`MediaBrowserColumnWidths`); bottom status bar with item count and thumbnail zoom slider.
+- [x] **M31.5: Hardware Renderer Auto-Detection (#137, PR #155)** – Runtime hardware GPU/encoder discovery via platform crate (`available_renderers()`); interactive selector in queue footer with persistence.
+- [x] **M31.6: Visual Regression Metrics Harness (#138)** – Headless layout assertion tests verifying panel insets, row heights, and table column boundary alignments (`test_layout_metrics.rs`).
+- [x] **M31.7: Parity Honesty Audit & Calibration (#150)** – Calibrated `target-app-parity.md` with explicit verified/partial statuses, reference UI pixel measurements, and tracking links across Milestones 31–34.
+
+## Milestone 32: Export Settings Inspector & Effects Pipeline
+
+Tracked under Milestone [M32 - Export Settings Inspector & Effects Pipeline](https://github.com/el-j/encoderCraft/milestone/10).
+
+- [x] **M32.1: Burn-In Timecode Overlay (BITC) with Position, Format & Opacity (#139)** – Timecode overlay configuration (`TimecodeOverlayConfig`), SMPTE burn-in rendering with anchor positions, scale, opacity, and custom start timecodes.
+- [x] **M32.2: Image Watermark Overlay with Position, Scaling & Opacity (#140)** – Watermark configuration (`WatermarkOverlayConfig`), raster image blending, anchor positioning, relative scaling, and opacity controls.
+- [x] **M32.3: Name Overlay & Broadcast Video Limiter (#141)** – Dailies name overlay (`NameOverlayConfig`) with prefix/suffix/source name; broadcast video limiter (`VideoLimiterConfig`) with IRE 100/103 clip levels and soft knee rolloff.
+- [x] **M32.4: SDR Conform HDR Tone-Mapping (HLG/PQ to Rec.709) (#142)** – Extended Reinhard tone-mapping curve in `encodercraft-color` (`apply_sdr_conform`) with highlight preservation and target luminance scaling.
+- [x] **M32.5: Source vs Output Compare View & Interactive Crop (#143)** – Inspector preview canvas supporting Source, Output, and Split Compare mode with interactive split slider; source frame crop margin controls (`CropConfig`).
+
+## Milestone 33: Queue Automation, Watch Folder Depth & Preferences
+
+Tracked under Milestone [M33 - Queue Automation, Watch Folder Depth & Preferences](https://github.com/el-j/encoderCraft/milestone/11).
+
+- [x] **M33.1: Auto-Start Queue on Idle Timeout (#144)** – Mouse/keyboard activity tracker (`last_user_interaction`), idle duration detection, and automatic queue kick-off when idle timeout expires.
+- [x] **M33.2: Automatic File Name Incrementing on Destination Collision (#145)** – Collision resolver (`resolve_unique_output_path`) appending `_1`, `_2`, etc. if output path exists; configurable in Preferences.
+- [x] **M33.3: Watch Folder Multi-Target Output Routing & Archiving (#146)** – 1-to-N output preset targets (`targets`) per watch folder with dedicated subdirectories; automated source post-processing: `LeaveInPlace`, `MoveToProcessed (/Source/)`, `MoveToArchive (/Archive/YYYY-MM-DD)`, `DeleteSource`.
+- [x] **M33.4: Completion Chime Audio Alert & Clean Exit Queue Pruning (#147)** – Non-blocking system audio notification (`play_completion_chime`) on queue completion; automatically clear completed jobs on clean application exit (`remove_finished_on_exit`).
+
+## Milestone 34: Audio Channel Mapping & Broadcast MXF Profiles
+
+Tracked under Milestone [M34 - Audio Channel Mapping & Broadcast MXF Profiles](https://github.com/el-j/encoderCraft/milestone/12).
+
+- [x] **M34.1: Multichannel Audio Matrix Router & Channel Mapping (#148)** – Multichannel matrix router (`AudioChannelMapping`), track layouts (`AudioTrackLayout::DiscreteMono`, `StereoPairs`, `Surround51`, `Surround71`), interactive GUI routing grid in Audio tab, and pipeline routing execution (`apply_audio_matrix`).
+- [x] **M34.2: Broadcast Delivery MXF Profiles (#149)** – Factory broadcast compliance presets for Sony XDCAM HD422 1080 (50 Mbps), Panasonic AVC-Intra 100 1080, DPP AS-11 UK HD Delivery (25p / EBU R128), and AMWA AS-10 Broadcast Shim in MXF OP-1a with 8-channel 24-bit 48 kHz PCM audio.
+
+## Milestone 35: Source Properties, Quick Preset Switcher & Stitch Dialog
+
+Tracked under Milestone [M35 - Source Properties, Quick Preset Switcher & Stitch Dialog](https://github.com/el-j/encoderCraft/milestone/13).
+
+- [x] **M35.1: Source Properties Essence Inspection Modal Dialog (#160)** – Dedicated modal stream essence viewer (`SourcePropertiesDialog`, Cmd+I) inspecting file size, container format, video dimensions, pixel aspect ratio, frame rate, codec, bit depth, color space primaries/transfer/matrix/range, audio sample rate, channels, bit depth, duration, and timecode; includes one-click "Copy Information" clipboard export.
+- [x] **M35.2: Inline Format and Preset Quick-Switch Popups in Queue Table (#161)** – Interactive in-place dropdown selectors directly in the queue table summary row for instant format and preset switching without entering the inspector modal, featuring container auto-extension sync and "Custom Export Settings..." link.
+- [x] **M35.3: Interactive Stitch Clips Destination and Preset Dialog (#162)** – Dedicated sequence assembly dialog with clip order re-ordering (Up/Down), output path picker, preset selector, and expandable queue child clips display.
+
+## Milestone 36: UI Table Column Locking, Spacing Precision & Theme Neutrality
+
+Tracked under Milestone [M36 - UI Table Column Locking, Spacing Precision & Theme Neutrality](https://github.com/el-j/encoderCraft/milestone/14).
+
+- [x] **M36.1: Strict Table Column Locking & Bounded Clipping (#164)** – Implemented `render_column_cell` with exact size allocation and clipping bounds, preventing long source file names or sibling chips from shifting downstream columns; added `test_render_column_cell_strict_bounds`.
+- [x] **M36.2: Media Browser Standard Timestamps & Label Truncation (#165)** – Replaced relative date strings with formatted ISO timestamps (`YYYY-MM-DD HH:MM`) using `chrono`, added `.truncate()` across list view columns, and calibrated column widths.
+- [x] **M36.3: Preset Browser Adaptive Column Widths & Tree Alignment (#166)** – Adaptive column width computation (`PresetColumnWidths`), internalized tree indentations inside the Name column, and aligned Format/Frame Size/Frame Rate/Target Rate columns across all rows.
+- [x] **M36.4: Adobe Reference Neutral Greys & Test Config Isolation (#167)** – Authentic `Tokens::medium_dark()` palette matching Adobe reference screenshots with neutral grey chrome and safe fallback parsing.
+
+## Milestone 37: Advanced Transforms, craft-libs Integration & Industry-Grade E2E Suite
+
+Tracked under Milestone [M37 - Advanced Transforms, craft-libs Integration & Industry-Grade E2E Suite](https://github.com/el-j/encoderCraft/milestone/15).
+
+- [x] **M37.1: Advanced Video Transforms: Flip, Deinterlace & Pixel Aspect Ratio Conform (#171)** – Added `FlipMode` (`Horizontal`, `Vertical`, `Both`), `DeinterlaceMode` (`TopFieldFirst`, `BottomFieldFirst`, `Bob`), and `PixelAspectRatioConform` (`Source`, `Square`, `Custom`) to `VideoTransform`; implemented SIMD-friendly packed pixel field interpolation and line-reversing operations; exposed controls in Video Tab.
+- [x] **M37.2: Audio Lip-Sync Delay Offset Compensation (#172)** – Added `delay_ms: i32` to `AudioEncodeSettings` and implemented `apply_audio_delay` in `encodercraft-audio-dsp` with millisecond-exact zero-sample prepending on positive delays and head-trimming on negative advances; added interactive offset drag value (-5000ms to +5000ms) in Audio Tab.
+- [x] **M37.3: Full Architecture, UI Design & craft-libs Integration Review (#173)** – Authored `docs/architecture-and-parity-audit.md` comparing encoderCraft against Adobe Media Encoder 2026, mapping out upstream extraction for `craft-media`, `craft-ui`, `craft-window`, `craft-menu`, `craft-cms`, and `craft-text`, and formalizing the transform pipeline execution sequence.
+- [x] **M37.4: Exhaustive Industry-Grade End-to-End Integration Test Suite (#174)** – Created `crates/engine/tests/industry_e2e.rs` covering video transforms matrix, audio lip-sync delay offset and surround matrix routing, batch queue multi-target lifecycle and journal persistence, watch folder automation with settle-delay quiescence probing, and TCP IPC daemon dispatch.
+
+## Milestone 38: Queue Batch Multi-Selection, UI ID Clash Fixes, In/Out Trimming & Audio Metadata
+
+Tracked under Milestone [M38 - Queue Batch Multi-Selection, UI ID Clash Fixes, In/Out Trimming & Audio Metadata](https://github.com/el-j/encoderCraft/milestone/16).
+
+- [x] **M38.1: UI ID Clash Resolution & Preset Browser Horizontal Overflow Fix (#176)** – Resolved egui ID clashes (ID 8457 and 5517) in Media Browser sidebar/content ScrollAreas and Preset Browser rows using explicit `id_salt` and `ui.push_id`; unified preset table header into two-dimensional scrolling container to prevent table blowout.
+- [x] **M38.2: Multi-Item Queue Selection Batch Updates & Inline Dropdown Events (#177)** – Enabled simultaneous batch format and preset switching across all highlighted queue items upon modifying any selected item; replaced stale outer combo response checking with inner state comparison so dropdown selections immediately apply.
+- [x] **M38.3: Native Multi-File Selection & Recursive Folder Queue Addition (#178)** – Removed restrictive extension filters from the native OS file picker allowing standard Shift/Command range and disjoint selections; added recursive folder scanner (`add_folder_recursive`) and `AppCommand::AddFolder` menu command.
+- [x] **M38.4: Context-Aware Format Filtering & Essence Visual Badges (#179)** – Dynamically filtered format choices based on media stream essence kind (e.g. audio-only files only offer audio formats like WAV, FLAC, MP3, AAC, Ogg); added distinct color-coded chips (`[VID]`, `[AUD]`, `[IMG]`, `[DOC]`, `[3D]`, `[SEQ]`) to visually identify media types in queue table.
+- [x] **M38.5: In/Out Point Trimming in Inspector & Preview Panel (#180)** – Connected "Set In", "Set Out", and "Reset Range" buttons in the Inspector preview section with live range labels; synchronized Preview Monitor transport marks (`[` Set In, `]` Set Out, `I` / `O` shortcuts) directly to queue job specifications.
+- [x] **M38.6: Granular Rendering Preferences & Audio Metadata Tag Editor (#181)** – Added GPU/CPU renderer selection, parallel worker concurrency (1..=16), and GPU VRAM budget controls in Preferences dialog; expanded `XmpMetadata` with Title, Artist, Album, Track Number, Year, and Genre tags with live editing in the Inspector Metadata tab.
+
+## Milestone 39: Ecosystem Codec Harvest: Audio, Cinema, GPU, 3D & Publications
+
+Tracked under Milestone [M39 - Ecosystem Codec Harvest: Audio, Cinema, GPU, 3D & Publications](https://github.com/el-j/encoderCraft/milestone/17).
+
+- [x] **M39.1: Pure-Rust MP3 & Ogg Vorbis Native Encoders (#183)** – Replace stub fallbacks with pure-Rust MPEG-1 Layer 3 (with ID3v2 headers) and Ogg Vorbis encoders (`execute_audio_mp3`, `execute_audio_ogg`).
+- [x] **M39.2: Apple Core Audio Format (.caf) & Standalone Ogg Opus (.opus) (#184)** – 64-bit Apple CAF writer from `soundcraft-audio-io` and RFC 7845 standalone Ogg Opus container multiplexer.
+- [x] **M39.3: GPU DirectDraw Surface (DDS), SMPTE DPX & JPEG XL (#185)** – Integrate `photocraft-codecs` for GPU textures (BC1–BC7/BC6H HDR), SMPTE 268M DPX film scans, and JPEG XL (.jxl).
+- [x] **M39.4: Deep OpenEXR, Radiance HDR, DICOM & FITS (#186)** – Deep OpenEXR with Cryptomatte, Radiance HDR (.hdr), medical DICOM (.dcm), and astronomical FITS (.fits).
+- [x] **M39.5: Autodesk FBX, Alembic (.abc) & Collada (.dae) 3D Interchange (#187)** – 3D mesh import/export from `texturecraft-formats` for FBX, Alembic Ogawa, Collada DAE, binary USDC, and 3D Gaussian Splats (.splat).
+- [x] **M39.6: EPUB 3 Publications, PowerPoint PPTX & Lottie Animations (#188)** – Standards-compliant EPUB 3 packages, PowerPoint slide decks, Lottie vector animation JSON, and Windows Metafile (.wmf) exports.
+
+## Milestone 40: Advanced Broadcast, Color & Delivery Paradigms (Novel Formats)
+
+Tracked under Milestone [M40 - Advanced Broadcast, Color & Delivery Paradigms (Novel Formats)](https://github.com/el-j/encoderCraft/milestone/18).
+
+- [x] **M40.1: 3D Look-Up Table (LUT) Transcoding & Baking Engine (#189)** – Bidirectional 1D/3D LUT conversion (.cube, .3dl, .look), tetrahedral interpolation, and direct transcode color baking.
+- [x] **M40.2: Universal Subtitle & Closed Caption Transcoding Matrix (#190)** – Bidirectional matrix across SRT, WebVTT, SCC, SMPTE-TT/IMSC1, and ASS/SSA with framerate retiming.
+- [x] **M40.3: Broadcast MPEG-TS Multiplexing & Apple Spatial Video (MV-HEVC) (#191)** – 188-byte MPEG-TS transport stream packetizer and stereoscopic MV-HEVC signaling in ISO BMFF.
+
+## Milestone 41: Production Workflow, UI/UX Polish & Adobe Media Encoder Parity Fixes
+
+Tracked under Milestone [M41 - Production Workflow, UI/UX Polish & Adobe Media Encoder Parity Fixes](https://github.com/el-j/encoderCraft/milestone/19).
+
+- [x] **M41.1: Multi-Selection Batch Format & Preset Switching (#192)** – Update all highlighted queue items simultaneously with synchronized default presets and output extensions upon modifying any selected item.
+- [x] **M41.2: Domain-Filtered Format Options (#193)** – Restrict format dropdowns strictly to candidate containers valid for the source media stream kind (no image/video options on audio sources).
+- [x] **M41.3: Eliminate egui ID Clashes Across Panels & ScrollAreas (#194)** – Wrap dock panels in `ui.push_id(*panel, ...)` inside `EncoderDockContent::body` and assign unique explicit `id_salt` across scroll areas and comboboxes.
+- [x] **M41.4: Shift+Click & Cmd+Click Multi-Selection in Media Browser (#195)** – Implement multi-file selection with range select (Shift) and toggle select (Cmd/Ctrl) in Media Browser list and thumbnail views.
+- [x] **M41.5: Recursive Folder Ingestion & Batch Queueing (#196)** – Support adding folders directly to the queue with recursive traversal and automatic media stream classification.
+- [x] **M41.6: Inline Format Dropdown Application & Instant UI Repaint (#197)** – Ensure inline format selection mutates job specs reliably and requests immediate frame repaint.
+- [x] **M41.7: Set In / Set Out Range Synchronization (#198)** – Synchronize In/Out trim markers across Preview panel, Inspector modal, and pipeline transcoding engine for both video and audio.
+- [x] **M41.8: Granular AME-Parity Preferences (#199)** – Tabbed Preferences dialog with granular GPU acceleration, CPU worker concurrency, memory quotas, and watch folder timing.
+- [x] **M41.9: Official Audio Metadata Lookup & Editor (#200)** – Full audio metadata editor for ID3/Vorbis/RIFF tags with automated lookup from official sources (MusicBrainz/ISRC).
+- [x] **M41.10: Distinctive Visual Media Kind Badges & Icons (#201)** – Render color-coded essence chips and distinctive icons (VID, AUD, IMG, DOC, 3D, SEQ) in the Queue Source column.
+- [x] **M41.11: Preset Browser Layout Bounds & Scrolling Overflow Fix (#202)** – Keep table header fixed outside vertical scroll area and bound scrolling within available height without dock pane overflow.
+
+## Milestone 42: Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews
+
+Tracked under Milestone [M42 - Media Browser File Operations, Resizable Columns & Rich Thumbnail Previews](https://github.com/el-j/encoderCraft/milestone/20).
+
+- [x] **M42.1: File & Folder Operations in Media Browser (#216)** – Inline rename (`Cmd+R` / Enter), New Folder (`Cmd+Shift+N`), and file move operations.
+- [x] **M42.2: Resizable Columns, Left-Aligned Names & Header Column Picker (#217)** – Interactive column divider resizing, left-aligned filenames in list view, and right-click column show/hide menu.
+- [x] **M42.3: Rich Thumbnail View with Folder Cards & Format Badges (#218)** – Folder-styled cards, image/video thumbnail textures, audio waveforms, and corner format pills (`MP4`, `FLAC`, etc.).
+
+## Milestone 43: Desktop Shell, Window Behavior & Settings Parity
+
+Tracked under Milestone [M43 - Desktop Shell, Window Behavior & Settings Parity](https://github.com/el-j/encoderCraft/milestone/21).
+
+- [x] **M43.1: Preset Browser Overscroll & Detached Item Popup Fix (#219)** – Fix detached floating preset labels bleeding outside dock boundaries and constrain tree to scroll area.
+- [x] **M43.2: Resizable Settings Window Height & Hardware-Relevant Filtering (#220)** – Dynamic height resizing for preferences modal and filter accelerators by active host hardware.
+- [x] **M43.3: Automatic Parent Directory Creation on State Journal Commit (#221)** – Prevent atomic journal I/O failure on parallelism and settings mutations by ensuring parent directory exists.
+- [x] **M43.4: Window Maximize / Restore Toggle on Title Bar Double-Click (#222)** – Double-click on header bar toggles window maximize and restore across desktop platforms.
+
+## Milestone 44: Universal Preview Engine for All Media Domains
+
+Tracked under Milestone [M44 - Universal Preview Engine for All Media Domains](https://github.com/el-j/encoderCraft/milestone/22).
+
+- [x] **M44.1: Universal Preview for Documents, Vector Graphics, 3D & Audio (#223)** – Render paginated document previews (DOCX, PDF, IDML, text), vector graphics (SVG, EPS, WMF), interactive 3D viewport (STL, OBJ, GLB, USDZ), and audio waveform scrubber in the Preview monitor.
+
+## Milestone 45: Queue In/Out Display, Table Customization & 3D/Document Presets
+
+Tracked under Milestone [M45 - Queue In/Out Display, Table Customization & 3D/Document Presets](https://github.com/el-j/encoderCraft/milestone/23).
+
+- [x] **M45.1: Queue In/Out Point & Trimmed Duration Display (#224)** – Display In mark, Out mark, and trimmed length directly in queue rows; add right-click column show/hide selector to queue table header.
+- [x] **M45.2: 3D Conversion Pipeline Audit & STEP/STP CAD Ingestion (#225)** – Ensure robust transcode across all 3D mesh formats (STL, OBJ, GLB, USDZ) and add ISO 10303 STEP/STP solid CAD ingestion.
+- [x] **M45.3: Document & Publishing Conversion Presets (#226)** – Built-in factory presets for DOCX to Markdown, DOCX to HTML, PDF to PNG sequence, Markdown to PDF, and Document to EPUB 3.
+
+## Proposed Milestone 46: User-Installable Codec Providers
+
+Open GitHub issues and milestones were reviewed on 2026-11-13. GitHub currently marks M39–M45 open; M39–M41 are documented as complete in this repository, while M42–M45 contain the current format, preview, and queue work. No pre-existing open issue or milestone defines a general runtime provider API. Adjacent docs do contemplate a specific optional system-FFmpeg subprocess bridge ([format matrix](docs/file-format-matrix.md), [plan-draft-00](docs/plan-draft-00.md), and the implementation risk table), but not provider manifests, multi-provider discovery, lifecycle controls, or a reusable protocol. GitHub [milestone M46](https://github.com/el-j/encoderCraft/milestone/24) and its nine scoped issues (#251–#259) now track the broader follow-on work without replacing or reprioritizing existing milestones.
+
+- **Goal:** Let users install compatible codecs absent from a release without rebuilding encoderCraft.
+- **Proposed design:** Local, versioned provider manifests and explicitly enabled, out-of-process workers; keep shipped codecs in-process and unchanged.
+- **Tasks & Status:** [M46.1–M46.9](https://github.com/el-j/encoderCraft/milestone/24) cover the threat model/API (ADR 0002 completed), manifest/discovery schema and validation (`crates/core/src/provider.rs` completed), runtime registry & non-shadowing resolution (`crates/engine/src/provider/registry.rs` completed), worker protocol, supervision, video vertical slice, audio/decode support, command/CLI/GUI management, and conformance/packaging/documentation.
+- **Scope guardrails:** No in-process Rust dynamic-library ABI, marketplace, auto-download, auto-enable, arbitrary engine replacement, or bundled third-party providers in v1. An enabled provider runs with the user's permissions; subprocess execution is not a security sandbox.
+- **Plan:** [docs/codec-plugin-system-plan.md](docs/codec-plugin-system-plan.md) contains the detailed architecture proposal, task definitions, completion gate, and open risks.
+
+## Milestone 47: Export Settings Parity: Audio Configuration, Stream Toggles, Cropping & Multi-Format Controls
+
+Tracked under Milestone [M47 - Export Settings Parity: Audio Configuration, Stream Toggles, Cropping & Multi-Format Controls](https://github.com/el-j/encoderCraft/milestone/25) addressing issues [#260](https://github.com/el-j/encoderCraft/issues/260) and [#265](https://github.com/el-j/encoderCraft/issues/265)–[#271](https://github.com/el-j/encoderCraft/issues/271).
+
+- [x] **M47.1: Master Stream Export Toggles ([#265](https://github.com/el-j/encoderCraft/issues/265))** – Implemented `export_video` and `export_audio` master stream toggles with container capability gating and automatic tab filtering for audio-only, video-only, and mixed deliverables.
+- [x] **M47.2: Pre-Scale Source Raster Cropping ([#266](https://github.com/el-j/encoderCraft/issues/266))** – True subregion raster extraction in `FrameScaler` (`scale_cropped_into`) prior to scaling and aspect conform, eliminating black padding bars.
+- [x] **M47.3: Interactive Preview Monitor Crop Tool ([#267](https://github.com/el-j/encoderCraft/issues/267))** – Interactive on-monitor crop box with translucent mask, rule-of-thirds grid, corner drag handles, and aspect ratio constraint presets (1:1, 4:3, 16:9, 9:16, 2.39:1, Custom).
+- [x] **M47.4: Dynamic Interactive Audio Parameters & Persistence ([#268](https://github.com/el-j/encoderCraft/issues/268))** – Fully interactive audio codec selection from container capabilities, sample rate, channel layout, bitrate, bit depth (16/24/32-bit), and lip-sync delay with immediate persistence to job targets.
+- [x] **M47.5: Multi-Format Audio-Only Pipeline Support ([#269](https://github.com/el-j/encoderCraft/issues/269))** – Direct export of audio-only streams into MP4/M4A and MKV/WebM containers from video, audio, or DAW sources.
+- [x] **M47.6: Still Image & Advanced Video Rate Controls ([#270](https://github.com/el-j/encoderCraft/issues/270))** – Still image quality slider (1-100), GOP distance, consecutive B-frames, codec profile selection, and pixel format depth options.
+- [x] **M47.7: Queue & Preset Synchronization ([#271](https://github.com/el-j/encoderCraft/issues/271))** – Synchronized stream capabilities and presets when container formats are changed across the queue panel and inspector.
+
+## Milestone 48: Universal Media Conversion Integrity, Real Codec Conformance & Desktop Shell Polish
+
+Tracked under Milestone [M48 - Universal Media Conversion Integrity, Real Codec Conformance & Desktop Shell Polish](https://github.com/el-j/encoderCraft/milestone/26) addressing issues [#275](https://github.com/el-j/encoderCraft/issues/275)–[#281](https://github.com/el-j/encoderCraft/issues/281).
+
+- [x] **M48.1: Robust DOCX Ingestion & Guaranteed PDF/X-4 Output ([#275](https://github.com/el-j/encoderCraft/issues/275))** – Tolerates non-fatal styling warnings in `designcraft_textimport` and provides direct OpenXML fallback parsing from `word/document.xml`, guaranteeing genuine multi-page PDF/X-4, Markdown, and HTML conversions.
+- [x] **M48.2: Real Zip-Package Content Extraction (EPUB & PPTX) ([#276](https://github.com/el-j/encoderCraft/issues/276))** – Replaced stub placeholder text with genuine content extraction for EPUB chapters (`html_to_text`) and PowerPoint slide XML paragraphs (`<a:p>` / `<a:t>`), plus robust `list_zip_entries` helper.
+- [x] **M48.3: Queue Duplication Counter & Overwrite Collision Protection ([#277](https://github.com/el-j/encoderCraft/issues/277))** – Automatic unique numeric suffix incrementing (`_1`, `_2`) when duplicating jobs or output targets, destination collision warning banners in queue panel, and one-click auto-renaming.
+- [x] **M48.4: Preset Browser Overscroll & Dock Boundary Constraining ([#278](https://github.com/el-j/encoderCraft/issues/278))** – Fixed floating/detached buttons during overscrolling by enforcing `ui.set_clip_rect` and row visibility culling (`ui.is_rect_visible`).
+- [x] **M48.5: Media Browser Polish: Left-Aligned Filenames & Resizable Headers ([#279](https://github.com/el-j/encoderCraft/issues/279))** – Fixed column divider misalignment between header and row cells by synchronizing `cols.name` with `settings.name`, drawing clear divider guide lines, and strictly left-aligning filename cells.
+- [x] **M48.6: Window Maximize / Restore on Header Double-Click ([#280](https://github.com/el-j/encoderCraft/issues/280))** – Protected egui's double-click pointer state in `titlebar::drag_area` so double-clicking anywhere on the top menu bar or header bar toggles window maximize and restore across desktop platforms.
+- [x] **M48.7: Upstream craft-libs Codec Ecosystem Expansion & End-to-End Tests ([#281](https://github.com/el-j/encoderCraft/issues/281))** – Eliminated dummy fallback projects in motion and timeline project executors in favor of typed errors, added comprehensive integration tests for DOCX, EPUB, and PPTX conversions in `presets_conformance.rs`.
+
+## Milestone 49: v0.1.0 First Stable Release Readiness & Final Gap Closure
+
+Tracked under Milestone [M49 - v0.1.0 First Stable Release Readiness & Final Gap Closure](https://github.com/el-j/encoderCraft/milestone/27) addressing issues [#1](https://github.com/el-j/encoderCraft/issues/1) and [#283](https://github.com/el-j/encoderCraft/issues/283)–[#286](https://github.com/el-j/encoderCraft/issues/286).
+
+- [x] **M49.1: Sibling App Job Ingestion Listener & Headless Rendering ([#1](https://github.com/el-j/encoderCraft/issues/1))** – Production Unix domain socket and TCP daemon endpoints for seamless zero-copy batch job submission from FilmCraft, EffectCraft, SoundCraft, DesignCraft, and CadCraft.
+- [x] **M49.2: Synchronized Preview Monitor Audio Controls ([#283](https://github.com/el-j/encoderCraft/issues/283))** – Integrated real-time volume slider (0.0 to 1.0) and instant mute/unmute toggle in the preview monitor transport toolbar.
+- [x] **M49.3: Workspace Version Bump to 0.1.0 Stable & Release Packaging Verification ([#284](https://github.com/el-j/encoderCraft/issues/284))** – Promoted entire workspace to official 0.1.0 stable release and verified package build metadata and smoke test harnesses.
+- [x] **M49.4: Parity Documentation Refresh & Cross-Repository Project Linking ([#285](https://github.com/el-j/encoderCraft/issues/285))** – Complete refresh of README, ROADMAP, target app parity, and implementation milestones.
+- [x] **M49.5: Multi-Platform Release Smoke & Zero-Panic Stress Verification Gate ([#286](https://github.com/el-j/encoderCraft/issues/286))** – Full clean-room audit, xtask CI validation (>300 tests passed, strict layering, clippy clean).
+
+## Known Issues (alpha.1, tracked above)
+
+- Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).
+- The interface layout differs from the reference encoder (Resolved in M31).

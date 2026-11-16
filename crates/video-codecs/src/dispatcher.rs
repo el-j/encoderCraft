@@ -11,6 +11,7 @@ use crate::gif::GifEncoder;
 use crate::h264::H264EncoderWrapper;
 use crate::hevc::HevcEncoderWrapper;
 use crate::mjpeg::MjpegEncoder;
+use crate::params::EncodeParams;
 use crate::prores::ProResEncoderWrapper;
 use crate::vp9::Vp9EncoderWrapper;
 
@@ -67,25 +68,36 @@ pub fn create_video_encoder(
     fps: Rational64,
     bitrate_kbps: Option<u32>,
 ) -> Result<Box<dyn VideoEncoder + Send>, EncoderError> {
+    create_video_encoder_with(kind, width, height, fps, &EncodeParams { bitrate_kbps, ..EncodeParams::default() })
+}
+
+/// Creates a video encoder honouring the full parameter set; parameters a codec cannot honour are rejected.
+pub fn create_video_encoder_with(
+    kind: VideoCodecKind,
+    width: u32,
+    height: u32,
+    fps: Rational64,
+    params: &EncodeParams,
+) -> Result<Box<dyn VideoEncoder + Send>, EncoderError> {
     match kind {
         VideoCodecKind::H264 => {
-            let enc = H264EncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            let enc = H264EncoderWrapper::with_params(width, height, fps, params)?;
             Ok(Box::new(enc))
         }
         VideoCodecKind::Hevc => {
-            let enc = HevcEncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            let enc = HevcEncoderWrapper::with_params(width, height, fps, params)?;
             Ok(Box::new(enc))
         }
         VideoCodecKind::ProRes => {
-            let enc = ProResEncoderWrapper::new(width, height, fps)?;
+            let enc = ProResEncoderWrapper::with_params(width, height, params)?;
             Ok(Box::new(enc))
         }
         VideoCodecKind::Av1 => {
-            let enc = Av1EncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            let enc = Av1EncoderWrapper::with_params(width, height, fps, params)?;
             Ok(Box::new(enc))
         }
         VideoCodecKind::Vp9 => {
-            let enc = Vp9EncoderWrapper::new(width, height, fps, bitrate_kbps)?;
+            let enc = Vp9EncoderWrapper::with_params(width, height, fps, params)?;
             Ok(Box::new(enc))
         }
         VideoCodecKind::Gif => {
@@ -94,7 +106,7 @@ pub fn create_video_encoder(
             Ok(Box::new(enc))
         }
         VideoCodecKind::DnxHd => {
-            let enc = DnxEncoderWrapper::new(width, height, fps)?;
+            let enc = DnxEncoderWrapper::with_params(width, height, fps, params)?;
             Ok(Box::new(enc))
         }
         VideoCodecKind::Mjpeg => {

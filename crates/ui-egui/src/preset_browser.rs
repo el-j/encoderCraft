@@ -1,116 +1,287 @@
 //! Preset browser: searchable, categorized tree view of factory and user presets.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use egui::{RichText, Ui};
-use encodercraft_engine::QueueManager;
-use encodercraft_presets::{EncodingPreset, PresetCategory, PresetRegistry};
+use encodercraft_core::CraftJobSpec;
+use encodercraft_engine::{QueueManager, cmd::CommandRegistry};
+use encodercraft_presets::catalog::{self, PresetRow, SortColumn};
+use encodercraft_presets::{EncodingPreset, PresetCategory};
 
 use crate::icons;
 use crate::theme::Tokens;
 
+/// Returns a user-friendly human readable name for video codecs.
+pub fn human_video_codec_name(codec: Option<&str>) -> &'static str {
+    match codec.map(str::to_ascii_lowercase).as_deref() {
+        Some("h264" | "avc" | "x264") => "H.264 / AVC",
+        Some("hevc" | "h265" | "x265") => "H.265 / HEVC",
+        Some("av1" | "rav1e" | "svt-av1") => "AV1",
+        Some("vp9") => "VP9",
+        Some("vp8") => "VP8",
+        Some("prores") => "Apple ProRes",
+        Some("dnxhd" | "dnxhr") => "Avid DNxHD / DNxHR",
+        Some("mjpeg") => "Motion JPEG",
+        Some("rawvideo" | "uncompressed") => "Uncompressed",
+        Some(_) => "Custom Codec",
+        None => "Match Source",
+    }
+}
+
+/// Returns a user-friendly human readable name for audio codecs.
+pub fn human_audio_codec_name(codec: Option<&str>) -> &'static str {
+    match codec.map(str::to_ascii_lowercase).as_deref() {
+        Some("aac") => "AAC",
+        Some("pcm" | "pcm_s16le" | "pcm_s24le" | "pcm_f32le") => "Uncompressed PCM",
+        Some("mp3") => "MP3",
+        Some("flac") => "FLAC Lossless",
+        Some("vorbis" | "ogg") => "Ogg Vorbis",
+        Some("opus") => "Opus",
+        Some("ac3") => "Dolby Digital (AC-3)",
+        Some(_) => "Custom Audio",
+        None => "Match Source",
+    }
+}
+
 /// State for the preset browser panel.
-#[derive(Default)]
 pub struct PresetBrowserState {
     pub search_query: String,
     pub selected_category: Option<PresetCategory>,
     pub selected_preset: Option<EncodingPreset>,
     pub editor: crate::preset_editor::PresetEditorState,
+    pub sort_column: Option<SortColumn>,
+    pub sort_descending: bool,
+    pub status: Option<String>,
+    pub pending_updates: Vec<(String, CraftJobSpec)>,
+    pub expanded_groups: std::collections::HashSet<String>,
+}
+
+impl Default for PresetBrowserState {
+    fn default() -> Self {
+        let mut expanded_groups = std::collections::HashSet::new();
+        expanded_groups.insert("User Presets & Groups".to_string());
+        expanded_groups.insert("System Presets".to_string());
+        expanded_groups.insert("Broadcast & Production".to_string());
+        expanded_groups.insert("Web Video & Streaming".to_string());
+        Self {
+            search_query: String::new(),
+            selected_category: None,
+            selected_preset: None,
+            editor: crate::preset_editor::PresetEditorState::default(),
+            sort_column: None,
+            sort_descending: false,
+            status: None,
+            pending_updates: Vec::new(),
+            expanded_groups,
+        }
+    }
 }
 
 /// Renders the preset browser pane.
 pub fn render_preset_browser(
     ui: &mut Ui,
     state: &mut PresetBrowserState,
-    registry: &Arc<Mutex<PresetRegistry>>,
     queue_mgr: &Arc<QueueManager>,
+    commands: &CommandRegistry,
     selected_job_ids: &[String],
     tokens: &Tokens,
-) {
+) -> Option<crate::commands::AppCommand> {
+    let mut chosen_command = None;
     ui.vertical(|ui| {
-        ui.heading(RichText::new("Preset Browser").size(15.0));
-        ui.add_space(4.0);
-
-        // Search input & New Preset action
+        // --- 1. Top Search & Action Bar (Full Width Search with Apply and New buttons) ---
         ui.horizontal(|ui| {
             icons::icon_label(ui, icons::Icon::Search, 14.0, tokens.text_dim);
-            ui.add(egui::TextEdit::singleline(&mut state.search_query).hint_text("Search presets..."));
-            if icons::button_with_label(ui, icons::Icon::Plus, "New", false, tokens, "Create custom encoding preset").clicked() {
-                state.editor.open_new();
-            }
-        });
+            let search_width = (ui.available_width() - 170.0).max(120.0);
+            ui.add(egui::TextEdit::singleline(&mut state.search_query).desired_width(search_width).hint_text("Search presets..."));
 
-        ui.add_space(4.0);
-
-        // Category filter chips
-        ui.horizontal_wrapped(|ui| {
-            let all_sel = state.selected_category.is_none();
-            if ui.selectable_label(all_sel, "All").clicked() {
-                state.selected_category = None;
-            }
-
-            let categories = [
-                (PresetCategory::Web, "Web"),
-                (PresetCategory::Broadcast, "Broadcast"),
-                (PresetCategory::SocialMedia, "Social"),
-                (PresetCategory::Audio, "Audio"),
-                (PresetCategory::StillImage, "Image"),
-                (PresetCategory::Spatial3D, "3D"),
-                (PresetCategory::Vector, "Vector"),
-                (PresetCategory::Document, "Document"),
-            ];
-
-            for (cat, label) in categories {
-                let is_sel = state.selected_category == Some(cat);
-                if ui.selectable_label(is_sel, label).clicked() {
-                    state.selected_category = Some(cat);
+            let can_apply = state.selected_preset.is_some() && !selected_job_ids.is_empty();
+            ui.add_enabled_ui(can_apply, |ui| {
+                if icons::button_with_label(ui, icons::Icon::Check, "Apply", false, tokens, "Apply selected preset to queue (double-click)").clicked()
+                {
+                    chosen_command = Some(crate::commands::AppCommand::ApplyPreset);
                 }
+            });
+
+            if icons::button_with_label(ui, icons::Icon::Plus, "New", false, tokens, "Create custom encoding preset").clicked() {
+                chosen_command = Some(crate::commands::AppCommand::CreatePreset);
             }
         });
 
+        ui.add_space(tokens.section_gap);
+
+        // --- 2. Secondary Action Bar (Import / Export / Delete) ---
+        ui.horizontal(|ui| {
+            if ui.button("Import...").on_hover_text("Import an encoderCraft preset bundle (.json)").clicked() {
+                chosen_command = Some(crate::commands::AppCommand::ImportPresets);
+            }
+            if ui.button("Export...").on_hover_text("Export user presets as an encoderCraft preset bundle").clicked() {
+                chosen_command = Some(crate::commands::AppCommand::ExportPresets);
+            }
+            let deletable = state.selected_preset.as_ref().is_some_and(|preset| preset.category == PresetCategory::Custom);
+            let delete_label = crate::commands::AppCommand::DeletePreset.info().map_or("Delete Preset", |info| info.label);
+            if ui.add_enabled(deletable, egui::Button::new(delete_label)).on_hover_text("Delete the selected user preset").clicked() {
+                chosen_command = Some(crate::commands::AppCommand::DeletePreset);
+            }
+        });
+
+        if let Some(msg) = &state.status {
+            ui.label(RichText::new(msg).small().color(tokens.text_dim));
+        }
+
+        ui.add_space(2.0);
+
+        // --- 3. Presets Query & Table Header ---
+        let presets: Vec<EncodingPreset> = match commands.dispatch(queue_mgr, "preset.list", serde_json::json!({})) {
+            Ok(value) => match serde_json::from_value(value) {
+                Ok(presets) => presets,
+                Err(error) => {
+                    state.status = Some(format!("Preset list returned invalid data: {error}"));
+                    Vec::new()
+                }
+            },
+            Err(error) => {
+                state.status = Some(format!("Could not list presets: {error}"));
+                Vec::new()
+            }
+        };
+
+        let cols = PresetColumnWidths::compute(ui.available_width());
+
+        // Fixed Table Header (AME Parity: stays visible when scrolling presets)
+        render_preset_table_header(ui, state, tokens, cols);
         ui.separator();
 
-        // Preset items list
-        let reg = registry.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut matching_presets: Vec<EncodingPreset> = reg.list().to_vec();
-        drop(reg);
+        // --- 4. Hierarchical Tree Scroll Area strictly bounded to pane height ---
+        egui::ScrollArea::both().id_salt("preset_browser_scroll").max_height(ui.available_height().max(60.0)).auto_shrink([false, false]).show(
+            ui,
+            |ui| {
+                ui.set_clip_rect(ui.clip_rect());
+                let is_searching = !state.search_query.trim().is_empty();
 
-        let query = state.search_query.to_lowercase();
-        matching_presets.retain(|p| {
-            let matches_cat = match state.selected_category {
-                Some(cat) => p.category == cat,
-                None => true,
-            };
-            let matches_query = query.is_empty() || p.name.to_lowercase().contains(&query) || p.description.to_lowercase().contains(&query);
-            matches_cat && matches_query
-        });
-
-        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-            for preset in matching_presets {
-                let is_sel = state.selected_preset.as_ref().map(|p| &p.name) == Some(&preset.name);
-                ui.horizontal(|ui| {
-                    icons::icon_label(ui, icons::Icon::Preset, 13.0, tokens.accent_primary);
-                    let label = ui.selectable_label(is_sel, &preset.name);
-                    if label.clicked() {
-                        state.selected_preset = Some(preset.clone());
+                if is_searching {
+                    // Flat search results list
+                    let mut table = catalog::filter_rows(catalog::rows(&presets), &state.search_query, state.selected_category);
+                    if let Some(col) = state.sort_column {
+                        catalog::sort_rows(&mut table, col, state.sort_descending);
                     }
-                    if label.double_clicked() {
-                        state.selected_preset = Some(preset.clone());
-                        for job_id in selected_job_ids {
-                            apply_preset_to_job(job_id, &preset, queue_mgr);
+
+                    if table.is_empty() {
+                        ui.add_space(16.0);
+                        ui.label(RichText::new("No matching presets found.").color(tokens.text_dim));
+                    } else {
+                        for row in &table {
+                            let Some(preset) = presets.iter().find(|p| p.name == row.name) else { continue };
+                            let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 0.0 };
+                            if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
+                                chosen_command = Some(cmd);
+                            }
                         }
                     }
-                });
-            }
-        });
+                } else {
+                    // Tree Group 1: User Presets & Groups
+                    let user_group_name = "User Presets & Groups";
+                    let is_user_expanded = state.expanded_groups.contains(user_group_name);
+                    let user_presets: Vec<EncodingPreset> = presets.iter().filter(|p| p.category == PresetCategory::Custom).cloned().collect();
 
-        // Detail card & Apply button for selected preset
+                    ui.horizontal(|ui| {
+                        let chevron = if is_user_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+                        if icons::button(ui, chevron, 16.0, false, tokens, "Toggle User Presets").clicked() {
+                            if is_user_expanded {
+                                state.expanded_groups.remove(user_group_name);
+                            } else {
+                                state.expanded_groups.insert(user_group_name.to_string());
+                            }
+                        }
+                        icons::icon_label(ui, icons::Icon::Folder, 14.0, tokens.accent_primary);
+                        ui.label(RichText::new(format!("{user_group_name} ({})", user_presets.len())).strong());
+                    });
+
+                    if is_user_expanded {
+                        if user_presets.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.add_space(24.0);
+                                ui.label(
+                                    RichText::new("(No user presets created yet. Click 'New' above to create one.)").small().color(tokens.text_dim),
+                                );
+                            });
+                        } else {
+                            let user_rows = catalog::rows(&user_presets);
+                            for row in &user_rows {
+                                let Some(preset) = user_presets.iter().find(|p| p.name == row.name) else { continue };
+                                let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 16.0 };
+                                if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
+                                    chosen_command = Some(cmd);
+                                }
+                            }
+                        }
+                    }
+
+                    ui.add_space(2.0);
+
+                    // Tree Group 2: System Presets
+                    let sys_group_name = "System Presets";
+                    let is_sys_expanded = state.expanded_groups.contains(sys_group_name);
+                    let system_presets: Vec<EncodingPreset> = presets.iter().filter(|p| p.category != PresetCategory::Custom).cloned().collect();
+
+                    ui.horizontal(|ui| {
+                        let chevron = if is_sys_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+                        if icons::button(ui, chevron, 16.0, false, tokens, "Toggle System Presets").clicked() {
+                            if is_sys_expanded {
+                                state.expanded_groups.remove(sys_group_name);
+                            } else {
+                                state.expanded_groups.insert(sys_group_name.to_string());
+                            }
+                        }
+                        icons::icon_label(ui, icons::Icon::Folder, 14.0, tokens.text_dim);
+                        ui.label(RichText::new(format!("{sys_group_name} ({})", system_presets.len())).strong());
+                    });
+
+                    if is_sys_expanded {
+                        for cat in PresetCategory::ALL_SYSTEM {
+                            let cat_presets: Vec<EncodingPreset> = system_presets.iter().filter(|p| p.category == *cat).cloned().collect();
+                            if cat_presets.is_empty() {
+                                continue;
+                            }
+                            let cat_name = cat.label();
+                            let is_cat_expanded = state.expanded_groups.contains(cat_name);
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(18.0);
+                                let chevron = if is_cat_expanded { icons::Icon::ChevronDown } else { icons::Icon::ChevronRight };
+                                if icons::button(ui, chevron, 14.0, false, tokens, "Toggle category").clicked() {
+                                    if is_cat_expanded {
+                                        state.expanded_groups.remove(cat_name);
+                                    } else {
+                                        state.expanded_groups.insert(cat_name.to_string());
+                                    }
+                                }
+                                icons::icon_label(ui, icons::Icon::Preset, 13.0, tokens.text_dim);
+                                ui.label(RichText::new(format!("{cat_name} ({})", cat_presets.len())).small().color(tokens.text_secondary));
+                            });
+
+                            if is_cat_expanded {
+                                let cat_rows = catalog::rows(&cat_presets);
+                                for row in &cat_rows {
+                                    let Some(preset) = cat_presets.iter().find(|p| p.name == row.name) else { continue };
+                                    let mut ctx = PresetRowContext { state, selected_job_ids, queue_mgr, tokens, cols, indent: 28.0 };
+                                    if let Some(cmd) = render_preset_row(ui, row, preset, &mut ctx) {
+                                        chosen_command = Some(cmd);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        );
+
+        // --- 5. Detail Card & Actions for Selected Preset ---
         if let Some(ref preset) = state.selected_preset {
             ui.separator();
             egui::Frame::new()
                 .fill(tokens.bg_panel_darker)
                 .stroke(egui::Stroke::new(1.0, tokens.border_subtle))
-                .corner_radius(4)
+                .corner_radius(tokens.radius_sm)
                 .inner_margin(6.0)
                 .show(ui, |ui| {
                     ui.label(RichText::new(&preset.name).strong().color(tokens.accent_primary));
@@ -118,20 +289,20 @@ pub fn render_preset_browser(
 
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Container:").small().color(tokens.text_dim));
-                        ui.label(RichText::new(format!("{:?}", preset.container)).small());
+                        ui.label(RichText::new(preset.container.display_name()).small());
                     });
 
                     if let Some(ref v) = preset.video {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Video:").small().color(tokens.text_dim));
-                            ui.label(RichText::new(format!("{:?}", v.codec)).small());
+                            ui.label(RichText::new(human_video_codec_name(Some(&v.codec))).small());
                         });
                     }
 
                     if let Some(ref a) = preset.audio {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Audio:").small().color(tokens.text_dim));
-                            ui.label(RichText::new(format!("{:?}", a.codec)).small());
+                            ui.label(RichText::new(human_audio_codec_name(Some(&a.codec))).small());
                         });
                     }
 
@@ -164,16 +335,12 @@ pub fn render_preset_browser(
                     }
 
                     // Apply to selected job buttons (batch support)
-                    let count = selected_job_ids.len();
-                    let apply_text = if count > 1 { format!("Apply to {count} Jobs") } else { "Apply to Job".into() };
-                    let add_target_text = if count > 1 { format!("Add as Output to {count} Jobs") } else { "Add as Output".into() };
-
                     ui.horizontal(|ui| {
                         ui.add_enabled_ui(has_jobs && !is_incompatible, |ui| {
                             let apply_btn = icons::button_with_label(
                                 ui,
                                 icons::Icon::Check,
-                                &apply_text,
+                                crate::commands::AppCommand::ApplyPreset.info().map_or("Apply Preset", |info| info.label),
                                 false,
                                 tokens,
                                 if is_incompatible {
@@ -183,15 +350,13 @@ pub fn render_preset_browser(
                                 },
                             );
                             if apply_btn.clicked() {
-                                for job_id in selected_job_ids {
-                                    apply_preset_to_job(job_id, preset, queue_mgr);
-                                }
+                                chosen_command = Some(crate::commands::AppCommand::ApplyPreset);
                             }
 
                             let add_target_btn = icons::button_with_label(
                                 ui,
                                 icons::Icon::Plus,
-                                &add_target_text,
+                                crate::commands::AppCommand::AddPresetTarget.info().map_or("Add Preset as Output", |info| info.label),
                                 false,
                                 tokens,
                                 if is_incompatible {
@@ -201,9 +366,7 @@ pub fn render_preset_browser(
                                 },
                             );
                             if add_target_btn.clicked() {
-                                for job_id in selected_job_ids {
-                                    add_preset_target_to_job(job_id, preset, queue_mgr);
-                                }
+                                chosen_command = Some(crate::commands::AppCommand::AddPresetTarget);
                             }
                         });
                     });
@@ -212,7 +375,131 @@ pub fn render_preset_browser(
     });
 
     // Render preset editor modal dialog if active
-    crate::preset_editor::render_preset_editor(ui.ctx(), &mut state.editor, registry, tokens);
+    crate::preset_editor::render_preset_editor(ui.ctx(), &mut state.editor, commands, queue_mgr, tokens);
+    chosen_command
+}
+
+/// Calculated column widths for Preset Browser table.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PresetColumnWidths {
+    pub name: f32,
+    pub format: f32,
+    pub frame_size: f32,
+    pub frame_rate: f32,
+    pub target_rate: f32,
+}
+
+impl PresetColumnWidths {
+    pub const FORMAT: f32 = 90.0;
+    pub const FRAME_SIZE: f32 = 75.0;
+    pub const FRAME_RATE: f32 = 65.0;
+    pub const TARGET_RATE: f32 = 65.0;
+
+    pub fn compute(available_width: f32) -> Self {
+        let fixed = Self::FORMAT + Self::FRAME_SIZE + Self::FRAME_RATE + Self::TARGET_RATE + 24.0;
+        let name = (available_width - fixed).max(110.0);
+        Self { name, format: Self::FORMAT, frame_size: Self::FRAME_SIZE, frame_rate: Self::FRAME_RATE, target_rate: Self::TARGET_RATE }
+    }
+
+    pub fn total_width(&self) -> f32 {
+        self.name + self.format + self.frame_size + self.frame_rate + self.target_rate
+    }
+}
+
+fn render_preset_table_header(ui: &mut Ui, state: &mut PresetBrowserState, tokens: &Tokens, cols: PresetColumnWidths) {
+    egui::Frame::new().fill(tokens.bg_panel_darker).inner_margin(egui::vec2(tokens.panel_inset, 3.0)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            for (label, col, width) in [
+                ("Preset Name", SortColumn::Name, cols.name),
+                ("Format", SortColumn::Format, cols.format),
+                ("Frame Size", SortColumn::FrameSize, cols.frame_size),
+                ("Frame Rate", SortColumn::FrameRate, cols.frame_rate),
+                ("Target Rate", SortColumn::TargetRate, cols.target_rate),
+            ] {
+                let arrow = match (state.sort_column == Some(col), state.sort_descending) {
+                    (true, true) => " ▼",
+                    (true, false) => " ▲",
+                    _ => "",
+                };
+                let resp = ui.add_sized([width, 18.0], egui::Button::new(RichText::new(format!("{label}{arrow}")).small().strong()).frame(false));
+                if resp.clicked() {
+                    state.sort_descending = state.sort_column == Some(col) && !state.sort_descending;
+                    state.sort_column = Some(col);
+                }
+            }
+        });
+    });
+}
+
+struct PresetRowContext<'a> {
+    state: &'a mut PresetBrowserState,
+    selected_job_ids: &'a [String],
+    queue_mgr: &'a Arc<QueueManager>,
+    tokens: &'a Tokens,
+    cols: PresetColumnWidths,
+    indent: f32,
+}
+
+fn render_preset_row(ui: &mut Ui, row: &PresetRow, preset: &EncodingPreset, ctx: &mut PresetRowContext<'_>) -> Option<crate::commands::AppCommand> {
+    let row_height = ctx.tokens.row_height;
+    let total_w = ctx.cols.total_width().max(ui.available_width());
+    let row_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(total_w, row_height));
+    if !ui.is_rect_visible(row_rect) {
+        ui.allocate_space(egui::vec2(total_w, row_height));
+        return None;
+    }
+
+    let mut chosen = None;
+    let is_sel = ctx.state.selected_preset.as_ref().map(|p| &p.name) == Some(&row.name);
+
+    ui.push_id(&preset.name, |ui| {
+        ui.horizontal(|ui| {
+            // Preset Name column (with internal tree indent)
+            if ctx.indent > 0.0 {
+                ui.add_space(ctx.indent);
+            }
+            let name_w = (ctx.cols.name - ctx.indent).max(40.0);
+            let name_btn = egui::Button::new(RichText::new(&row.name).small()).truncate().selected(is_sel);
+            let name_resp = ui.add_sized([name_w, ctx.tokens.row_height], name_btn);
+            if name_resp.clicked() {
+                ctx.state.selected_preset = Some(preset.clone());
+            }
+            if name_resp.double_clicked() {
+                ctx.state.selected_preset = Some(preset.clone());
+                chosen = Some(crate::commands::AppCommand::ApplyPreset);
+            }
+            name_resp.context_menu(|ui| {
+                ctx.state.selected_preset = Some(preset.clone());
+                let preset_deletable = preset.category == PresetCategory::Custom;
+                let applicable = !ctx.selected_job_ids.is_empty() && !preset_incompatible_with_jobs(preset, ctx.selected_job_ids, ctx.queue_mgr);
+                for info in crate::commands::context_menu_commands(crate::commands::CommandContextMenu::Preset) {
+                    let enabled = if info.command == crate::commands::AppCommand::DeletePreset { preset_deletable } else { applicable };
+                    if ui.add_enabled(enabled, egui::Button::new(info.context_label(crate::commands::CommandContextMenu::Preset))).clicked() {
+                        chosen = Some(info.command);
+                        ui.close();
+                    }
+                }
+            });
+
+            // Format column
+            let format_label = RichText::new(&row.format).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.format, ctx.tokens.row_height], egui::Label::new(format_label).truncate());
+
+            // Frame Size column
+            let size_label = RichText::new(&row.frame_size).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.frame_size, ctx.tokens.row_height], egui::Label::new(size_label).truncate());
+
+            // Frame Rate column
+            let rate_label = RichText::new(&row.frame_rate).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.frame_rate, ctx.tokens.row_height], egui::Label::new(rate_label).truncate());
+
+            // Target Rate column
+            let target_label = RichText::new(&row.target_rate).small().color(ctx.tokens.text_secondary);
+            ui.add_sized([ctx.cols.target_rate, ctx.tokens.row_height], egui::Label::new(target_label).truncate());
+        });
+    });
+
+    chosen
 }
 
 fn get_job_stream_kind(job_id: &str, queue_mgr: &Arc<QueueManager>) -> Option<encodercraft_core::MediaStreamKind> {
@@ -227,116 +514,46 @@ fn is_job_audio_only(job_id: &str, queue_mgr: &Arc<QueueManager>) -> bool {
     get_job_stream_kind(job_id, queue_mgr).is_some_and(|k| k.is_audio_only())
 }
 
-fn container_to_extension(container: encodercraft_core::ContainerType) -> &'static str {
-    match container {
-        encodercraft_core::ContainerType::IsoBmffMp4 => "mp4",
-        encodercraft_core::ContainerType::QuickTimeMov => "mov",
-        encodercraft_core::ContainerType::MatroskaMkv => "mkv",
-        encodercraft_core::ContainerType::WebM => "webm",
-        encodercraft_core::ContainerType::Wave => "wav",
-        encodercraft_core::ContainerType::Aiff => "aiff",
-        encodercraft_core::ContainerType::Flac => "flac",
-        encodercraft_core::ContainerType::OggAudio => "ogg",
-        encodercraft_core::ContainerType::Mp3 => "mp3",
-        encodercraft_core::ContainerType::AnimatedGif => "gif",
-        encodercraft_core::ContainerType::Svg => "svg",
-        encodercraft_core::ContainerType::Gltf => "glb",
-        encodercraft_core::ContainerType::Usdz => "usdz",
-        encodercraft_core::ContainerType::Obj => "obj",
-        encodercraft_core::ContainerType::Stl => "stl",
-        encodercraft_core::ContainerType::Ply => "ply",
-        encodercraft_core::ContainerType::Pdf => "pdf",
-        encodercraft_core::ContainerType::Docx => "docx",
-        encodercraft_core::ContainerType::Idml => "idml",
-        encodercraft_core::ContainerType::MxfOp1a | encodercraft_core::ContainerType::MxfOpAtom => "mxf",
-        encodercraft_core::ContainerType::Png | encodercraft_core::ContainerType::StillSequence => "png",
-        encodercraft_core::ContainerType::Jpeg => "jpg",
-        encodercraft_core::ContainerType::WebP => "webp",
-        encodercraft_core::ContainerType::Tiff => "tif",
-        encodercraft_core::ContainerType::OpenExr => "exr",
-        encodercraft_core::ContainerType::Bmp => "bmp",
-    }
+pub(crate) fn preset_incompatible_with_jobs(preset: &EncodingPreset, job_ids: &[String], queue_mgr: &Arc<QueueManager>) -> bool {
+    preset.video.is_some()
+        && job_ids.iter().any(|id| {
+            is_job_audio_only(id, queue_mgr) || get_job_stream_kind(id, queue_mgr).is_some_and(|kind| kind.is_document() || kind.is_vector())
+        })
 }
 
-fn apply_preset_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {
-    if is_job_audio_only(job_id, queue_mgr) && preset.video.is_some() {
-        log::warn!("Rejected applying video preset '{}' to audio-only job '{}'", preset.name, job_id);
-        return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_readable_codec_names() {
+        assert_eq!(human_video_codec_name(Some("h264")), "H.264 / AVC");
+        assert_eq!(human_video_codec_name(Some("hevc")), "H.265 / HEVC");
+        assert_eq!(human_video_codec_name(Some("prores")), "Apple ProRes");
+        assert_eq!(human_video_codec_name(None), "Match Source");
+
+        assert_eq!(human_audio_codec_name(Some("aac")), "AAC");
+        assert_eq!(human_audio_codec_name(Some("pcm")), "Uncompressed PCM");
+        assert_eq!(human_audio_codec_name(None), "Match Source");
     }
 
-    let jobs = queue_mgr.list_jobs();
-    if let Some(job) = jobs.iter().find(|j| j.spec.job_id == job_id) {
-        let mut new_spec = job.spec.clone();
-        if let Some(target) = new_spec.targets.first_mut() {
-            target.preset_name = preset.name.clone();
-            target.container = preset.container;
-            let ext = container_to_extension(preset.container);
-            target.output_path.set_extension(ext);
-
-            if let Some(ref v) = preset.video {
-                target.custom_width = match v.width {
-                    encodercraft_presets::MatchSourceOr::Exact(w) => Some(w),
-                    encodercraft_presets::MatchSourceOr::MatchSource => None,
-                };
-                target.custom_height = match v.height {
-                    encodercraft_presets::MatchSourceOr::Exact(h) => Some(h),
-                    encodercraft_presets::MatchSourceOr::MatchSource => None,
-                };
-                target.target_bitrate_kbps = Some(v.target_bitrate_kbps);
-            } else {
-                target.custom_width = None;
-                target.custom_height = None;
-                target.target_bitrate_kbps = None;
-            }
-            if let Some(ref a) = preset.audio {
-                target.target_lufs = a.target_lufs.map(|x| x as f32);
-            } else {
-                target.target_lufs = None;
-            }
-        }
-        // Update job
-        let _ = queue_mgr.remove_job(job_id);
-        let _ = queue_mgr.submit_job(new_spec);
-    }
-}
-
-fn add_preset_target_to_job(job_id: &str, preset: &EncodingPreset, queue_mgr: &Arc<QueueManager>) {
-    if is_job_audio_only(job_id, queue_mgr) && preset.video.is_some() {
-        log::warn!("Rejected adding video preset target '{}' to audio-only job '{}'", preset.name, job_id);
-        return;
+    #[test]
+    fn preset_browser_state_defaults_expand_system_and_user_groups() {
+        let state = PresetBrowserState::default();
+        assert!(state.expanded_groups.contains("User Presets & Groups"));
+        assert!(state.expanded_groups.contains("System Presets"));
     }
 
-    let jobs = queue_mgr.list_jobs();
-    if let Some(job) = jobs.iter().find(|j| j.spec.job_id == job_id) {
-        let count = job.spec.targets.len() + 1;
-        let ext = container_to_extension(preset.container);
-        let (cw, ch, br) = if let Some(ref v) = preset.video {
-            let w = match v.width {
-                encodercraft_presets::MatchSourceOr::Exact(w) => Some(w),
-                encodercraft_presets::MatchSourceOr::MatchSource => None,
-            };
-            let h = match v.height {
-                encodercraft_presets::MatchSourceOr::Exact(h) => Some(h),
-                encodercraft_presets::MatchSourceOr::MatchSource => None,
-            };
-            (w, h, Some(v.target_bitrate_kbps))
-        } else {
-            (None, None, None)
-        };
-        let lufs = preset.audio.as_ref().and_then(|a| a.target_lufs.map(|x| x as f32));
+    #[test]
+    fn test_preset_column_widths_adaptive() {
+        let narrow = PresetColumnWidths::compute(300.0);
+        assert_eq!(narrow.format, PresetColumnWidths::FORMAT);
+        assert_eq!(narrow.frame_size, PresetColumnWidths::FRAME_SIZE);
+        assert_eq!(narrow.frame_rate, PresetColumnWidths::FRAME_RATE);
+        assert_eq!(narrow.target_rate, PresetColumnWidths::TARGET_RATE);
+        assert_eq!(narrow.name, 110.0);
 
-        let new_target = encodercraft_core::OutputTarget {
-            target_id: format!("target-{count}"),
-            output_path: std::path::PathBuf::from(format!("output_{count}.{ext}")),
-            preset_name: preset.name.clone(),
-            container: preset.container,
-            custom_width: cw,
-            custom_height: ch,
-            custom_frame_rate: None,
-            target_bitrate_kbps: br,
-            target_lufs: lufs,
-            ..Default::default()
-        };
-        let _ = queue_mgr.add_output_target(job_id, new_target);
+        let wide = PresetColumnWidths::compute(800.0);
+        assert!(wide.name > narrow.name);
     }
 }

@@ -12,7 +12,7 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
         // 1. Match Source - Adaptive High Bitrate
         EncodingPreset {
             name: "Match Source - High Bitrate".into(),
-            description: "Matches source dimensions, frame rate, and channels with high-quality H.264 video and AAC audio".into(),
+            description: "Matches source dimensions, frame rate, and bitrate; uses HEVC for high-bit-depth sources and AAC audio".into(),
             category: PresetCategory::Web,
             container: ContainerType::IsoBmffMp4,
             video: Some(PresetVideoSettings {
@@ -21,15 +21,20 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 height: MatchSourceOr::MatchSource,
                 frame_rate: MatchSourceOr::MatchSource,
                 scale_mode: ScaleMode::Fit,
-                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
+                pixel_format: MatchSourceOr::MatchSource,
                 target_bitrate_kbps: 12000,
                 keyframe_interval: 48,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: true,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
                 sample_rate: MatchSourceOr::MatchSource,
                 layout: MatchSourceOr::MatchSource,
-                bitrate_kbps: Some(320),
+                bitrate_kbps: Some(256),
                 target_lufs: Some(-14.0),
             }),
         },
@@ -48,6 +53,11 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: 45000,
                 keyframe_interval: 60,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -72,6 +82,11 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: 12000,
                 keyframe_interval: 48,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -96,6 +111,11 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p10),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1, // Intra-frame
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -120,6 +140,11 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1, // Intra-frame
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -144,6 +169,11 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p10),
                 target_bitrate_kbps: 880000,
                 keyframe_interval: 1, // Intra-frame
+                profile: Some("hqx".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -168,6 +198,11 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1,
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "pcm_s24le".into(),
@@ -192,8 +227,129 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
                 target_bitrate_kbps: 220000,
                 keyframe_interval: 1,
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: None,
+        },
+        // 4f. Sony XDCAM HD422 1080 (50 Mbps)
+        EncodingPreset {
+            name: "Sony XDCAM HD422 1080 (50 Mbps)".into(),
+            description: "SMPTE RDD 9 compliant MXF OP-1a with 50 Mbps 4:2:2 Long-GOP broadcast essence and 8-channel 24-bit 48 kHz uncompressed PCM audio".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::MxfOp1a,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(1920),
+                height: MatchSourceOr::Exact(1080),
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
+                target_bitrate_kbps: 50000,
+                keyframe_interval: 12,
+                profile: Some("sq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24le".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::Exact(ChannelLayout::Surround71),
+                bitrate_kbps: None,
+                target_lufs: Some(-24.0),
+            }),
+        },
+        // 4g. Panasonic AVC-Intra 100 1080
+        EncodingPreset {
+            name: "Panasonic AVC-Intra 100 1080".into(),
+            description: "SMPTE RP 2027 compliant MXF OP-1a with 100 Mbps 4:2:2 Intra-only broadcast video and 8-channel 24-bit PCM audio".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::MxfOp1a,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(1920),
+                height: MatchSourceOr::Exact(1080),
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
+                target_bitrate_kbps: 100000,
+                keyframe_interval: 1,
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24le".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::Exact(ChannelLayout::Surround71),
+                bitrate_kbps: None,
+                target_lufs: Some(-23.0),
+            }),
+        },
+        // 4h. DPP AS-11 UK HD Delivery
+        EncodingPreset {
+            name: "DPP AS-11 UK HD Delivery".into(),
+            description: "Digital Production Partnership compliant MXF OP-1a master for UK broadcast delivery (100 Mbps 1080/25p with EBU R128 -23 LUFS audio)".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::MxfOp1a,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(1920),
+                height: MatchSourceOr::Exact(1080),
+                frame_rate: MatchSourceOr::Exact(Rational64::FPS_25),
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
+                target_bitrate_kbps: 100000,
+                keyframe_interval: 1,
+                profile: Some("hq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24le".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::Exact(ChannelLayout::Surround71),
+                bitrate_kbps: None,
+                target_lufs: Some(-23.0),
+            }),
+        },
+        // 4i. AMWA AS-10 Broadcast Shim
+        EncodingPreset {
+            name: "AMWA AS-10 Broadcast Shim".into(),
+            description: "AMWA AS-10 MXF OP-1a specification for North American digital television program delivery (50 Mbps broadcast video with ATSC A/85 -24 LUFS audio)".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::MxfOp1a,
+            video: Some(PresetVideoSettings {
+                codec: "dnxhr".into(),
+                width: MatchSourceOr::Exact(1920),
+                height: MatchSourceOr::Exact(1080),
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv422p),
+                target_bitrate_kbps: 50000,
+                keyframe_interval: 12,
+                profile: Some("sq".into()),
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "pcm_s24le".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::Exact(ChannelLayout::Surround71),
+                bitrate_kbps: None,
+                target_lufs: Some(-24.0),
+            }),
         },
         // 5. TikTok / Instagram Reels 9:16 Vertical
         EncodingPreset {
@@ -210,6 +366,11 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
                 pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
                 target_bitrate_kbps: 8000,
                 keyframe_interval: 30,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
             }),
             audio: Some(PresetAudioSettings {
                 codec: "aac".into(),
@@ -378,5 +539,163 @@ pub fn factory_presets() -> Vec<EncodingPreset> {
             video: None,
             audio: None,
         },
+        // 21. Still Image JPEG
+        EncodingPreset {
+            name: "Still Image JPEG".into(),
+            description: "Baseline JPEG 8-bit still image; transparency is flattened onto white".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::Jpeg,
+            video: None,
+            audio: None,
+        },
+        // 22. Still Image WebP (Lossless)
+        EncodingPreset {
+            name: "Still Image WebP (Lossless)".into(),
+            description: "Lossless WebP still image with alpha channel".into(),
+            category: PresetCategory::StillImage,
+            container: ContainerType::WebP,
+            video: None,
+            audio: None,
+        },
+        // 23. CableLabs Broadcast MPEG-TS
+        EncodingPreset {
+            name: "CableLabs Broadcast MPEG-TS".into(),
+            description: "188-byte packetized MPEG-2 Transport Stream (.ts) with PAT/PMT/PCR signaling and AAC audio for broadcast transmission".into(),
+            category: PresetCategory::Broadcast,
+            container: ContainerType::MpegTs,
+            video: Some(PresetVideoSettings {
+                codec: "h264".into(),
+                width: MatchSourceOr::MatchSource,
+                height: MatchSourceOr::MatchSource,
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p),
+                target_bitrate_kbps: 15000,
+                keyframe_interval: 30,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "aac".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::Exact(ChannelLayout::Stereo),
+                bitrate_kbps: Some(256),
+                target_lufs: Some(-24.0),
+            }),
+        },
+        // 24. Apple Spatial Video (MV-HEVC)
+        EncodingPreset {
+            name: "Apple Spatial Video (MV-HEVC)".into(),
+            description: "Stereoscopic Multi-View HEVC (.mov) with svhd, st3d, and lhvC spatial disparity signaling for Apple Vision Pro".into(),
+            category: PresetCategory::Spatial3D,
+            container: ContainerType::QuickTimeMov,
+            video: Some(PresetVideoSettings {
+                codec: "hevc".into(),
+                width: MatchSourceOr::MatchSource,
+                height: MatchSourceOr::MatchSource,
+                frame_rate: MatchSourceOr::MatchSource,
+                scale_mode: ScaleMode::Fit,
+                pixel_format: MatchSourceOr::Exact(PixelFormat::Yuv420p10),
+                target_bitrate_kbps: 28000,
+                keyframe_interval: 48,
+                profile: None,
+                bframes: None,
+                rate_mode: Default::default(),
+                color: None,
+                match_source_bitrate: false,
+            }),
+            audio: Some(PresetAudioSettings {
+                codec: "aac".into(),
+                sample_rate: MatchSourceOr::Exact(48000),
+                layout: MatchSourceOr::Exact(ChannelLayout::Stereo),
+                bitrate_kbps: Some(256),
+                target_lufs: Some(-16.0),
+            }),
+        },
+        // 25. Microsoft Word to PDF/X-4 (High Quality)
+        EncodingPreset {
+            name: "Microsoft Word to PDF/X-4 (High Quality)".into(),
+            description: "Converts Microsoft Word DOCX OpenXML documents into high-resolution multi-page PDF/X-4 publishing files".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Pdf,
+            video: None,
+            audio: None,
+        },
+        // 26. Microsoft Word to Markdown (.md)
+        EncodingPreset {
+            name: "Microsoft Word to Markdown (.md)".into(),
+            description: "Converts Microsoft Word DOCX OpenXML documents into clean GitHub Flavored Markdown".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Markdown,
+            video: None,
+            audio: None,
+        },
+        // 27. Microsoft Word to Clean HTML5 (.html)
+        EncodingPreset {
+            name: "Microsoft Word to Clean HTML5 (.html)".into(),
+            description: "Converts Microsoft Word DOCX OpenXML documents into standalone semantic HTML5 documents".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Html,
+            video: None,
+            audio: None,
+        },
+        // 28. Markdown to Universal PDF
+        EncodingPreset {
+            name: "Markdown to Universal PDF".into(),
+            description: "Renders Markdown text files into formatted multi-page PDF documents".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Pdf,
+            video: None,
+            audio: None,
+        },
+        // 29. PDF pages to PNG sequence
+        EncodingPreset {
+            name: "PDF Pages to PNG Sequence (300 DPI)".into(),
+            description: "Renders each selected PDF page as a 300-DPI PNG image".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Png,
+            video: None,
+            audio: None,
+        },
+        // 30. Document to EPUB 3
+        EncodingPreset {
+            name: "Document to EPUB 3 Publication".into(),
+            description: "Publishes document pages and text as an EPUB 3 publication with a table of contents".into(),
+            category: PresetCategory::Document,
+            container: ContainerType::Epub,
+            video: None,
+            audio: None,
+        },
+        // 31. ISO 10303 STEP CAD Mesh (.step)
+        EncodingPreset {
+            name: "ISO 10303 STEP CAD Mesh (.step)".into(),
+            description: "Standard for the Exchange of Product model data (ISO 10303-21) CAD exchange mesh".into(),
+            category: PresetCategory::Spatial3D,
+            container: ContainerType::Step,
+            video: None,
+            audio: None,
+        },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn document_publication_presets_use_the_expected_containers() {
+        let presets = factory_presets();
+        for (name, container) in
+            [("PDF Pages to PNG Sequence (300 DPI)", ContainerType::Png), ("Document to EPUB 3 Publication", ContainerType::Epub)]
+        {
+            let preset = presets.iter().find(|preset| preset.name == name).expect("M45 document preset is registered");
+            assert_eq!(preset.category, PresetCategory::Document);
+            assert_eq!(preset.container, container);
+            assert!(preset.video.is_none());
+            assert!(preset.audio.is_none());
+        }
+    }
 }

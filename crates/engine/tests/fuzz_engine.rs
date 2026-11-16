@@ -9,7 +9,7 @@ proptest! {
         job_count in 1usize..20usize,
         prio_val in 0u8..4u8,
     ) {
-        let queue = QueueManager::new_in_memory();
+        let queue = std::sync::Arc::new(QueueManager::new_in_memory());
         let registry = CommandRegistry::new();
 
         let prio = match prio_val {

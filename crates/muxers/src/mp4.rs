@@ -6,8 +6,8 @@
 use std::io::{Read, Seek, Write};
 
 use craft_media::isobmff::{
-    AacConfig, AudioParams, Av1Config, AvcConfig, Brand, CodecConfig, FourCc, HevcConfig, Mp4Writer, SampleEntry, TrackConfig, VideoParams,
-    VpcConfig, WriteSample, WriterOptions,
+    AacConfig, AudioParams, Av1Config, AvcConfig, Brand, CodecConfig, FourCc, HevcConfig, Mp4Writer, PcmConfig, SampleEntry, TrackConfig,
+    VideoParams, VpcConfig, WriteSample, WriterOptions,
 };
 use encodercraft_core::EncoderError;
 
@@ -33,23 +33,18 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
 
         let fourcc = FourCc::new(&cfg.codec_fourcc);
         let codec_config = match &cfg.codec_fourcc {
-            b"avc1" | b"avc3" => CodecConfig::Avc(AvcConfig::new(vec![vec![0x67, 0x64, 0x00, 0x1F]], vec![vec![0x68, 0xEB]], 4)),
-            b"hvc1" | b"hev1" => CodecConfig::Hevc(HevcConfig {
-                general_profile_idc: 1,
-                general_level_idc: 93,
-                chroma_format_idc: 1,
-                bit_depth_luma: cfg.bit_depth.max(8),
-                bit_depth_chroma: cfg.bit_depth.max(8),
-                length_size: 4,
-                ..Default::default()
-            }),
-            b"av01" => CodecConfig::Av1(Av1Config {
-                seq_profile: 0,
-                seq_level_idx_0: 8,
-                chroma_subsampling_x: true,
-                chroma_subsampling_y: true,
-                ..Default::default()
-            }),
+            b"avc1" | b"avc3" => CodecConfig::Avc(
+                AvcConfig::parse(&cfg.codec_private)
+                    .map_err(|e| EncoderError::InvalidContainer(format!("invalid avcC decoder configuration: {e}")))?,
+            ),
+            b"hvc1" | b"hev1" => CodecConfig::Hevc(
+                HevcConfig::parse(&cfg.codec_private)
+                    .map_err(|e| EncoderError::InvalidContainer(format!("invalid hvcC decoder configuration: {e}")))?,
+            ),
+            b"av01" => CodecConfig::Av1(
+                Av1Config::parse(&cfg.codec_private)
+                    .map_err(|e| EncoderError::InvalidContainer(format!("invalid av1C decoder configuration: {e}")))?,
+            ),
             b"vp09" => {
                 CodecConfig::Vp9(VpcConfig { profile: 0, level: 31, bit_depth: cfg.bit_depth.max(8), chroma_subsampling: 1, ..Default::default() })
             }
@@ -70,7 +65,11 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
         let entry =
             SampleEntry { format: fourcc, data_reference_index: 1, codec: codec_config, video: Some(video_params), audio: None, bitrate: None };
 
-        let timescale = (cfg.frame_rate.num as u32).max(1000);
+        // One sample lasts `frame_rate.den` ticks of a `frame_rate.num` Hz track clock.
+        let timescale = u32::try_from(cfg.frame_rate.num)
+            .ok()
+            .filter(|t| *t > 0)
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("invalid frame rate {}/{}", cfg.frame_rate.num, cfg.frame_rate.den)))?;
         let track_cfg = TrackConfig::new(entry, timescale);
 
         writer.add_track(track_cfg).map_err(|e| EncoderError::Internal(format!("failed to add video track: {e}")))
@@ -79,6 +78,20 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
     /// Adds an audio stream track to the container.
     pub fn add_audio_stream(&mut self, cfg: &AudioStreamConfig) -> Result<usize, EncoderError> {
         let writer = self.writer.as_mut().ok_or_else(|| EncoderError::Internal("mp4 writer already finished".into()))?;
+
+        if cfg.codec_fourcc == *b"lpcm" {
+            let entry = SampleEntry::pcm(PcmConfig {
+                bits: cfg.bits_per_sample,
+                float: false,
+                big_endian: false,
+                signed: true,
+                channels: u32::try_from(cfg.layout.channel_count())
+                    .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the MP4 format limit".into()))?,
+                sample_rate: f64::from(cfg.sample_rate),
+            });
+            let track_cfg = TrackConfig::new(entry, cfg.sample_rate);
+            return writer.add_track(track_cfg).map_err(|e| EncoderError::Internal(format!("failed to add PCM audio track: {e}")));
+        }
 
         let fourcc = FourCc::new(&cfg.codec_fourcc);
         let codec_config = match &cfg.codec_fourcc {
@@ -157,6 +170,40 @@ pub fn append_xmp_uuid_box<W: Write>(w: &mut W, xmp_xml: &str) -> Result<(), Enc
     Ok(())
 }
 
+/// Appends Apple Spatial Video (MV-HEVC) 3D stereoscopic metadata boxes:
+/// `svhd` (Spatial Video Header), `st3d` (Stereo 3D), and `lhvC` (Layered HEVC Configuration).
+pub fn append_spatial_video_boxes<W: Write>(w: &mut W, config: &crate::muxer::SpatialVideoConfig, hevc_private: &[u8]) -> Result<(), EncoderError> {
+    // 1. svhd (Spatial Video Header Box) - 24 bytes total
+    let svhd_len = 24u32;
+    w.write_all(&svhd_len.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write svhd box length: {e}")))?;
+    w.write_all(b"svhd").map_err(|e| EncoderError::Io(format!("failed to write svhd box type: {e}")))?;
+    w.write_all(&0u32.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write svhd version/flags: {e}")))?;
+    w.write_all(&config.baseline_micrometers.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write baseline: {e}")))?;
+    w.write_all(&config.hfov_millidegrees.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write hfov: {e}")))?;
+    w.write_all(&config.disparity_adjustment.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write disparity: {e}")))?;
+
+    // 2. st3d (Stereo 3D Box) - 13 bytes total
+    let st3d_len = 13u32;
+    w.write_all(&st3d_len.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write st3d box length: {e}")))?;
+    w.write_all(b"st3d").map_err(|e| EncoderError::Io(format!("failed to write st3d box type: {e}")))?;
+    w.write_all(&0u32.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write st3d version/flags: {e}")))?;
+    let stereo_mode = if config.is_multiview { 3u8 } else { 0u8 };
+    w.write_all(&[stereo_mode]).map_err(|e| EncoderError::Io(format!("failed to write st3d stereo mode: {e}")))?;
+
+    // 3. lhvC (Layered HEVC Configuration Box)
+    let lhvc_payload = if !hevc_private.is_empty() {
+        hevc_private
+    } else {
+        &[0x01, 0x01, 0x60, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0xF0, 0x00, 0xFC, 0xFD, 0xF8, 0xF8, 0x00, 0x00, 0x0F, 0x03]
+    };
+    let lhvc_len = (8 + lhvc_payload.len()) as u32;
+    w.write_all(&lhvc_len.to_be_bytes()).map_err(|e| EncoderError::Io(format!("failed to write lhvC box length: {e}")))?;
+    w.write_all(b"lhvC").map_err(|e| EncoderError::Io(format!("failed to write lhvC box type: {e}")))?;
+    w.write_all(lhvc_payload).map_err(|e| EncoderError::Io(format!("failed to write lhvC payload: {e}")))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +216,7 @@ mod tests {
     fn test_mp4_muxer_video_and_audio() {
         let cursor = Cursor::new(Vec::new());
         let mut muxer = Mp4Muxer::new(cursor, false).unwrap();
+        let avcc = craft_h264enc::Encoder::new(craft_h264enc::EncoderConfig::new(64, 64, 24, 1)).unwrap().avcc();
 
         let v_cfg = VideoStreamConfig {
             codec_fourcc: *b"avc1",
@@ -177,7 +225,8 @@ mod tests {
             pixel_format: PixelFormat::Yuv420p,
             color_space: ColorSpaceTag::REC709,
             bit_depth: 8,
-            codec_private: vec![0, 0, 0, 1],
+            codec_private: avcc,
+            spatial: None,
         };
         let v_track = muxer.add_video_stream(&v_cfg).unwrap();
         assert_eq!(v_track, 0);
@@ -192,5 +241,30 @@ mod tests {
         assert!(bytes.len() > 32);
         // First 4 bytes length, then ftyp
         assert_eq!(&bytes[4..8], b"ftyp");
+    }
+
+    #[test]
+    fn test_apple_spatial_video_mv_hevc_boxes() {
+        let mut cursor = Cursor::new(Vec::new());
+        let spatial_cfg =
+            crate::muxer::SpatialVideoConfig { baseline_micrometers: 64_000, hfov_millidegrees: 65_000, disparity_adjustment: 0, is_multiview: true };
+        append_spatial_video_boxes(&mut cursor, &spatial_cfg, &[0xAA, 0xBB, 0xCC, 0xDD]).unwrap();
+        let bytes = cursor.into_inner();
+
+        // 1. svhd box
+        assert_eq!(&bytes[0..4], &24u32.to_be_bytes());
+        assert_eq!(&bytes[4..8], b"svhd");
+        assert_eq!(&bytes[12..16], &64_000u32.to_be_bytes()); // baseline
+        assert_eq!(&bytes[16..20], &65_000u32.to_be_bytes()); // hfov
+
+        // 2. st3d box
+        assert_eq!(&bytes[24..28], &13u32.to_be_bytes());
+        assert_eq!(&bytes[28..32], b"st3d");
+        assert_eq!(bytes[36], 3u8); // stereo_mode = 3 (multiview)
+
+        // 3. lhvC box
+        assert_eq!(&bytes[37..41], &12u32.to_be_bytes()); // 8 + 4
+        assert_eq!(&bytes[41..45], b"lhvC");
+        assert_eq!(&bytes[45..49], &[0xAA, 0xBB, 0xCC, 0xDD]);
     }
 }

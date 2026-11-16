@@ -1,0 +1,28 @@
+[package]
+name = "encodercraft-source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Unified media decoding (video, audio, stills) built on the ArtCraft filmcraft media/codec crates"
+
+[lints]
+workspace = true
+
+[dependencies]
+photocraft-codecs = { workspace = true }
+encodercraft-core = { workspace = true }
+encodercraft-geom = { workspace = true }
+encodercraft-color = { workspace = true }
+encodercraft-demux = { workspace = true }
+encodercraft-shared-stream = { workspace = true }
+filmcraft-media = { workspace = true }
+filmcraft-color = { workspace = true }
+filmcraft-codecs = { workspace = true }
+filmcraft-frame = { workspace = true }
+filmcraft-time = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }

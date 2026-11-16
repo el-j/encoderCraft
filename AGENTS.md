@@ -48,6 +48,16 @@ People and automated render farms trust `encoderCraft` with multi-hour batch que
 
 ---
 
+## Git workflow (branches and PRs only)
+- **Never push to `main`** (or `alpha`/`release`). Every change lands through a pull request.
+- One branch per issue or tightly related issue group, from up-to-date `main`: `fix/<issue>-<slug>`, `feat/<issue>-<slug>`, `docs/<issue>-<slug>`, `ci/<slug>`.
+- Conventional-commit messages (`fix(queue): ...`); end with the trailer `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
+- Open the PR with `gh pr create`, using `.github/pull_request_template.md` (keep its headings and checklist). The body must contain a closing keyword per issue on its own line: `Closes #N`, so merging closes the issues. Use `Refs #N` for partial work.
+- Run `cargo xtask ci` before pushing, and list the exact commands and results under "How it was tested". Wait for CI to be green, fix failures on the branch, then merge (squash). Delete the branch after merging.
+- Update `ROADMAP.md` and `docs/implementation-milestones.md` in the same PR when a milestone task completes.
+
+---
+
 ## Running and Testing
 - **Desktop GUI:** `cargo run --release -p encodercraft`
 - **Headless CLI:** `cargo run --release -p encodercraft-cli -- encode input.mov -p "YouTube 4K" -o output.mp4`

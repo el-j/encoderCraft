@@ -4,8 +4,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(unix)]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 
@@ -15,13 +18,22 @@ use encodercraft_dispatch::{IpcRequest, IpcResponse};
 /// Trait implemented by command dispatchers and engine hosts to process incoming requests.
 pub trait IpcHandler: Send + Sync + 'static {
     fn handle(&self, req: &IpcRequest) -> IpcResponse;
+
+    /// Streaming methods (such as `queue.subscribe`) push notifications until `emit` returns `false`
+    /// (the client went away). Returns `true` when the request was a streaming one.
+    fn stream(&self, _req: &IpcRequest, _emit: &mut dyn FnMut(IpcResponse) -> bool) -> bool {
+        false
+    }
 }
 
 /// Headless IPC daemon server.
 pub struct IpcServer {
     is_running: Arc<AtomicBool>,
     worker_thread: Option<JoinHandle<()>>,
+    #[cfg(unix)]
     socket_path: Option<PathBuf>,
+    #[cfg(unix)]
+    socket_identity: Option<(u64, u64)>,
 }
 
 impl IpcServer {
@@ -52,21 +64,71 @@ impl IpcServer {
             }
         });
 
-        Ok(Self { is_running, worker_thread: Some(handle), socket_path: None })
+        Ok(Self {
+            is_running,
+            worker_thread: Some(handle),
+            #[cfg(unix)]
+            socket_path: None,
+            #[cfg(unix)]
+            socket_identity: None,
+        })
     }
 
     /// Binds and starts an IPC server listening on a Unix domain socket.
     #[cfg(unix)]
     pub fn bind_unix(path: &Path, handler: Arc<dyn IpcHandler>) -> Result<Self, EncoderError> {
-        use std::os::unix::net::UnixListener;
+        use std::os::unix::net::{UnixListener, UnixStream};
 
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
+        use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) => {
+                if !meta.file_type().is_socket() {
+                    return Err(EncoderError::Io(format!("refusing to replace non-socket path {}", path.display())));
+                }
+                match UnixStream::connect(path) {
+                    Ok(_) => return Err(EncoderError::Io(format!("Unix socket is already active at {}", path.display()))),
+                    Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+                        let current = std::fs::symlink_metadata(path)
+                            .map_err(|e| EncoderError::Io(format!("failed to inspect Unix socket {}: {e}", path.display())))?;
+                        if current.dev() != meta.dev() || current.ino() != meta.ino() || !current.file_type().is_socket() {
+                            return Err(EncoderError::Io(format!("Unix socket path changed while binding {}", path.display())));
+                        }
+                        std::fs::remove_file(path)
+                            .map_err(|e| EncoderError::Io(format!("failed to remove stale Unix socket {}: {e}", path.display())))?;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(EncoderError::Io(format!("failed to check Unix socket {}: {error}", path.display())));
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(EncoderError::Io(format!("failed to inspect Unix socket {}: {error}", path.display()))),
         }
 
-        let listener = UnixListener::bind(path).map_err(|e| EncoderError::Io(format!("failed to bind Unix socket {}: {e}", path.display())))?;
+        // Bind under a private name, restrict to the owner (0600), then atomically rename into place
+        // so the public path is never reachable with looser permissions.
+        static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
+        let mut staging = path.as_os_str().to_owned();
+        staging.push(format!(".{}.{}.tmp", std::process::id(), NEXT_STAGING_ID.fetch_add(1, Ordering::Relaxed)));
+        let staging = PathBuf::from(staging);
 
-        listener.set_nonblocking(true).map_err(|e| EncoderError::Io(format!("failed to set nonblocking: {e}")))?;
+        let listener =
+            UnixListener::bind(&staging).map_err(|e| EncoderError::Io(format!("failed to bind Unix socket {}: {e}", staging.display())))?;
+        if let Err(e) = listener.set_nonblocking(true) {
+            let _ = std::fs::remove_file(&staging);
+            return Err(EncoderError::Io(format!("failed to set nonblocking: {e}")));
+        }
+        let secured = std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600)).and_then(|()| std::fs::rename(&staging, path));
+        if let Err(e) = secured {
+            let _ = std::fs::remove_file(&staging);
+            return Err(EncoderError::Io(format!("failed to secure Unix socket {}: {e}", path.display())));
+        }
+
+        let socket_meta =
+            std::fs::symlink_metadata(path).map_err(|e| EncoderError::Io(format!("failed to inspect bound Unix socket {}: {e}", path.display())))?;
+        let socket_identity = (socket_meta.dev(), socket_meta.ino());
 
         let is_running = Arc::new(AtomicBool::new(true));
         let running_flag = is_running.clone();
@@ -90,7 +152,12 @@ impl IpcServer {
             }
         });
 
-        Ok(Self { is_running, worker_thread: Some(handle), socket_path: Some(sock_path) })
+        Ok(Self { is_running, worker_thread: Some(handle), socket_path: Some(sock_path), socket_identity: Some(socket_identity) })
+    }
+
+    /// Returns whether the server is currently running.
+    pub fn is_running(&self) -> bool {
+        self.is_running.load(Ordering::SeqCst)
     }
 
     /// Stops the server and joins the listener thread.
@@ -99,10 +166,16 @@ impl IpcServer {
         if let Some(handle) = self.worker_thread.take() {
             let _ = handle.join();
         }
-        if let Some(ref path) = self.socket_path
-            && path.exists()
-        {
-            let _ = std::fs::remove_file(path);
+        #[cfg(unix)]
+        if let (Some(path), Some(identity)) = (&self.socket_path, self.socket_identity) {
+            use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+            if let Ok(meta) = std::fs::symlink_metadata(path)
+                && meta.file_type().is_socket()
+                && (meta.dev(), meta.ino()) == identity
+            {
+                let _ = std::fs::remove_file(path);
+            }
         }
     }
 }
@@ -114,8 +187,25 @@ impl Drop for IpcServer {
 }
 
 fn handle_tcp_client(stream: TcpStream, handler: Arc<dyn IpcHandler>) -> Result<(), EncoderError> {
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?);
-    let mut writer = stream;
+    let reader = stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?;
+    serve_client(reader, stream, handler.as_ref())
+}
+
+#[cfg(unix)]
+fn handle_unix_client(stream: std::os::unix::net::UnixStream, handler: Arc<dyn IpcHandler>) -> Result<(), EncoderError> {
+    let reader = stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?;
+    serve_client(reader, stream, handler.as_ref())
+}
+
+fn write_response(writer: &mut impl Write, resp: &IpcResponse) -> bool {
+    let Ok(mut json) = serde_json::to_string(resp) else { return true };
+    json.push('\n');
+    writer.write_all(json.as_bytes()).and_then(|()| writer.flush()).is_ok()
+}
+
+/// Reads JSON lines and answers each one until the peer disconnects.
+fn serve_client(reader: impl std::io::Read, mut writer: impl Write, handler: &dyn IpcHandler) -> Result<(), EncoderError> {
+    let mut reader = BufReader::new(reader);
     let mut line = String::new();
 
     while let Ok(n) = reader.read_line(&mut line) {
@@ -123,15 +213,24 @@ fn handle_tcp_client(stream: TcpStream, handler: Arc<dyn IpcHandler>) -> Result<
             break;
         }
 
-        let resp = match serde_json::from_str::<IpcRequest>(&line) {
-            Ok(req) => handler.handle(&req),
-            Err(e) => IpcResponse::error(0, format!("malformed request: {e}")),
-        };
-
-        if let Ok(mut resp_json) = serde_json::to_string(&resp) {
-            resp_json.push('\n');
-            let _ = writer.write_all(resp_json.as_bytes());
-            let _ = writer.flush();
+        match serde_json::from_str::<IpcRequest>(&line) {
+            Ok(req) => {
+                let mut alive = true;
+                if !handler.stream(&req, &mut |resp| {
+                    alive = write_response(&mut writer, &resp);
+                    alive
+                }) {
+                    alive = write_response(&mut writer, &handler.handle(&req));
+                }
+                if !alive {
+                    break;
+                }
+            }
+            Err(e) => {
+                if !write_response(&mut writer, &IpcResponse::error(0, format!("malformed request: {e}"))) {
+                    break;
+                }
+            }
         }
 
         line.clear();
@@ -139,29 +238,74 @@ fn handle_tcp_client(stream: TcpStream, handler: Arc<dyn IpcHandler>) -> Result<
     Ok(())
 }
 
-#[cfg(unix)]
-fn handle_unix_client(stream: std::os::unix::net::UnixStream, handler: Arc<dyn IpcHandler>) -> Result<(), EncoderError> {
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| EncoderError::Io(e.to_string()))?);
-    let mut writer = stream;
-    let mut line = String::new();
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
-    while let Ok(n) = reader.read_line(&mut line) {
-        if n == 0 {
-            break;
+    struct Noop;
+    impl IpcHandler for Noop {
+        fn handle(&self, req: &IpcRequest) -> IpcResponse {
+            IpcResponse::success(req.id, serde_json::json!({}))
         }
+    }
 
-        let resp = match serde_json::from_str::<IpcRequest>(&line) {
-            Ok(req) => handler.handle(&req),
-            Err(e) => IpcResponse::error(0, format!("malformed request: {e}")),
+    #[test]
+    fn unix_socket_is_owner_only_and_staging_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ec.sock");
+        let server = IpcServer::bind_unix(&path, Arc::new(Noop)).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(leftovers, 1);
+        drop(server);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn stale_socket_is_replaced_but_regular_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ec.sock");
+        let stale = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        drop(stale);
+        assert!(path.exists());
+        let server = IpcServer::bind_unix(&path, Arc::new(Noop)).unwrap();
+        drop(server);
+
+        std::fs::write(&path, b"precious").unwrap();
+        assert!(IpcServer::bind_unix(&path, Arc::new(Noop)).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"precious");
+    }
+
+    #[test]
+    fn active_socket_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ec.sock");
+        let server = IpcServer::bind_unix(&path, Arc::new(Noop)).unwrap();
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            (meta.dev(), meta.ino())
         };
 
-        if let Ok(mut resp_json) = serde_json::to_string(&resp) {
-            resp_json.push('\n');
-            let _ = writer.write_all(resp_json.as_bytes());
-            let _ = writer.flush();
-        }
-
-        line.clear();
+        assert!(IpcServer::bind_unix(&path, Arc::new(Noop)).is_err());
+        let meta = std::fs::symlink_metadata(&path).unwrap();
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!((meta.dev(), meta.ino()), identity);
+        drop(server);
     }
-    Ok(())
+
+    #[test]
+    fn stopping_server_does_not_remove_replacement_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ec.sock");
+        let server = IpcServer::bind_unix(&path, Arc::new(Noop)).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let replacement = std::os::unix::net::UnixListener::bind(&path).unwrap();
+
+        drop(server);
+        assert!(path.exists());
+        drop(replacement);
+    }
 }

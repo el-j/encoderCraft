@@ -41,24 +41,33 @@ pub struct Tokens {
     pub hover: Color32,
     pub pressed: Color32,
     pub radius_sm: f32,
+    pub panel_inset: f32,
+    pub toolbar_gap: f32,
+    pub row_height: f32,
+    pub section_gap: f32,
 }
 
 impl Tokens {
+    /// Return the standardized margin for dock panel contents.
+    pub fn panel_margin(&self) -> egui::Margin {
+        egui::Margin::same(self.panel_inset as i8)
+    }
+
     /// Dark theme tokens matching ArtCraft standards.
     pub fn dark() -> Self {
         Self {
             dark: true,
-            bg_app: Color32::from_rgb(24, 24, 26),
-            bg_panel: Color32::from_rgb(32, 32, 35),
-            bg_panel_darker: Color32::from_rgb(20, 20, 22),
-            bg_surface: Color32::from_rgb(42, 42, 46),
-            bg_surface_hover: Color32::from_rgb(52, 52, 58),
-            bg_surface_active: Color32::from_rgb(60, 60, 68),
-            border_subtle: Color32::from_rgb(50, 50, 56),
-            border_strong: Color32::from_rgb(70, 70, 80),
-            text_primary: Color32::from_rgb(240, 240, 245),
-            text_secondary: Color32::from_rgb(180, 180, 190),
-            text_dim: Color32::from_rgb(120, 120, 130),
+            bg_app: Color32::from_rgb(27, 27, 27),
+            bg_panel: Color32::from_rgb(35, 35, 35),
+            bg_panel_darker: Color32::from_rgb(26, 26, 26),
+            bg_surface: Color32::from_rgb(45, 45, 45),
+            bg_surface_hover: Color32::from_rgb(58, 58, 58),
+            bg_surface_active: Color32::from_rgb(68, 68, 68),
+            border_subtle: Color32::from_rgb(56, 56, 56),
+            border_strong: Color32::from_rgb(84, 84, 84),
+            text_primary: Color32::from_rgb(232, 232, 232),
+            text_secondary: Color32::from_rgb(176, 176, 176),
+            text_dim: Color32::from_rgb(128, 128, 128),
             accent_primary: Color32::from_rgb(14, 134, 255),
             accent_hover: Color32::from_rgb(45, 155, 255),
             status_queued: Color32::from_rgb(140, 140, 150),
@@ -72,6 +81,10 @@ impl Tokens {
             hover: Color32::from_rgb(52, 52, 58),
             pressed: Color32::from_rgb(60, 60, 68),
             radius_sm: 4.0,
+            panel_inset: 8.0,
+            toolbar_gap: 4.0,
+            row_height: 22.0,
+            section_gap: 6.0,
         }
     }
 
@@ -103,25 +116,68 @@ impl Tokens {
             hover: Color32::from_rgb(40, 40, 40),
             pressed: Color32::from_rgb(60, 60, 60),
             radius_sm: 2.0,
+            panel_inset: 8.0,
+            toolbar_gap: 4.0,
+            row_height: 22.0,
+            section_gap: 6.0,
         }
+    }
+
+    /// Medium Dark theme tokens matching Adobe Media Encoder 2026 default layout.
+    pub fn medium_dark() -> Self {
+        Self {
+            dark: true,
+            bg_app: Color32::from_rgb(33, 33, 33),
+            bg_panel: Color32::from_rgb(45, 45, 45),
+            bg_panel_darker: Color32::from_rgb(36, 36, 36),
+            bg_surface: Color32::from_rgb(54, 54, 54),
+            bg_surface_hover: Color32::from_rgb(66, 66, 66),
+            bg_surface_active: Color32::from_rgb(76, 76, 76),
+            border_subtle: Color32::from_rgb(36, 36, 36),
+            border_strong: Color32::from_rgb(72, 72, 72),
+            text_primary: Color32::from_rgb(235, 235, 235),
+            text_secondary: Color32::from_rgb(180, 180, 180),
+            text_dim: Color32::from_rgb(132, 132, 132),
+            accent_primary: Color32::from_rgb(14, 134, 255),
+            accent_hover: Color32::from_rgb(45, 155, 255),
+            status_queued: Color32::from_rgb(140, 140, 150),
+            status_processing: Color32::from_rgb(255, 179, 0),
+            status_completed: Color32::from_rgb(52, 199, 89),
+            status_failed: Color32::from_rgb(255, 69, 58),
+            status_paused: Color32::from_rgb(175, 82, 222),
+            status_cancelled: Color32::from_rgb(100, 100, 110),
+            icon: Color32::from_rgb(190, 190, 200),
+            icon_active: Color32::from_rgb(14, 134, 255),
+            hover: Color32::from_rgb(58, 58, 64),
+            pressed: Color32::from_rgb(68, 68, 76),
+            radius_sm: 4.0,
+            panel_inset: 8.0,
+            toolbar_gap: 4.0,
+            row_height: 22.0,
+            section_gap: 6.0,
+        }
+    }
+
+    /// Light theme tokens.
+    pub fn light() -> Self {
+        let mut d = Self::dark();
+        d.dark = false;
+        d.bg_app = Color32::from_rgb(240, 240, 245);
+        d.bg_panel = Color32::from_rgb(255, 255, 255);
+        d.bg_panel_darker = Color32::from_rgb(230, 230, 235);
+        d.bg_surface = Color32::from_rgb(245, 245, 250);
+        d.border_subtle = Color32::from_rgb(210, 210, 220);
+        d.text_primary = Color32::from_rgb(20, 20, 25);
+        d.text_secondary = Color32::from_rgb(80, 80, 90);
+        d.text_dim = Color32::from_rgb(130, 130, 140);
+        d
     }
 
     pub fn for_brightness(b: Brightness) -> Self {
         match b {
-            Brightness::Dark | Brightness::MediumDark => Self::dark(),
-            Brightness::Light => {
-                let mut d = Self::dark();
-                d.dark = false;
-                d.bg_app = Color32::from_rgb(240, 240, 245);
-                d.bg_panel = Color32::from_rgb(255, 255, 255);
-                d.bg_panel_darker = Color32::from_rgb(230, 230, 235);
-                d.bg_surface = Color32::from_rgb(245, 245, 250);
-                d.border_subtle = Color32::from_rgb(210, 210, 220);
-                d.text_primary = Color32::from_rgb(20, 20, 25);
-                d.text_secondary = Color32::from_rgb(80, 80, 90);
-                d.text_dim = Color32::from_rgb(130, 130, 140);
-                d
-            }
+            Brightness::Dark => Self::dark(),
+            Brightness::MediumDark => Self::medium_dark(),
+            Brightness::Light => Self::light(),
             Brightness::HighContrast => Self::high_contrast(),
         }
     }
@@ -176,7 +232,46 @@ pub fn apply_theme(ctx: &egui::Context, tokens: &Tokens) {
 
     ctx.global_style_mut(|s| {
         s.text_styles = text_styles;
-        s.spacing.item_spacing = egui::vec2(6.0, 6.0);
-        s.spacing.button_padding = egui::vec2(8.0, 4.0);
+        s.spacing.item_spacing = egui::vec2(6.0, 4.0);
+        s.spacing.button_padding = egui::vec2(8.0, 3.0);
+        s.spacing.interact_size.y = 20.0;
+        s.spacing.menu_margin = egui::Margin::symmetric(6, 4);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dark_theme_is_neutral_grey_without_accent_fills() {
+        for t in [Tokens::dark(), Tokens::medium_dark()] {
+            for c in [t.bg_app, t.bg_panel, t.bg_panel_darker, t.bg_surface, t.border_subtle] {
+                assert!(c.r() == c.g() && c.g() == c.b(), "{c:?} must be neutral grey");
+            }
+            assert!(t.bg_panel_darker.r() > 16 && t.bg_panel.r() < 60);
+            assert_ne!(t.accent_primary, Color32::YELLOW);
+        }
+    }
+
+    #[test]
+    fn default_brightness_is_dark() {
+        assert_eq!(Brightness::default(), Brightness::Dark);
+    }
+
+    #[test]
+    fn tokens_provide_consistent_panel_spacing() {
+        let t = Tokens::dark();
+        assert_eq!(t.panel_inset, 8.0);
+        assert_eq!(t.toolbar_gap, 4.0);
+        assert_eq!(t.row_height, 22.0);
+        assert_eq!(t.section_gap, 6.0);
+        assert_eq!(t.panel_margin(), egui::Margin::same(8));
+
+        let hc = Tokens::high_contrast();
+        assert_eq!(hc.panel_margin(), egui::Margin::same(8));
+
+        let light = Tokens::for_brightness(Brightness::Light);
+        assert_eq!(light.panel_margin(), egui::Margin::same(8));
+    }
 }

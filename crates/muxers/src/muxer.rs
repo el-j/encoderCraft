@@ -4,6 +4,25 @@ use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{ChannelLayout, Rational64};
 use encodercraft_geom::Dimensions;
 
+/// Configuration for stereoscopic Apple Spatial Video (MV-HEVC) signaling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpatialVideoConfig {
+    /// Interpupillary baseline in micrometers (default 64,000 = 64mm).
+    pub baseline_micrometers: u32,
+    /// Horizontal field of view in millidegrees (default 65,000 = 65.0 deg).
+    pub hfov_millidegrees: u32,
+    /// Disparity adjustment (horizontal shift for parallax convergence).
+    pub disparity_adjustment: i32,
+    /// Whether multiview stereoscopic encoding is active.
+    pub is_multiview: bool,
+}
+
+impl Default for SpatialVideoConfig {
+    fn default() -> Self {
+        Self { baseline_micrometers: 64_000, hfov_millidegrees: 65_000, disparity_adjustment: 0, is_multiview: true }
+    }
+}
+
 /// Parameters for initializing a video output stream in a container.
 #[derive(Debug, Clone)]
 pub struct VideoStreamConfig {
@@ -14,6 +33,7 @@ pub struct VideoStreamConfig {
     pub color_space: ColorSpaceTag,
     pub bit_depth: u8,
     pub codec_private: Vec<u8>,
+    pub spatial: Option<SpatialVideoConfig>,
 }
 
 /// Parameters for initializing an audio output stream in a container.

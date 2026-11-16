@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use egui::{RichText, Ui};
-use encodercraft_engine::QueueManager;
+use encodercraft_engine::{QueueManager, cmd::CommandRegistry};
 use encodercraft_presets::PresetRegistry;
 use encodercraft_watch::{PostProcessAction, WatchFolderConfig, WatchFolderService};
 
@@ -39,6 +39,7 @@ pub fn render_watch_panel(
     state: &mut WatchPanelState,
     queue_mgr: &Arc<QueueManager>,
     preset_registry: &Arc<Mutex<PresetRegistry>>,
+    commands: &CommandRegistry,
     tokens: &Tokens,
 ) {
     ui.vertical(|ui| {
@@ -77,7 +78,7 @@ pub fn render_watch_panel(
             }
 
             if ui.button("Scan Now").on_hover_text("Immediately scan watch folders for settled media files").clicked() {
-                trigger_watch_scan(state, queue_mgr, preset_registry);
+                trigger_watch_scan(state, queue_mgr, preset_registry, commands);
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -132,7 +133,7 @@ pub fn render_watch_panel(
 
         ui.add_space(2.0);
 
-        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("watch_panel_configs_scroll_area").auto_shrink([false; 2]).show(ui, |ui| {
             let mut remove_idx = None;
             for (idx, cfg) in state.configs.iter_mut().enumerate() {
                 let is_selected = state.selected_config_idx == Some(idx);
@@ -150,7 +151,7 @@ pub fn render_watch_panel(
                             state.selected_config_idx = Some(idx);
                         }
 
-                        ui.label(RichText::new("➔").color(tokens.text_dim));
+                        ui.label(RichText::new("->").color(tokens.text_dim));
 
                         // Output Directory Display
                         let out_name = cfg.output_dir.display().to_string();
@@ -165,6 +166,7 @@ pub fn render_watch_panel(
                             PostProcessAction::MoveToProcessed(_) => "Move to _processed",
                             PostProcessAction::DeleteSource => "Delete source",
                             PostProcessAction::MoveToErrors(_) => "Move to _errors",
+                            PostProcessAction::MoveToArchive(_) => "Archive (timestamped)",
                         };
                         ui.label(RichText::new(post_label).small().color(tokens.text_dim));
 
@@ -190,12 +192,94 @@ pub fn render_watch_panel(
                 state.configs.remove(r_idx);
                 state.selected_config_idx = None;
             }
+
+            // --- 3. Selected Watch Folder Details & Multi-Target Routing ---
+            if let Some(idx) = state.selected_config_idx
+                && idx < state.configs.len()
+            {
+                let cfg = &mut state.configs[idx];
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(8.0).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Watch Folder Details:").strong().color(tokens.text_primary));
+                        ui.label(RichText::new(cfg.watch_dir.display().to_string()).color(tokens.accent_primary));
+                    });
+
+                    ui.add_space(4.0);
+
+                    // Post-processing action selector
+                    ui.horizontal(|ui| {
+                        ui.label("Source Archiving / Post-Action:");
+                        let is_leave = matches!(cfg.post_action, PostProcessAction::LeaveInPlace);
+                        let is_proc = matches!(cfg.post_action, PostProcessAction::MoveToProcessed(_));
+                        let is_arch = matches!(cfg.post_action, PostProcessAction::MoveToArchive(_));
+                        let is_del = matches!(cfg.post_action, PostProcessAction::DeleteSource);
+
+                        if ui.selectable_label(is_leave, "Leave in place").clicked() {
+                            cfg.post_action = PostProcessAction::LeaveInPlace;
+                        }
+                        if ui.selectable_label(is_proc, "Move to /Source/").clicked() {
+                            cfg.post_action = PostProcessAction::MoveToProcessed(cfg.watch_dir.join("Source"));
+                        }
+                        if ui.selectable_label(is_arch, "Archive (Timestamped)").clicked() {
+                            cfg.post_action = PostProcessAction::MoveToArchive(cfg.watch_dir.join("Archive"));
+                        }
+                        if ui.selectable_label(is_del, "Delete Source").clicked() {
+                            cfg.post_action = PostProcessAction::DeleteSource;
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Output Target Presets (1-to-N Routing):").strong().color(tokens.text_primary));
+
+                    let mut target_to_remove = None;
+                    let targets_count = cfg.targets.len();
+                    for (t_idx, target) in cfg.targets.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("#{}:", t_idx + 1)).color(tokens.text_dim));
+                            ui.label(RichText::new(&target.preset_name).strong().color(tokens.accent_primary));
+
+                            let out_path = target.output_dir.as_ref().unwrap_or(&cfg.output_dir);
+                            ui.label(RichText::new(format!("-> {}", out_path.display())).small().color(tokens.text_secondary));
+
+                            if icons::button_with_label(ui, icons::Icon::Folder, "Subfolder...", false, tokens, "Custom target directory").clicked()
+                                && let Some(picked) = rfd::FileDialog::new().set_title("Select Target Output Subdirectory").pick_folder()
+                            {
+                                target.output_dir = Some(picked);
+                            }
+
+                            if targets_count > 1 && icons::button(ui, icons::Icon::Trash, 14.0, false, tokens, "Remove target").clicked() {
+                                target_to_remove = Some(t_idx);
+                            }
+                        });
+                    }
+
+                    if let Some(del_t) = target_to_remove
+                        && del_t < cfg.targets.len()
+                    {
+                        cfg.targets.remove(del_t);
+                    }
+
+                    ui.add_space(4.0);
+                    if ui.button("+ Add Output Preset Target...").clicked() {
+                        cfg.targets.push(encodercraft_watch::WatchTargetConfig::new("Match Source - High Bitrate", None));
+                    }
+                });
+            }
         });
     });
 }
 
 /// Triggers a scan pass across all active watch folders and automatically queues settled jobs.
-pub fn trigger_watch_scan(state: &mut WatchPanelState, queue_mgr: &Arc<QueueManager>, preset_registry: &Arc<Mutex<PresetRegistry>>) {
+pub fn trigger_watch_scan(
+    state: &mut WatchPanelState,
+    queue_mgr: &Arc<QueueManager>,
+    preset_registry: &Arc<Mutex<PresetRegistry>>,
+    commands: &CommandRegistry,
+) {
     if state.configs.is_empty() {
         return;
     }
@@ -211,13 +295,28 @@ pub fn trigger_watch_scan(state: &mut WatchPanelState, queue_mgr: &Arc<QueueMana
             let count = jobs.len();
             state.last_detected_count = count;
             state.last_scan_time = Some(std::time::Instant::now());
+            let mut queued = 0;
+            let mut failures = Vec::new();
 
             for (_folder_id, spec) in jobs {
-                let _ = queue_mgr.submit_job(spec);
+                let params = match serde_json::to_value(spec) {
+                    Ok(params) => params,
+                    Err(error) => {
+                        failures.push(format!("could not serialize detected job: {error}"));
+                        continue;
+                    }
+                };
+                match commands.dispatch(queue_mgr, "queue.add", params) {
+                    Ok(_) => queued += 1,
+                    Err(error) => failures.push(error.to_string()),
+                }
             }
 
-            if count > 0 {
-                state.status_message = Some(format!("Found & queued {count} settled media files."));
+            if failures.is_empty() && count > 0 {
+                state.status_message = Some(format!("Found & queued {queued} settled media files."));
+            } else if let Some(first_error) = failures.first() {
+                state.status_message =
+                    Some(format!("Queued {queued} of {count} settled files; {} could not be queued. First error: {first_error}", failures.len()));
             } else {
                 state.status_message = Some("Watch scan complete: no new settled files.".into());
             }

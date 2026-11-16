@@ -124,6 +124,7 @@ mod tests {
             color_space: ColorSpaceTag::REC709,
             bit_depth: 10,
             codec_private: Vec::new(),
+            spatial: None,
         };
         let a_cfg = AudioStreamConfig {
             codec_fourcc: *b"sowt",

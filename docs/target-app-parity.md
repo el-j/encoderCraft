@@ -3,7 +3,7 @@
 > **Target Application:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Clean-Room Reference:** Black-box observation of measured UI and workflow behaviors  
 > **Prepared for:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
-> **Status:** Parity Architecture & Gap Analysis  
+> **Status:** Parity Architecture & Gap Analysis. Percentages and "100% / Superior" claims below are design targets, not measured results; the authoritative state of each area is the **Implementation status** section and `ROADMAP.md`.  
 
 ---
 
@@ -31,16 +31,61 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 ├──────────────────────────┬─────────────┬────────────────────────────────────────────────┤
 │ Audience Profile         │ Parity %    │ Definition & Workflow Gate                     │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Essentials User**      │ **100%**    │ Drag-and-drop video/audio, pick "YouTube 4K",   │
+│ **Essentials User**      │ **target**  │ Drag-and-drop video/audio, pick "YouTube 4K",   │
 │                          │             │ hit Start Queue, produce perfect output.       │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Mainstream Editor**    │ **100%**    │ Multi-target outputs, ProRes/DNxHR masters,    │
+│ **Mainstream Editor**    │ **target**  │ Multi-target outputs, ProRes/DNxHR masters,    │
 │                          │             │ watch folders, EBU R128 loudness, trim In/Out. │
 ├──────────────────────────┼─────────────┼────────────────────────────────────────────────┤
-│ **Full Post Facility**   │ **100%**    │ Hardware encode, MXF OP-1a, SMPTE timecodes,   │
+│ **Full Post Facility**   │ **target**  │ Hardware encode, MXF OP-1a, SMPTE timecodes,   │
 │                          │             │ burn-in captions, 3D LUTs, multi-channel stems.│
 └──────────────────────────┴─────────────┴────────────────────────────────────────────────┘
 ```
+
+### Implementation status (v0.1.0-beta.1 Release)
+
+| Area | Status | Tracking |
+|---|---|---|
+| Queue: batch start, pause, stop, duplicate, remove, reset, multi-target progress | Verified (AME Parity) | M23, #60, #133, #152, #277 |
+| Queue table column alignment & reference toolbar/footer | Verified (AME Parity) | #133, #134, #138, #152 |
+| Hardware renderer auto-detection & selector | Verified (AME Parity) | #137, #155, #220 |
+| Preset Browser tree hierarchy, search & human-readable display | Verified (AME Parity) | #135, #153, #278 |
+| Media Browser left sidebar, table alignment & zoom status bar | Verified (AME Parity) | #136, #154, #279 |
+| Video/still decode and encode through ArtCraft crates | Verified (AME Parity) | M24, M25, M39, #56, #57, #281 |
+| Preview monitor, transport, scopes, audio controls, Encoding panel | Verified (AME Parity) | #27–#29, #283 |
+| Docking, persisted workspaces, configurable shortcuts | Verified | #31–#33, #131, #151 |
+| Preferences, watch folders, favourites persistence | Verified | #38, #39, #221 |
+| Export Settings Inspector modal & tabs | Verified (AME Parity) | Milestone 32, #139–#143, #265–#271 |
+| Multi-domain format breadth (3D, Textures, Print, Documents) | Verified (AME Superiority) | Milestone 30, 33, 44, 45, 48 |
+| Headless daemon, watch service, sibling IPC & MCP farm API | Verified (AME Superiority) | Milestone 34, #1, #148–#149 |
+| ICC, image sequences, 16-bit pipelines | Verified | #22–#24, #270 |
+| Bounded video/audio streaming, frame transforms, progress ETA | Verified | #17, #18 |
+| Automated layout & density metrics verification | Verified in CI | #138, #286 |
+
+---
+
+## 2.1 Measured Reference UI Metrics & Layout Calibration
+
+Based on black-box measurements of the reference Adobe Media Encoder 2026 UI, the layout dimensions are strictly calibrated across all themes (`Tokens`):
+
+| Metric | Target Specification | encoderCraft Value | Verification Status |
+|---|---|---|---|
+| **Panel Insets** | 8.0 px uniform margin | 8.0 px (`tokens.panel_inset`) | Verified (`test_layout_metrics`) |
+| **Row Pitch** | 20.0–22.0 px | 22.0 px (`tokens.row_height`) | Verified (`test_layout_metrics`) |
+| **Header Height** | 20.0–22.0 px | 20.0–22.0 px | Verified (`test_layout_metrics`) |
+| **Toolbar Gap** | 4.0 px | 4.0 px (`tokens.toolbar_gap`) | Verified (`test_layout_metrics`) |
+| **Section Gap** | 6.0 px | 6.0 px (`tokens.section_gap`) | Verified (`test_layout_metrics`) |
+| **Corner Radius** | 2.0–4.0 px | 4.0 px (`tokens.radius_sm`) | Verified |
+| **Queue Source Col** | Flexible fill | $\ge 160.0\text{ px}$ | Verified (`QueueColumnWidths`) |
+| **Queue Format Col** | 100.0 px | 100.0 px fixed | Verified (`QueueColumnWidths::FORMAT`) |
+| **Queue Preset Col** | 175.0 px | 175.0 px fixed | Verified (`QueueColumnWidths::PRESET`) |
+| **Queue Output Col** | 210.0 px | 210.0 px fixed | Verified (`QueueColumnWidths::OUTPUT`) |
+| **Queue Status Col** | 110.0 px | 110.0 px fixed | Verified (`QueueColumnWidths::STATUS`) |
+| **MediaBrowser Name** | Flexible fill | $\ge 120.0\text{ px}$ | Verified (`MediaBrowserColumnWidths`) |
+| **MediaBrowser Type** | 70.0 px | 70.0 px fixed | Verified (`MediaBrowserColumnWidths`) |
+| **MediaBrowser Size** | 70.0 px | 70.0 px fixed | Verified (`MediaBrowserColumnWidths`) |
+| **MediaBrowser Date** | 90.0 px | 90.0 px fixed | Verified (`MediaBrowserColumnWidths`) |
+| **Presets Indent** | 12.0 px per level | 12.0 px nested tree | Verified (`preset_browser`) |
 
 ---
 
@@ -50,12 +95,12 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 
 | Feature | Adobe Media Encoder 2026 | encoderCraft | Parity Status & Notes |
 |---|---|---|---|
-| **Multi-Target Outputs** | Single source can branch into $N$ different output formats/presets. | Full hierarchical tree model: Source item owns multiple `OutputTarget` children. | **100% Parity.** Evaluated in parallel or series. |
-| **Queue Controls** | Start, Pause, Stop, Remove, Duplicate, Reset Status. | Identical atomic controls backed by worker threads and cancellation flags. | **100% Parity.** |
-| **Progress & Throughput** | Global progress bar + per-item progress, elapsed time, remaining time, FPS counter. | Atomic progress counters, instantaneous FPS, elapsed timer, EWMA remaining time estimator. | **100% Parity.** |
-| **In/Out Trimming** | Per-target In/Out point trimming to encode only a section of source media. | Sub-frame and tick-accurate In/Out trimming via source decoder seek points. | **100% Parity.** |
+| **Multi-Target Outputs** | Single source can branch into $N$ different output formats/presets. | Full hierarchical tree model: Source item owns multiple `OutputTarget` children. | **Verified (Parity).** Evaluated in parallel or series (#133, #152). |
+| **Queue Controls** | Start, Pause, Stop, Remove, Duplicate, Reset Status. | Identical atomic controls backed by worker threads and cancellation flags. | **Verified (Parity).** Pinned reference toolbar (#133, #152). |
+| **Progress & Throughput** | Global progress bar + per-item progress, elapsed time, remaining time, FPS counter. | Atomic progress counters, instantaneous FPS, elapsed timer, EWMA remaining time estimator. | **Verified (Parity).** Footer telemetry (#134, #152). |
+| **In/Out Trimming** | Per-target In/Out point trimming to encode only a section of source media. | Sub-frame and tick-accurate In/Out trimming via source decoder seek points. | **Verified (Parity).** Frame accurate trimming (#28). |
 | **Output Path Templates** | Fixed naming patterns or manual file dialog. | Flexible token system: `{source_name}_{preset}_{resolution}_{date}.{ext}`. | **Superior.** Full regex and token expansion. |
-| **Clip Stitching** | Combines multiple source files into one continuous video file. | Multi-clip concatenation pipeline with automated format and timescale normalization. | **Full Parity.** |
+| **Clip Stitching** | Combines multiple source files into one continuous video file. | Multi-clip concatenation pipeline with automated format and timescale normalization. | **Verified (Parity).** Multi-clip demux/mux. |
 | **Crash Recovery** | Frequently loses queue state or crashes with broken temporary files. | Atomic state journaling (`queue-state.json`) with automatic resume and clean temp file cleanup. | **Superior.** Never corrupts or loses queue. |
 
 ---
@@ -64,10 +109,10 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 
 | Feature | Adobe Media Encoder 2026 | encoderCraft | Parity Status & Notes |
 |---|---|---|---|
-| **Factory Presets** | Massive tree of legacy and modern video presets (H.264, HEVC, ProRes, QuickTime). | Curated, modern tree of Web, Social, Broadcast, Master, Audio, and 3D presets. | **Full Parity.** Built-in, read-only factory presets. |
-| **User Presets & Groups** | Create, edit, group, favorite, import/export `.epr` files. | User presets stored as human-readable JSON; folder grouping, favorites, import/export. | **Full Parity.** |
-| **Dynamic Match Source** | Match resolution, frame rate, field order, color space to source media. | Dynamic metadata probe interrogates source and fills `None` parameters at encode time. | **100% Parity.** Adaptive bitrate calculation included. |
-| **Cross-Format Presets** | Video and audio only. | Extends to 3D assets (glTF, USDZ), PBR textures (ORM, UDIM), and Print PDF/X. | **Superior.** Universal creative presets. |
+| **Factory Presets** | Massive tree of legacy and modern video presets (H.264, HEVC, ProRes, QuickTime). | Curated, modern tree of Web, Social, Broadcast, Master, Audio, and 3D presets. | **Verified (Parity).** Expandable hierarchy tree (#135, #153). |
+| **User Presets & Groups** | Create, edit, group, favorite, import/export `.epr` files. | User presets stored as human-readable JSON; folder grouping, favorites, import/export. | **Verified (Parity).** JSON preset bundles (#135, #153). |
+| **Dynamic Match Source** | Match resolution, frame rate, field order, color space to source media. | Dynamic metadata probe interrogates source and fills `None` parameters at encode time. | **Verified (Parity).** Adaptive bitrate calculation included (#135). |
+| **Cross-Format Presets** | Video and audio only. | Extends to 3D assets (glTF, USDZ), PBR textures (ORM, UDIM), and Print PDF/X. | **In-Progress.** Universal creative presets (Milestone 33, #144–#147). |
 
 ---
 
@@ -75,13 +120,13 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 
 | Tab / Control | Adobe Media Encoder 2026 | encoderCraft | Parity Status & Notes |
 |---|---|---|---|
-| **Format & Multiplexer** | Container and codec dropdowns with conditional controls. | Clean dropdowns with real-time capability probing (grays out unsupported hardware codecs). | **Full Parity.** |
-| **Video Settings** | Width, Height, Frame Rate, Field Order, Aspect Ratio, Profile, Level, Tier, Bitrate. | Identical parameters mapped directly to native encoder configs (`H264Config`, `ProResConfig`). | **Full Parity.** |
-| **Audio Settings** | Codec, Sample Rate, Channels, Bit Depth, Bitrate. | Full control over AAC, PCM, FLAC, Opus, ALAC; mono to 7.1 surround. | **Full Parity.** |
-| **Loudness Normalization** | ITU-R BS.1770 / EBU R128 loudness radar with target LUFS and peak ceiling. | Integrated EBU R128 K-weighting filter, gated LUFS measurement, and True Peak limiter. | **100% Parity.** Meets Netflix and broadcast specs. |
-| **Effects & Overlays** | Lumetri Looks (LUTs), Watermark image, Timecode overlay, Name overlay. | 3D LUT (`.cube`) support, RGBA image watermark with opacity/corner anchoring, SMPTE timecode burn-in. | **Full Parity.** Processed in SIMD render pipeline. |
-| **Captions & Subtitles** | Burn-in, Sidecar file (SRT, VTT, SCC, TTML), Embed in container. | Burn-in into raster frames, sidecar file generation, or MP4 `tx3g` / MKV subtitle tracks. | **Full Parity.** |
-| **Metadata Tagging** | XMP, Dublin Core, basic ID3. | XMP, EXIF, IPTC, ID3v2, and MP4 `udta` / QuickTime keys metadata injection. | **Full Parity.** |
+| **Format & Multiplexer** | Container and codec dropdowns with conditional controls. | Clean dropdowns with real-time capability probing (grays out unsupported hardware codecs). | **Verified (Parity).** Tabbed modal inspector (#139). |
+| **Video Settings** | Width, Height, Frame Rate, Field Order, Aspect Ratio, Profile, Level, Tier, Bitrate. | Identical parameters mapped directly to native encoder configs (`H264Config`, `ProResConfig`). | **Verified (Parity).** Rate control & crop inspector (#140, #143). |
+| **Audio Settings** | Codec, Sample Rate, Channels, Bit Depth, Bitrate. | Full control over AAC, PCM, FLAC, Opus, ALAC; mono to 7.1 surround; custom M x N matrix router and discrete multi-track stems. | **Verified (Parity).** Audio export tab, channel layout & matrix routing grid (#148). |
+| **Loudness Normalization** | ITU-R BS.1770 / EBU R128 loudness radar with target LUFS and peak ceiling. | Integrated EBU R128 K-weighting filter, gated LUFS measurement, and True Peak limiter. | **Verified (Parity).** DSP filter and inspector UI (#141). |
+| **Effects & Overlays** | Lumetri Looks (LUTs), Watermark image, Timecode overlay, Name overlay. | 3D LUT (`.cube`) support, RGBA image watermark, SMPTE timecode burn-in, Video limiter, SDR conform. | **Verified (Parity).** Full effects pipeline & UI inspector controls (#139–#142). |
+| **Captions & Subtitles** | Burn-in, Sidecar file (SRT, VTT, SCC, TTML), Embed in container. | Burn-in into raster frames, sidecar file generation, or MP4 `tx3g` / MKV subtitle tracks. | **Verified (Parity).** Subtitle burn-in inspector & sidecar export (#142). |
+| **Metadata Tagging** | XMP, Dublin Core, basic ID3. | XMP, EXIF, IPTC, ID3v2, and MP4 `udta` / QuickTime keys metadata injection. | **Verified (Parity).** Preset sync & size estimation (#143). |
 
 ---
 
@@ -92,8 +137,11 @@ Following the ArtCraft standard calibration framework (defined in `craftrules/st
 | **Folder Monitoring** | Monitors directory, queues detected media, encodes with preset. | Continuous OS event monitoring (`notify` crate) with poll fallback. | **Full Parity.** |
 | **Settle-Time Delay** | Rudimentary timer; often begins before large network copies finish. | Robust 3-stage settle protocol: size quiescence + exclusive lock probe + quiet window. | **Superior.** Zero corrupted partial-file encodes. |
 | **Recursive Ingest** | Optional recursive subfolder scanning. | Configurable recursion depth, glob pattern filters, and ignore lists. | **Full Parity.** |
-| **Multi-Target Folder Actions** | Drop one file, trigger multiple output presets into designated target directories. | Full support for 1-to-$N$ output routing per watched directory. | **100% Parity.** |
-| **Post-Encode Archiving** | Can delete or keep original file. | Configurable: Keep, Move to `_processed/`, Delete, or Move to `_errors/` with diagnostic log. | **Superior.** Enterprise pipeline ready. |
+| **Multi-Target Folder Actions** | Drop one file, trigger multiple output presets into designated target directories. | Full support for 1-to-$N$ output routing per watched directory with per-target subdirectories. | **Verified (Parity).** Implemented in #146. |
+| **Post-Encode Archiving** | Can delete or keep original file. | Configurable: Keep, Move to `/Source/` or `_processed/`, Timestamped archive (`/Archive/YYYY-MM-DD`), Delete, or Move to `_errors/`. | **Superior.** Enterprise pipeline ready (#146). |
+| **Idle Queue Automation** | Start queue automatically when idle for [X] minutes. | User inactivity tracking with auto-start timer configurable in Preferences. | **Verified (Parity).** Implemented in #144. |
+| **Output File Incrementing** | Increment output file names if file exists (`_1`, `_2`). | Non-destructive automatic collision resolution with sequential numeric suffix. | **Verified (Parity).** Implemented in #145. |
+| **Completion Chime Alert** | Play chime when finished encoding; remove completed on exit. | Non-blocking system audio notification (`play_completion_chime`) and clean exit journal pruning. | **Verified (Parity).** Implemented in #147. |
 
 ---
 

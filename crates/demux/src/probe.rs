@@ -27,6 +27,8 @@ pub struct VideoStreamInfo {
     pub color_space: ColorSpaceTag,
     pub frame_rate: Rational64,
     pub bit_depth: u8,
+    #[serde(default)]
+    pub bitrate: Option<u64>,
     pub duration_seconds: Option<f64>,
 }
 
@@ -57,9 +59,14 @@ impl MediaInfo {
     /// Classifies the overall stream kind based on discovered elementary streams and container kind.
     pub fn stream_kind(&self) -> MediaStreamKind {
         match self.container {
-            ContainerKind::Wav | ContainerKind::Rf64Wav | ContainerKind::Aiff | ContainerKind::Flac | ContainerKind::Mp3 | ContainerKind::Ogg => {
-                MediaStreamKind::AudioOnly
-            }
+            ContainerKind::Wav
+            | ContainerKind::Rf64Wav
+            | ContainerKind::Aiff
+            | ContainerKind::Flac
+            | ContainerKind::Mp3
+            | ContainerKind::Ogg
+            | ContainerKind::AdobeAuditionSesx
+            | ContainerKind::ArtcraftSoundcraft => MediaStreamKind::AudioOnly,
             ContainerKind::GltfBinary
             | ContainerKind::GltfJson
             | ContainerKind::UsdBinary
@@ -75,16 +82,23 @@ impl MediaInfo {
             | ContainerKind::OpenExr
             | ContainerKind::RadianceHdr
             | ContainerKind::Dds
-            | ContainerKind::Psd
             | ContainerKind::Bmp => MediaStreamKind::StillImage,
-            ContainerKind::Svg | ContainerKind::IllustratorAi | ContainerKind::Eps => MediaStreamKind::Vector2D,
+            ContainerKind::Psd | ContainerKind::Psb | ContainerKind::ArtcraftPhotocraft => MediaStreamKind::LayeredComposite,
+            ContainerKind::Svg | ContainerKind::IllustratorAi | ContainerKind::Eps | ContainerKind::ArtcraftVectorcraft => MediaStreamKind::Vector2D,
+            ContainerKind::AutocadDxf | ContainerKind::AutocadDwg | ContainerKind::HpglPlotter | ContainerKind::ArtcraftCadcraft => {
+                MediaStreamKind::Cad2D
+            }
+            ContainerKind::AdobeAfterEffectsAep | ContainerKind::ArtcraftEffectcraft => MediaStreamKind::MotionGraph,
+            ContainerKind::AdobePremierePrproj | ContainerKind::ArtcraftFilmcraft => MediaStreamKind::ProjectTimeline,
+            ContainerKind::ArtcraftAnicraft => MediaStreamKind::ImageSequence,
             ContainerKind::Pdf
             | ContainerKind::Docx
             | ContainerKind::Pptx
             | ContainerKind::Xlsx
             | ContainerKind::Idml
             | ContainerKind::Indd
-            | ContainerKind::Epub => MediaStreamKind::Document,
+            | ContainerKind::Epub
+            | ContainerKind::ArtcraftDesigncraft => MediaStreamKind::Document,
             _ => {
                 let has_video = !self.video_streams.is_empty();
                 let has_audio = !self.audio_streams.is_empty();
@@ -116,11 +130,18 @@ pub fn classify_stream_kind(path: &Path) -> MediaStreamKind {
     // Fallback based on extension if probe failed or file is headless/mock
     if let Some(ext) = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()) {
         match ext.as_str() {
-            "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" | "alac" | "wma" => MediaStreamKind::AudioOnly,
+            "mp3" | "wav" | "flac" | "aiff" | "aif" | "ogg" | "oga" | "m4a" | "aac" | "opus" | "alac" | "wma" | "sesx" | "soundcraft" => {
+                MediaStreamKind::AudioOnly
+            }
             "glb" | "gltf" | "obj" | "stl" | "ply" | "usda" | "usdc" | "usdz" => MediaStreamKind::Spatial3D,
-            "svg" | "ai" | "eps" => MediaStreamKind::Vector2D,
-            "pdf" | "docx" | "idml" | "indd" | "epub" | "pptx" | "xlsx" | "rtf" => MediaStreamKind::Document,
-            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "hdr" | "dds" | "bmp" | "psd" => MediaStreamKind::StillImage,
+            "svg" | "ai" | "eps" | "vectorcraft" => MediaStreamKind::Vector2D,
+            "dxf" | "dwg" | "plt" | "hpgl" | "cadcraft" => MediaStreamKind::Cad2D,
+            "psd" | "psb" | "photocraft" => MediaStreamKind::LayeredComposite,
+            "aep" | "aet" | "effectcraft" => MediaStreamKind::MotionGraph,
+            "prproj" | "filmcraft" => MediaStreamKind::ProjectTimeline,
+            "anicraft" => MediaStreamKind::ImageSequence,
+            "pdf" | "docx" | "idml" | "indd" | "epub" | "pptx" | "xlsx" | "rtf" | "designcraft" => MediaStreamKind::Document,
+            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "exr" | "hdr" | "dds" | "bmp" => MediaStreamKind::StillImage,
             "mp4" | "mov" | "mkv" | "webm" | "mxf" | "avi" | "m4v" | "mpg" | "mpeg" | "ts" => MediaStreamKind::VideoWithAudio,
             _ => MediaStreamKind::Unknown,
         }
@@ -218,6 +239,7 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
                 color_space: ColorSpaceTag::SRGB,
                 frame_rate: Rational64::FPS_24,
                 bit_depth: img.bit_depth,
+                bitrate: None,
                 duration_seconds: None,
             });
         }
@@ -231,6 +253,7 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
                 color_space: ColorSpaceTag::SRGB,
                 frame_rate: Rational64::FPS_24,
                 bit_depth: img.bit_depth,
+                bitrate: None,
                 duration_seconds: None,
             });
         }
@@ -244,12 +267,13 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
                 color_space: ColorSpaceTag::SRGB,
                 frame_rate: Rational64::FPS_24,
                 bit_depth: img.bit_depth,
+                bitrate: None,
                 duration_seconds: None,
             });
         }
         ContainerKind::IsoBmffMp4 | ContainerKind::QuickTimeMov => {
             if let Ok(mp4) = craft_media::isobmff::open(bytes) {
-                populate_isobmff_streams(&mp4, &mut duration_seconds, &mut video_streams, &mut audio_streams);
+                populate_isobmff_streams(&mp4, &mut duration_seconds, &mut video_streams, &mut audio_streams)?;
             } else {
                 metadata.insert("container".into(), container.display_name().into());
             }
@@ -282,7 +306,7 @@ fn populate_isobmff_streams(
     duration_seconds: &mut Option<f64>,
     video_streams: &mut Vec<VideoStreamInfo>,
     audio_streams: &mut Vec<AudioStreamInfo>,
-) {
+) -> Result<(), EncoderError> {
     let dur = if mp4.timescale > 0 { Some(mp4.duration as f64 / mp4.timescale as f64) } else { None };
     *duration_seconds = dur;
 
@@ -294,14 +318,16 @@ fn populate_isobmff_streams(
                 {
                     let codec_str = track.codec().map(|c| c.name().to_string()).unwrap_or_else(|| "video".to_string());
                     let bit_depth = if v.depth > 0 { (v.depth & 0xFF) as u8 } else { 8 };
+                    let frame_rate = frame_rate_from_timing(track.timescale, track.samples.iter().map(|sample| sample.duration))?;
                     video_streams.push(VideoStreamInfo {
                         stream_index: idx,
                         codec_name: codec_str,
                         dimensions: dims,
                         pixel_format: PixelFormat::Yuv420p,
                         color_space: ColorSpaceTag::REC709,
-                        frame_rate: Rational64::new(track.timescale as i64, 1).unwrap_or(Rational64::FPS_24),
+                        frame_rate,
                         bit_depth,
+                        bitrate: None,
                         duration_seconds: dur,
                     });
                 }
@@ -330,6 +356,36 @@ fn populate_isobmff_streams(
             _ => {}
         }
     }
+    Ok(())
+}
+
+fn frame_rate_from_timing(timescale: u32, sample_durations: impl IntoIterator<Item = u32>) -> Result<Rational64, EncoderError> {
+    let (sample_count, duration_ticks) = sample_durations
+        .into_iter()
+        .try_fold((0u128, 0u128), |(count, total), duration| Some((count.checked_add(1)?, total.checked_add(u128::from(duration))?)))
+        .ok_or_else(|| EncoderError::InvalidContainer("ISO BMFF video sample timing overflowed".into()))?;
+    if timescale == 0 || sample_count == 0 || duration_ticks == 0 {
+        return Err(EncoderError::InvalidContainer("ISO BMFF video track has no usable frame timing".into()));
+    }
+
+    let numerator = u128::from(timescale)
+        .checked_mul(sample_count)
+        .ok_or_else(|| EncoderError::InvalidContainer("ISO BMFF frame-rate numerator overflowed".into()))?;
+    let divisor = gcd_u128(numerator, duration_ticks);
+    let numerator =
+        i64::try_from(numerator / divisor).map_err(|_| EncoderError::InvalidContainer("ISO BMFF frame rate exceeds supported range".into()))?;
+    let denominator =
+        i64::try_from(duration_ticks / divisor).map_err(|_| EncoderError::InvalidContainer("ISO BMFF frame rate exceeds supported range".into()))?;
+    Rational64::new(numerator, denominator).map_err(|error| EncoderError::InvalidContainer(format!("invalid ISO BMFF frame rate: {error}")))
+}
+
+fn gcd_u128(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        let remainder = a % b;
+        a = b;
+        b = remainder;
+    }
+    a
 }
 
 fn populate_matroska_streams(
@@ -355,6 +411,7 @@ fn populate_matroska_streams(
                         color_space: ColorSpaceTag::REC709,
                         frame_rate: Rational64::FPS_24,
                         bit_depth: 8,
+                        bitrate: None,
                         duration_seconds: dur,
                     });
                 }
@@ -422,6 +479,7 @@ fn populate_mxf_streams(
                         color_space: ColorSpaceTag::REC709,
                         frame_rate: fps,
                         bit_depth,
+                        bitrate: None,
                         duration_seconds: dur,
                     });
                 }
@@ -469,7 +527,24 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
         file.read(&mut header_buf).map_err(|e| EncoderError::Io(format!("failed to read media header from `{}`: {e}", path.display())))?;
     header_buf.truncate(bytes_read);
 
-    let mut info = probe_bytes(&header_buf)?;
+    let mut info = match probe_bytes(&header_buf) {
+        Ok(info) => info,
+        // Premiere project files are gzip-compressed XML, so the header carries no readable signature.
+        Err(_)
+            if header_buf.starts_with(&[0x1f, 0x8b])
+                && path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("prproj")) =>
+        {
+            MediaInfo {
+                container: ContainerKind::AdobePremierePrproj,
+                file_size_bytes: file_size,
+                duration_seconds: None,
+                video_streams: Vec::new(),
+                audio_streams: Vec::new(),
+                metadata: Default::default(),
+            }
+        }
+        Err(e) => return Err(e),
+    };
     info.file_size_bytes = file_size;
 
     // If streams were not found in the initial header chunk (e.g. `moov` at file end), open full file source
@@ -478,7 +553,7 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
             && let Ok(file_handle) = File::open(path)
             && let Ok(mp4) = craft_media::isobmff::open(file_handle)
         {
-            populate_isobmff_streams(&mp4, &mut info.duration_seconds, &mut info.video_streams, &mut info.audio_streams);
+            populate_isobmff_streams(&mp4, &mut info.duration_seconds, &mut info.video_streams, &mut info.audio_streams)?;
         } else if matches!(info.container, ContainerKind::Matroska | ContainerKind::WebM)
             && let Ok(file_handle) = File::open(path)
             && let Ok(mkv) = craft_media::matroska::open(file_handle)
@@ -498,6 +573,19 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isobmff_frame_rate_uses_sample_timing() {
+        assert_eq!(frame_rate_from_timing(30_000, vec![1_001; 15]).unwrap(), Rational64::new(30_000, 1_001).unwrap());
+        assert_eq!(frame_rate_from_timing(30_000, vec![1_001, 2_002]).unwrap(), Rational64::new(20_000, 1_001).unwrap());
+    }
+
+    #[test]
+    fn isobmff_frame_rate_rejects_missing_or_invalid_timing() {
+        assert!(matches!(frame_rate_from_timing(0, vec![1]), Err(EncoderError::InvalidContainer(_))));
+        assert!(matches!(frame_rate_from_timing(1, Vec::new()), Err(EncoderError::InvalidContainer(_))));
+        assert!(matches!(frame_rate_from_timing(1, vec![0]), Err(EncoderError::InvalidContainer(_))));
+    }
 
     #[test]
     fn test_probe_wav_bytes() {
@@ -536,11 +624,23 @@ mod tests {
         assert_eq!(classify_stream_kind(Path::new("model.glb")), MediaStreamKind::Spatial3D);
         assert_eq!(classify_stream_kind(Path::new("scene.gltf")), MediaStreamKind::Spatial3D);
         assert_eq!(classify_stream_kind(Path::new("picture.png")), MediaStreamKind::StillImage);
-        assert_eq!(classify_stream_kind(Path::new("photo.psd")), MediaStreamKind::StillImage);
+        assert_eq!(classify_stream_kind(Path::new("photo.psd")), MediaStreamKind::LayeredComposite);
+        assert_eq!(classify_stream_kind(Path::new("graphic.photocraft")), MediaStreamKind::LayeredComposite);
         assert_eq!(classify_stream_kind(Path::new("icon.svg")), MediaStreamKind::Vector2D);
         assert_eq!(classify_stream_kind(Path::new("logo.ai")), MediaStreamKind::Vector2D);
-        assert_eq!(classify_stream_kind(Path::new("drawing.eps")), MediaStreamKind::Vector2D);
+        assert_eq!(classify_stream_kind(Path::new("drawing.vectorcraft")), MediaStreamKind::Vector2D);
+        assert_eq!(classify_stream_kind(Path::new("blueprint.dwg")), MediaStreamKind::Cad2D);
+        assert_eq!(classify_stream_kind(Path::new("floorplan.dxf")), MediaStreamKind::Cad2D);
+        assert_eq!(classify_stream_kind(Path::new("machine.cadcraft")), MediaStreamKind::Cad2D);
+        assert_eq!(classify_stream_kind(Path::new("comp.aep")), MediaStreamKind::MotionGraph);
+        assert_eq!(classify_stream_kind(Path::new("motion.effectcraft")), MediaStreamKind::MotionGraph);
+        assert_eq!(classify_stream_kind(Path::new("sequence.prproj")), MediaStreamKind::ProjectTimeline);
+        assert_eq!(classify_stream_kind(Path::new("timeline.filmcraft")), MediaStreamKind::ProjectTimeline);
+        assert_eq!(classify_stream_kind(Path::new("multitrack.sesx")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("mix.soundcraft")), MediaStreamKind::AudioOnly);
+        assert_eq!(classify_stream_kind(Path::new("animation.anicraft")), MediaStreamKind::ImageSequence);
         assert_eq!(classify_stream_kind(Path::new("document.pdf")), MediaStreamKind::Document);
+        assert_eq!(classify_stream_kind(Path::new("layout.designcraft")), MediaStreamKind::Document);
         assert_eq!(classify_stream_kind(Path::new("proposal.docx")), MediaStreamKind::Document);
         assert_eq!(classify_stream_kind(Path::new("catalog.idml")), MediaStreamKind::Document);
         assert_eq!(classify_stream_kind(Path::new("book.epub")), MediaStreamKind::Document);

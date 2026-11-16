@@ -90,8 +90,10 @@ Copy-Item (Join-Path $Bin 'encodercraft.exe'), (Join-Path $Bin 'encodercraft-cli
 
 & (Join-Path $PSScriptRoot 'sign.ps1') (Join-Path $Stage 'encodercraft.exe') (Join-Path $Stage 'encodercraft-cli.exe')
 
-# Required embedded-font notices ship independently of optional font inputs.
-Copy-Item -LiteralPath (Join-Path $Root 'NOTICE') -Destination $Stage
+# License notices ship with the binaries for both optional and embedded font builds.
+foreach ($license in @('LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE')) {
+  Copy-Item -LiteralPath (Join-Path $Root $license) -Destination $Stage
+}
 
 # ---- MSI ---------------------------------------------------------------------------------------
 $Msi = Join-Path $Dist "encodercraft-$Version-windows-$Arch.msi"

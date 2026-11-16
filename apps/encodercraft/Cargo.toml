@@ -15,12 +15,19 @@ encodercraft-core = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-engine = { workspace = true }
 encodercraft-ipc = { workspace = true }
+encodercraft-dispatch = { workspace = true }
 encodercraft-presets = { workspace = true }
 encodercraft-ui-egui = { workspace = true }
+craft-window = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 egui = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [build-dependencies]
 # Icon + VERSIONINFO for encodercraft.exe; build.rs only uses it when the target is Windows.

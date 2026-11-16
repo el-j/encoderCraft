@@ -29,6 +29,20 @@ fn test_ipc_handler_ping_and_version() {
 }
 
 #[test]
+fn ipc_exposes_the_shared_command_registry() {
+    let queue_mgr = Arc::new(QueueManager::new_in_memory());
+    let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
+    let handler = EngineIpcHandler::new(queue_mgr, preset_registry);
+
+    let list = handler.handle(&IpcRequest::new(20, "command.list", json!({})));
+    let commands = list.result.unwrap();
+    assert!(commands.as_array().is_some_and(|items| items.iter().any(|item| item.get("id").and_then(|id| id.as_str()) == Some("queue.select_all"))));
+
+    let execute = handler.handle(&IpcRequest::new(21, "command.execute", json!({ "commandId": "queue.select_all", "params": {} })));
+    assert_eq!(execute.result.unwrap().get("jobIds").and_then(serde_json::Value::as_array).map(Vec::len), Some(0));
+}
+
+#[test]
 fn test_ipc_handler_queue_workflow() {
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
     let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
@@ -81,4 +95,195 @@ fn test_ipc_handler_queue_workflow() {
     let cancel_res = handler.handle(&cancel_req);
     assert_eq!(cancel_res.id, 14);
     assert!(cancel_res.error.is_none());
+}
+
+fn write_wav(path: &std::path::Path) {
+    let samples: Vec<u8> = (0..1600i32).flat_map(|i| ((((i as f32) * 0.2).sin() * 6000.0) as i16).to_le_bytes()).collect();
+    let mut b = Vec::new();
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36u32 + samples.len() as u32).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&8000u32.to_le_bytes());
+    b.extend_from_slice(&16_000u32.to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+    b.extend_from_slice(&samples);
+    std::fs::write(path, b).unwrap();
+}
+
+fn wav_spec(dir: &std::path::Path, id: &str) -> CraftJobSpec {
+    let src = dir.join(format!("{id}.wav"));
+    write_wav(&src);
+    CraftJobSpec {
+        version: "1.0".into(),
+        job_id: id.into(),
+        client_info: ClientInfo { app_name: "test".into(), app_version: "0".into(), pid: 1, user_notes: None },
+        priority: JobPriority::Normal,
+        start_policy: StartPolicy::Paused,
+        source: SourceDescriptor::File { path: src, start_tick: None, duration_ticks: None, timebase: None },
+        targets: vec![OutputTarget {
+            target_id: "t".into(),
+            output_path: dir.join(format!("{id}_out.wav")),
+            preset_name: "WAV".into(),
+            container: ContainerType::Wave,
+            ..Default::default()
+        }],
+    }
+}
+
+fn wait_idle(handler: &EngineIpcHandler) -> Vec<serde_json::Value> {
+    for _ in 0..600 {
+        let res = handler.handle(&IpcRequest::new(90, "queue.list", json!({}))).result.unwrap();
+        let jobs = res.as_array().unwrap().clone();
+        let busy = jobs.iter().any(|j| matches!(j["status"].as_str(), Some("Queued" | "Processing")));
+        let running = handler.handle(&IpcRequest::new(91, "queue.is_running", json!({}))).result.unwrap();
+        if !busy && running.as_bool() != Some(true) {
+            return jobs;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("queue did not drain");
+}
+
+#[test]
+fn test_ipc_start_once_drains_all_jobs_and_cancel_is_honoured() {
+    let dir = tempfile::tempdir().unwrap();
+    let handler = EngineIpcHandler::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+
+    for id in ["a", "b", "c", "d"] {
+        let res = handler.handle(&IpcRequest::new(1, "queue.submit", serde_json::to_value(wav_spec(dir.path(), id)).unwrap()));
+        assert!(res.error.is_none(), "{:?}", res.error);
+    }
+    assert!(handler.handle(&IpcRequest::new(2, "queue.cancel", json!({ "jobId": "d" }))).error.is_none());
+    for id in ["a", "b", "c"] {
+        handler.handle(&IpcRequest::new(3, "queue.reset", json!({ "jobId": id })));
+    }
+
+    assert!(handler.handle(&IpcRequest::new(4, "queue.start", json!({}))).error.is_none());
+    let jobs = wait_idle(&handler);
+    let status = |id: &str| jobs.iter().find(|j| j["spec"]["jobId"] == id).and_then(|j| j["status"].as_str().map(str::to_owned));
+    for id in ["a", "b", "c"] {
+        assert_eq!(status(id).as_deref(), Some("Completed"), "job {id}");
+        assert!(dir.path().join(format!("{id}_out.wav")).exists());
+    }
+    assert_eq!(status("d").as_deref(), Some("Cancelled"));
+    assert!(!dir.path().join("d_out.wav").exists());
+}
+
+#[test]
+fn test_ipc_auto_start_policy_runs_without_queue_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let handler = EngineIpcHandler::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+
+    let mut spec = wav_spec(dir.path(), "auto");
+    spec.start_policy = StartPolicy::AutoStart;
+    let res = handler.handle(&IpcRequest::new(1, "queue.submit", serde_json::to_value(&spec).unwrap()));
+    assert!(res.error.is_none(), "{:?}", res.error);
+
+    let jobs = wait_idle(&handler);
+    assert_eq!(jobs[0]["status"].as_str(), Some("Completed"));
+    assert!(dir.path().join("auto_out.wav").exists());
+}
+
+#[test]
+fn test_ipc_paused_policy_waits_for_an_explicit_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let handler = EngineIpcHandler::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+
+    let res = handler.handle(&IpcRequest::new(1, "queue.submit", serde_json::to_value(wav_spec(dir.path(), "held")).unwrap()));
+    assert!(res.error.is_none(), "{:?}", res.error);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let jobs = handler.handle(&IpcRequest::new(2, "queue.list", json!({}))).result.unwrap();
+    assert_eq!(jobs[0]["status"].as_str(), Some("Paused"));
+    assert!(!dir.path().join("held_out.wav").exists());
+}
+
+#[test]
+fn test_ipc_subscribe_streams_job_events_until_completion() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let dir = tempfile::tempdir().unwrap();
+    let queue = Arc::new(QueueManager::new_in_memory());
+    let handler = Arc::new(EngineIpcHandler::new(queue, Arc::new(Mutex::new(PresetRegistry::default()))));
+    let mut server = encodercraft_ipc::IpcServer::bind_tcp("127.0.0.1:18998", handler).unwrap();
+
+    let stream = std::net::TcpStream::connect("127.0.0.1:18998").unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(20))).unwrap();
+    let mut writer = stream.try_clone().unwrap();
+    let mut reader = BufReader::new(stream);
+    writer.write_all(b"{\"id\":7,\"method\":\"queue.subscribe\",\"params\":{}}\n").unwrap();
+
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(line.contains("subscribed"), "{line}");
+
+    let mut spec = wav_spec(dir.path(), "evt");
+    spec.start_policy = StartPolicy::AutoStart;
+    let submit = format!("{{\"id\":8,\"method\":\"queue.submit\",\"params\":{}}}\n", serde_json::to_string(&spec).unwrap());
+    let mut other = std::net::TcpStream::connect("127.0.0.1:18998").unwrap();
+    other.write_all(submit.as_bytes()).unwrap();
+
+    let mut saw_completed = false;
+    for _ in 0..50 {
+        line.clear();
+        if reader.read_line(&mut line).unwrap() == 0 {
+            break;
+        }
+        if line.contains("\"jobId\":\"evt\"") && line.contains("Completed") {
+            saw_completed = true;
+            break;
+        }
+    }
+    assert!(saw_completed, "no completion event received");
+    server.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_sibling_app_ipc_unix_socket_roundtrip() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let dir = tempfile::tempdir().unwrap();
+    let sock_path = dir.path().join("encodercraft-test.sock");
+    let queue = Arc::new(QueueManager::new_in_memory());
+    let handler = Arc::new(EngineIpcHandler::new(queue, Arc::new(Mutex::new(PresetRegistry::default()))));
+    let mut server = encodercraft_ipc::IpcServer::bind_unix(&sock_path, handler).unwrap();
+
+    let stream = UnixStream::connect(&sock_path).unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    let mut writer = stream.try_clone().unwrap();
+    let mut reader = BufReader::new(stream);
+
+    // Test submission from sibling applications across the ArtCraft suite
+    let sibling_apps = ["FilmCraft", "EffectCraft", "SoundCraft", "DesignCraft", "CadCraft"];
+    for (idx, app) in sibling_apps.iter().enumerate() {
+        let job_id = format!("sibling-job-{idx}");
+        let mut spec = wav_spec(dir.path(), &job_id);
+        spec.client_info.app_name = (*app).to_string();
+        spec.client_info.pid = 4000 + idx as u32;
+        spec.start_policy = StartPolicy::Paused;
+
+        let submit_req = format!("{{\"id\":{},\"method\":\"queue.submit\",\"params\":{}}}\n", 100 + idx, serde_json::to_string(&spec).unwrap());
+        writer.write_all(submit_req.as_bytes()).unwrap();
+
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.contains(&job_id), "failed response for {app}: {line}");
+    }
+
+    // Query queue.list over Unix socket and verify all sibling descriptors are ingested
+    writer.write_all(b"{\"id\":200,\"method\":\"queue.list\",\"params\":{}}\n").unwrap();
+    let mut list_line = String::new();
+    reader.read_line(&mut list_line).unwrap();
+    for app in &sibling_apps {
+        assert!(list_line.contains(app), "queue list missing sibling app {app}");
+    }
+
+    server.stop();
 }

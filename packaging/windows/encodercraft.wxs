@@ -36,6 +36,12 @@
       <Component Id="EncodercraftNotice">
         <File Id="EncodercraftNoticeFile" Source="$(var.BinDir)\NOTICE" KeyPath="yes" />
       </Component>
+      <Component Id="EncodercraftLicenseMIT">
+        <File Id="EncodercraftLicenseMITFile" Source="$(var.BinDir)\LICENSE-MIT" KeyPath="yes" />
+      </Component>
+      <Component Id="EncodercraftLicenseApache">
+        <File Id="EncodercraftLicenseApacheFile" Source="$(var.BinDir)\LICENSE-APACHE" KeyPath="yes" />
+      </Component>
       <Component Id="EncodercraftApp" Guid="F16FC42D-969E-4A7F-9B84-506CDAAB8264">
         <File Id="EncodercraftExe" Source="$(var.BinDir)\encodercraft.exe" KeyPath="yes">
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="EncoderCraft" Description="EncoderCraft media transcoder" WorkingDirectory="INSTALLFOLDER" Advertise="yes" Icon="EncodercraftIcon.ico" IconIndex="0" />

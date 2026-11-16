@@ -28,6 +28,7 @@ pub enum Icon {
     Folder,
     Gear,
     Search,
+    Filter,
     Preset,
     Link,
     Clock,
@@ -35,7 +36,22 @@ pub enum Icon {
     Close,
     Sliders,
     ListView,
+    GridView,
     Info,
+    // Canonical media & UI glyphs shared across ArtCraft:
+    Film,
+    Sequence,
+    Audio,
+    AudioWaveform,
+    Image,
+    Document,
+    Spatial3D,
+    Speaker,
+    Mute,
+    Lock,
+    Unlock,
+    Captions,
+    ExternalLink,
 }
 
 /// 16×16 grid pixel-snapped vector painter for crisp UI rendering.
@@ -226,6 +242,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.circle(6.8, 6.8, 4.3);
             pen.line(&[(10.0, 10.0), (14.0, 14.0)]);
         }
+        Filter => pen.fill(&[(2.0, 3.0), (14.0, 3.0), (9.0, 8.0), (9.0, 13.0), (7.0, 14.0), (7.0, 8.0)]),
         Preset => {
             pen.fill(&[(9.0, 2.0), (4.5, 8.5), (8.0, 8.5), (7.0, 14.0), (11.5, 7.5), (8.0, 7.5)]);
         }
@@ -256,20 +273,96 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 pen.line(&[(5.5, y), (14.0, y)]);
             }
         }
+        GridView => {
+            for y in [2.5, 7.0, 11.5] {
+                for x in [2.5, 7.0, 11.5] {
+                    pen.rect(x, y, x + 2.0, y + 2.0);
+                }
+            }
+        }
         Info => {
             pen.circle(8.0, 8.0, 6.0);
             pen.line(&[(8.0, 7.0), (8.0, 11.5)]);
             pen.dot(8.0, 4.8, 0.9);
+        }
+        Film => {
+            pen.rect(2.0, 3.0, 14.0, 13.0);
+            for y in [5.0, 8.0, 11.0] {
+                pen.dot(3.8, y, 0.6);
+                pen.dot(12.2, y, 0.6);
+            }
+            pen.line(&[(5.5, 3.0), (5.5, 13.0)]);
+            pen.line(&[(10.5, 3.0), (10.5, 13.0)]);
+        }
+        Sequence => {
+            pen.rect(1.5, 3.5, 14.5, 12.5);
+            pen.rect_fill(3.0, 5.5, 9.0, 7.5);
+            pen.rect_fill(6.0, 9.0, 13.0, 11.0);
+        }
+        Audio | AudioWaveform => {
+            for (i, h) in [3.0, 6.0, 9.0, 5.0, 7.0, 3.0].iter().enumerate() {
+                let x = 2.5 + i as f32 * 2.2;
+                pen.line(&[(x, 8.0 - h / 2.0), (x, 8.0 + h / 2.0)]);
+            }
+        }
+        Image => {
+            pen.rect(2.0, 3.0, 14.0, 13.0);
+            pen.line(&[(2.5, 12.0), (6.0, 8.0), (9.0, 11.0), (11.0, 9.0), (13.5, 12.0)]);
+            pen.dot(10.5, 6.0, 1.1);
+        }
+        Document => {
+            pen.closed(&[(3.5, 2.5), (9.5, 2.5), (12.5, 5.5), (12.5, 13.5), (3.5, 13.5)]);
+            pen.line(&[(9.5, 2.5), (9.5, 5.5), (12.5, 5.5)]);
+            pen.line(&[(5.5, 8.0), (10.5, 8.0)]);
+            pen.line(&[(5.5, 10.5), (9.0, 10.5)]);
+        }
+        Spatial3D => {
+            pen.closed(&[(8.0, 2.5), (13.5, 5.5), (13.5, 11.5), (8.0, 14.5), (2.5, 11.5), (2.5, 5.5)]);
+            pen.line(&[(8.0, 8.5), (8.0, 14.5)]);
+            pen.line(&[(8.0, 8.5), (13.5, 5.5)]);
+            pen.line(&[(8.0, 8.5), (2.5, 5.5)]);
+        }
+        Speaker | Mute => {
+            pen.fill(&[(2.0, 6.0), (5.0, 6.0), (9.0, 2.5), (9.0, 13.5), (5.0, 10.0), (2.0, 10.0)]);
+            if icon == Mute {
+                pen.line(&[(10.5, 6.0), (14.0, 10.0)]);
+                pen.line(&[(14.0, 6.0), (10.5, 10.0)]);
+            } else {
+                pen.arc(9.0, 8.0, 3.0, -50.0, 50.0);
+                pen.arc(9.0, 8.0, 5.5, -50.0, 50.0);
+            }
+        }
+        Lock | Unlock => {
+            pen.rect(3.5, 7.0, 12.5, 14.0);
+            if icon == Lock {
+                pen.arc(8.0, 7.0, 3.0, 180.0, 360.0);
+            } else {
+                pen.arc(8.0, 5.0, 3.0, 180.0, 330.0);
+            }
+            pen.dot(8.0, 10.5, 1.0);
+        }
+        Captions => {
+            pen.rect(1.5, 3.0, 14.5, 13.0);
+            pen.line(&[(4.0, 9.0), (7.0, 9.0)]);
+            pen.line(&[(9.0, 9.0), (12.0, 9.0)]);
+            pen.line(&[(4.0, 11.0), (12.0, 11.0)]);
+        }
+        ExternalLink => {
+            pen.line(&[(6.0, 3.0), (2.0, 3.0), (2.0, 14.0), (13.0, 14.0), (13.0, 10.0)]);
+            pen.line(&[(7.0, 9.0), (14.0, 2.0)]);
+            pen.line(&[(9.0, 2.0), (14.0, 2.0), (14.0, 7.0)]);
         }
     }
 }
 
 /// Draws an icon button: returns the response; `active` draws the highlighted state.
 pub fn button(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool, t: &Tokens, tooltip: &str) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), egui::Sense::click());
-    let bg = if resp.is_pointer_button_down_on() {
+    let enabled = ui.is_enabled();
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), sense);
+    let bg = if enabled && resp.is_pointer_button_down_on() {
         Some(t.pressed)
-    } else if resp.hovered() {
+    } else if enabled && resp.hovered() {
         Some(t.hover)
     } else {
         None
@@ -277,12 +370,40 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool, t: &Tokens
     if let Some(bg) = bg {
         ui.painter().rect_filled(rect, t.radius_sm, bg);
     }
-    let col = if active {
+    let col = if !enabled {
+        t.text_dim
+    } else if active {
         t.icon_active
     } else if resp.hovered() {
         t.text_primary
     } else {
         t.icon
+    };
+    paint(ui.painter(), rect.shrink(size * 0.18), icon, col);
+    if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
+}
+
+/// Draws an icon button with a custom tint color when enabled.
+pub fn button_tinted(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool, color: Color32, t: &Tokens, tooltip: &str) -> egui::Response {
+    let enabled = ui.is_enabled();
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), sense);
+    let bg = if enabled && resp.is_pointer_button_down_on() {
+        Some(t.pressed)
+    } else if enabled && resp.hovered() {
+        Some(t.hover)
+    } else {
+        None
+    };
+    if let Some(bg) = bg {
+        ui.painter().rect_filled(rect, t.radius_sm, bg);
+    }
+    let col = if !enabled {
+        t.text_dim
+    } else if active {
+        t.icon_active
+    } else {
+        color
     };
     paint(ui.painter(), rect.shrink(size * 0.18), icon, col);
     if tooltip.is_empty() { resp } else { resp.on_hover_text(tooltip) }
@@ -295,16 +416,58 @@ pub fn small_button(ui: &mut egui::Ui, icon: Icon, t: &Tokens, tooltip: &str) ->
 
 /// Draws a button with an icon and label text.
 pub fn button_with_label(ui: &mut egui::Ui, icon: Icon, label: &str, active: bool, t: &Tokens, tooltip: &str) -> egui::Response {
+    button_with_label_tinted(ui, icon, label, ButtonTint { active, enabled: None, icon_color: None }, t, tooltip)
+}
+
+pub fn button_with_label_enabled(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    active: bool,
+    enabled: bool,
+    t: &Tokens,
+    tooltip: &str,
+) -> egui::Response {
+    button_with_label_tinted(ui, icon, label, ButtonTint { active, enabled: Some(enabled), icon_color: None }, t, tooltip)
+}
+
+pub fn button_with_label_color_enabled(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    enabled: bool,
+    icon_color: Color32,
+    t: &Tokens,
+    tooltip: &str,
+) -> egui::Response {
+    button_with_label_tinted(ui, icon, label, ButtonTint { active: false, enabled: Some(enabled), icon_color: Some(icon_color) }, t, tooltip)
+}
+
+struct ButtonTint {
+    active: bool,
+    enabled: Option<bool>,
+    icon_color: Option<Color32>,
+}
+
+fn button_with_label_tinted(ui: &mut egui::Ui, icon: Icon, label: &str, tint: ButtonTint, t: &Tokens, tooltip: &str) -> egui::Response {
     let icon_size = 14.0;
     let padding = vec2(7.0, 3.5);
     let gap = 5.0;
-    let galley =
-        ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(12.0), if active { t.icon_active } else { t.text_primary });
+    let enabled = ui.is_enabled() && tint.enabled.unwrap_or(true);
+    let label_color = if !enabled {
+        t.text_dim
+    } else if tint.active {
+        t.icon_active
+    } else {
+        t.text_primary
+    };
+    let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(12.0), label_color);
     let desired_size = vec2(padding.x * 2.0 + icon_size + gap + galley.size().x, (galley.size().y.max(icon_size) + padding.y * 2.0).max(22.0));
-    let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
-    let bg = if resp.is_pointer_button_down_on() {
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(desired_size, sense);
+    let bg = if enabled && resp.is_pointer_button_down_on() {
         Some(t.pressed)
-    } else if resp.hovered() {
+    } else if enabled && resp.hovered() {
         Some(t.hover)
     } else {
         None
@@ -312,7 +475,11 @@ pub fn button_with_label(ui: &mut egui::Ui, icon: Icon, label: &str, active: boo
     if let Some(bg) = bg {
         ui.painter().rect_filled(rect, t.radius_sm, bg);
     }
-    let icon_color = if active {
+    let icon_color = if !enabled {
+        t.text_dim
+    } else if let Some(color) = tint.icon_color {
+        color
+    } else if tint.active {
         t.icon_active
     } else if resp.hovered() {
         t.text_primary
@@ -323,7 +490,9 @@ pub fn button_with_label(ui: &mut egui::Ui, icon: Icon, label: &str, active: boo
     paint(ui.painter(), icon_rect, icon, icon_color);
 
     let text_pos = pos2(rect.min.x + padding.x + icon_size + gap, rect.center().y - galley.size().y * 0.5);
-    let text_color = if active {
+    let text_color = if !enabled {
+        t.text_dim
+    } else if tint.active {
         t.icon_active
     } else if resp.hovered() {
         t.text_primary
@@ -365,6 +534,7 @@ mod tests {
         Icon::Folder,
         Icon::Gear,
         Icon::Search,
+        Icon::Filter,
         Icon::Preset,
         Icon::Link,
         Icon::Clock,
@@ -372,7 +542,21 @@ mod tests {
         Icon::Close,
         Icon::Sliders,
         Icon::ListView,
+        Icon::GridView,
         Icon::Info,
+        Icon::Film,
+        Icon::Sequence,
+        Icon::Audio,
+        Icon::AudioWaveform,
+        Icon::Image,
+        Icon::Document,
+        Icon::Spatial3D,
+        Icon::Speaker,
+        Icon::Mute,
+        Icon::Lock,
+        Icon::Unlock,
+        Icon::Captions,
+        Icon::ExternalLink,
     ];
 
     fn drawn_shapes(icon: Icon, ppp: f32, size: f32) -> Vec<Shape> {
@@ -399,21 +583,25 @@ mod tests {
 
     #[test]
     fn all_icons_render_without_panicking() {
-        for &icon in ALL_ICONS {
-            let shapes = drawn_shapes(icon, 1.0, 16.0);
-            assert!(!shapes.is_empty(), "Icon {icon:?} must render at least one shape");
+        for ppp in [1.0, 1.5, 2.0] {
+            for &icon in ALL_ICONS {
+                let shapes = drawn_shapes(icon, ppp, 16.0);
+                assert!(!shapes.is_empty(), "Icon {icon:?} must render at {ppp}x");
+            }
         }
     }
 
     #[test]
     fn icons_have_valid_strokes() {
-        for &icon in ALL_ICONS {
-            for shape in drawn_shapes(icon, 2.0, 16.0) {
-                if let Shape::Path(p) = shape
-                    && p.stroke.width > 0.0
-                    && !matches!(p.stroke.color, ColorMode::Solid(c) if c == Color32::TRANSPARENT)
-                {
-                    assert!(p.stroke.width >= 0.5, "Stroke width too thin for {icon:?}");
+        for ppp in [1.0, 1.5, 2.0] {
+            for &icon in ALL_ICONS {
+                for shape in drawn_shapes(icon, ppp, 16.0) {
+                    if let Shape::Path(p) = shape
+                        && p.stroke.width > 0.0
+                        && !matches!(p.stroke.color, ColorMode::Solid(c) if c == Color32::TRANSPARENT)
+                    {
+                        assert!(p.stroke.width >= 0.5, "Stroke width too thin for {icon:?} at {ppp}x");
+                    }
                 }
             }
         }

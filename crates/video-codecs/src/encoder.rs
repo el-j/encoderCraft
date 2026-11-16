@@ -20,4 +20,15 @@ pub trait VideoEncoder {
 
     /// Flushes any pending frames buffered inside the encoder pipeline.
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, EncoderError>;
+
+    /// Decoder configuration record (`avcC`, `hvcC` or `av1C`) for the container sample entry.
+    /// Empty for codecs whose frames are self-describing (ProRes, DNx, VP9, MJPEG).
+    fn config_record(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    /// Sample-entry FourCC when it depends on the configured profile (ProRes); `None` means the codec default.
+    fn fourcc(&self) -> Option<[u8; 4]> {
+        None
+    }
 }

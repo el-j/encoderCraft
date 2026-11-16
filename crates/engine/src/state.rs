@@ -2,19 +2,48 @@
 
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use encodercraft_core::{CraftJobSpec, EncoderError, JobStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::conversion::ConversionDecision;
+
+static TMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn unique_temp_path(target_path: &Path) -> PathBuf {
+    let pid = std::process::id();
+    let counter = TMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let base_name = target_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    target_path.with_file_name(format!("{base_name}.{pid}.{counter}.tmp"))
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(path: &Path) -> Result<(), EncoderError> {
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let directory = File::open(parent).map_err(|e| EncoderError::Io(format!("failed to open parent directory for sync: {e}")))?;
+    directory.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync parent directory: {e}")))
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_path: &Path) -> Result<(), EncoderError> {
+    Ok(())
+}
+
 /// Snapshot of an individual job in the encoding queue.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueuedJob {
     pub spec: CraftJobSpec,
+    /// One-time lossy-conversion approvals scoped to this queued job.
+    #[serde(default)]
+    pub conversion_approvals: Vec<crate::conversion::LossyConversionKey>,
     pub status: JobStatus,
     pub progress_percent: f64,
     pub current_fps: f64,
+    #[serde(default)]
+    pub target_eta_seconds: Option<u64>,
     pub added_at_unix_ms: u64,
     pub completed_at_unix_ms: Option<u64>,
     pub error_message: Option<String>,
@@ -27,9 +56,11 @@ impl QueuedJob {
 
         Self {
             spec,
+            conversion_approvals: Vec::new(),
             status: JobStatus::Queued,
             progress_percent: 0.0,
             current_fps: 0.0,
+            target_eta_seconds: None,
             added_at_unix_ms: now,
             completed_at_unix_ms: None,
             error_message: None,
@@ -53,6 +84,9 @@ pub struct LogEntry {
 /// User application preferences and defaults (AME Parity).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppPreferences {
+    /// Schema of the stored file; files written before versioning load as 0 and are migrated.
+    #[serde(default)]
+    pub schema_version: u32,
     #[serde(default = "default_true")]
     pub auto_start_queue: bool,
     #[serde(default = "default_true")]
@@ -65,6 +99,45 @@ pub struct AppPreferences {
     pub max_parallel_jobs: usize,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Shut the computer down after the queue has finished, after a cancellable countdown.
+    #[serde(default)]
+    pub auto_shutdown: bool,
+    /// Start queue automatically when the user is idle for this timeout.
+    #[serde(default)]
+    pub auto_start_on_idle: bool,
+    /// Inactivity minutes before starting the queue automatically.
+    #[serde(default = "default_idle_timeout_minutes")]
+    pub idle_timeout_minutes: u32,
+    /// Automatically increment output file names if a destination file already exists on disk.
+    #[serde(default = "default_true")]
+    pub increment_output_filename: bool,
+    /// Enable watch folder automatic monitoring and transcode triggering.
+    #[serde(default = "default_true")]
+    pub auto_encode_watch_folders: bool,
+    /// Selected hardware / software renderer backend name.
+    #[serde(default = "default_renderer")]
+    pub selected_renderer: String,
+    /// Percentage of GPU VRAM allocated for hardware rendering and texture caching (10..=100).
+    #[serde(default = "default_vram_budget_percent")]
+    pub vram_budget_percent: u8,
+    /// Queue table columns selected by the user.
+    #[serde(default = "default_queue_columns")]
+    pub queue_visible_columns: Vec<String>,
+    /// Use the operating system's title bar instead of the app-drawn one (takes effect on restart).
+    #[serde(default)]
+    pub system_title_bar: bool,
+    /// Persistent allow/deny decisions for exact source-to-target lossy video conversions.
+    #[serde(default)]
+    pub lossy_conversion_decisions: Vec<ConversionDecision>,
+    /// Default audio master sample rate (Hz) for multi-channel export.
+    #[serde(default = "default_audio_sample_rate")]
+    pub default_audio_sample_rate: u32,
+    /// Default audio master channels (1 = Mono, 2 = Stereo, 6 = 5.1 Surround).
+    #[serde(default = "default_audio_channels")]
+    pub default_audio_channels: u8,
+    /// Explicitly enabled out-of-process codec provider identifiers (ADR 0002).
+    #[serde(default)]
+    pub enabled_providers: std::collections::HashSet<String>,
 }
 
 fn default_true() -> bool {
@@ -75,19 +148,94 @@ fn default_parallelism() -> usize {
     2
 }
 
+fn default_idle_timeout_minutes() -> u32 {
+    2
+}
+
 fn default_theme() -> String {
     "Dark".into()
+}
+
+fn default_vram_budget_percent() -> u8 {
+    80
+}
+
+fn default_queue_columns() -> Vec<String> {
+    ["source", "inOut", "trimmedLength", "format", "preset", "output", "status"].map(str::to_owned).to_vec()
+}
+
+fn default_renderer() -> String {
+    "Pure-Rust Software (CPU)".into()
+}
+
+fn default_audio_sample_rate() -> u32 {
+    48_000
+}
+
+fn default_audio_channels() -> u8 {
+    2
+}
+
+/// Current preferences file schema.
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 2;
+
+/// The shared per-user configuration directory used by the desktop app and headless clients.
+pub fn default_config_dir() -> Option<std::path::PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))
+    }?;
+    Some(base.join("encoderCraft"))
+}
+
+/// Shared preferences file used for saved conversion decisions.
+pub fn default_preferences_path() -> Option<std::path::PathBuf> {
+    default_config_dir().map(|dir| dir.join("preferences.json"))
+}
+
+impl AppPreferences {
+    /// Upgrades older files and clamps values a hand-edited file could set out of range.
+    pub fn migrate(&mut self) {
+        if self.schema_version < PREFERENCES_SCHEMA_VERSION {
+            self.schema_version = PREFERENCES_SCHEMA_VERSION;
+        }
+        self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 16);
+        self.vram_budget_percent = self.vram_budget_percent.clamp(10, 100);
+        self.idle_timeout_minutes = self.idle_timeout_minutes.clamp(1, 60);
+        if !matches!(self.theme.as_str(), "Dark" | "Medium Dark" | "Light" | "High Contrast") {
+            self.theme = default_theme();
+        }
+    }
 }
 
 impl Default for AppPreferences {
     fn default() -> Self {
         Self {
+            schema_version: PREFERENCES_SCHEMA_VERSION,
             auto_start_queue: true,
             play_completion_sound: true,
             remove_finished_on_exit: false,
             default_output_dir: None,
             max_parallel_jobs: 2,
             theme: "Dark".into(),
+            auto_shutdown: false,
+            auto_start_on_idle: false,
+            idle_timeout_minutes: 2,
+            increment_output_filename: true,
+            auto_encode_watch_folders: true,
+            selected_renderer: default_renderer(),
+            vram_budget_percent: default_vram_budget_percent(),
+            queue_visible_columns: default_queue_columns(),
+            system_title_bar: false,
+            lossy_conversion_decisions: Vec::new(),
+            default_audio_sample_rate: default_audio_sample_rate(),
+            default_audio_channels: default_audio_channels(),
+            enabled_providers: std::collections::HashSet::new(),
         }
     }
 }
@@ -108,22 +256,31 @@ impl Default for QueueJournal {
     }
 }
 
-/// Atomically saves the queue journal to disk using a temporary file and rename.
+/// Atomically saves the queue journal using a temporary file and rename.
+/// On Unix, syncs the containing directory after the rename; newly created ancestor
+/// directories and filesystems without durable sync are not covered by this guarantee.
 pub fn save_journal_atomic(journal_path: &Path, journal: &QueueJournal) -> Result<(), EncoderError> {
-    if let Some(parent) = journal_path.parent() {
+    if let Some(parent) = journal_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| EncoderError::Io(format!("failed to create journal directory: {e}")))?;
     }
 
-    let tmp_path = journal_path.with_extension("tmp");
+    let tmp_path = unique_temp_path(journal_path);
     let json_bytes = serde_json::to_vec_pretty(journal).map_err(|e| EncoderError::Internal(format!("failed to serialize queue journal: {e}")))?;
 
-    let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp journal: {e}")))?;
-    tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp journal: {e}")))?;
-    tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp journal: {e}")))?;
+    let write_res = (|| -> Result<(), EncoderError> {
+        let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp journal: {e}")))?;
+        tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp journal: {e}")))?;
+        tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp journal: {e}")))?;
+        std::fs::rename(&tmp_path, journal_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit journal: {e}")))?;
+        sync_parent_directory(journal_path)?;
+        Ok(())
+    })();
 
-    std::fs::rename(&tmp_path, journal_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit journal: {e}")))?;
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
 
-    Ok(())
+    write_res
 }
 
 /// Loads the queue journal from disk, recovering from interrupted jobs if necessary.
@@ -154,26 +311,82 @@ pub fn load_preferences(prefs_path: &Path) -> Result<AppPreferences, EncoderErro
     }
 
     let file = File::open(prefs_path).map_err(|e| EncoderError::Io(format!("failed to open preferences: {e}")))?;
-    let prefs: AppPreferences =
+    let mut prefs: AppPreferences =
         serde_json::from_reader(file).map_err(|e| EncoderError::Internal(format!("failed to deserialize preferences: {e}")))?;
+    prefs.migrate();
     Ok(prefs)
 }
 
-/// Atomically saves application preferences to disk.
+/// Atomically saves application preferences with the same durability as [`save_journal_atomic`].
 pub fn save_preferences_atomic(prefs_path: &Path, prefs: &AppPreferences) -> Result<(), EncoderError> {
-    if let Some(parent) = prefs_path.parent() {
+    if let Some(parent) = prefs_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| EncoderError::Io(format!("failed to create preferences directory: {e}")))?;
     }
 
-    let tmp_path = prefs_path.with_extension("tmp");
+    let tmp_path = unique_temp_path(prefs_path);
     let json_bytes = serde_json::to_vec_pretty(prefs).map_err(|e| EncoderError::Internal(format!("failed to serialize preferences: {e}")))?;
 
-    let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp preferences: {e}")))?;
-    tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp preferences: {e}")))?;
-    tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp preferences: {e}")))?;
+    let write_res = (|| -> Result<(), EncoderError> {
+        let mut tmp_file = File::create(&tmp_path).map_err(|e| EncoderError::Io(format!("failed to create temp preferences: {e}")))?;
+        tmp_file.write_all(&json_bytes).map_err(|e| EncoderError::Io(format!("failed to write temp preferences: {e}")))?;
+        tmp_file.sync_all().map_err(|e| EncoderError::Io(format!("failed to sync temp preferences: {e}")))?;
+        std::fs::rename(&tmp_path, prefs_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit preferences: {e}")))?;
+        sync_parent_directory(prefs_path)?;
+        Ok(())
+    })();
 
-    std::fs::rename(&tmp_path, prefs_path).map_err(|e| EncoderError::Io(format!("failed to atomically commit preferences: {e}")))?;
-    Ok(())
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
+    write_res
+}
+
+#[cfg(test)]
+mod prefs_tests {
+    use super::*;
+
+    #[test]
+    fn unversioned_file_is_migrated_and_clamped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        std::fs::write(&path, r#"{"max_parallel_jobs":99,"theme":"Neon","auto_start_queue":false}"#).unwrap();
+        let p = load_preferences(&path).unwrap();
+        assert_eq!(p.schema_version, PREFERENCES_SCHEMA_VERSION);
+        assert_eq!(p.max_parallel_jobs, 16);
+        assert_eq!(p.theme, "Dark");
+        assert!(!p.auto_start_queue);
+        assert!(p.lossy_conversion_decisions.is_empty());
+    }
+
+    #[test]
+    fn preferences_round_trip_and_corruption_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        let p = AppPreferences { max_parallel_jobs: 4, queue_visible_columns: vec!["source".into(), "status".into()], ..AppPreferences::default() };
+        save_preferences_atomic(&path, &p).unwrap();
+        assert_eq!(load_preferences(&path).unwrap(), p);
+        std::fs::write(&path, "{broken").unwrap();
+        assert!(load_preferences(&path).is_err());
+    }
+
+    #[test]
+    fn preference_migration_preserves_supported_themes() {
+        for theme in ["Dark", "Medium Dark", "Light", "High Contrast"] {
+            let mut preferences = AppPreferences { theme: theme.into(), schema_version: 1, ..AppPreferences::default() };
+            preferences.migrate();
+            assert_eq!(preferences.theme, theme);
+            assert_eq!(preferences.schema_version, PREFERENCES_SCHEMA_VERSION);
+        }
+    }
+
+    #[test]
+    fn preference_migration_clamps_vram_and_workers() {
+        let mut p = AppPreferences { max_parallel_jobs: 99, vram_budget_percent: 5, ..AppPreferences::default() };
+        p.migrate();
+        assert_eq!(p.max_parallel_jobs, 16);
+        assert_eq!(p.vram_budget_percent, 10);
+    }
 }
 
 #[cfg(test)]
@@ -182,6 +395,15 @@ mod tests {
     use encodercraft_core::{ClientInfo, ContainerType, JobPriority, OutputTarget, SourceDescriptor, StartPolicy};
     use std::path::PathBuf;
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_directory_sync_handles_relative_paths_and_reports_errors() {
+        assert!(sync_parent_directory(Path::new("queue.json")).is_ok());
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("missing").join("queue.json");
+        assert!(matches!(sync_parent_directory(&path), Err(EncoderError::Io(_))));
+    }
 
     #[test]
     fn test_atomic_journal_roundtrip() {

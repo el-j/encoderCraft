@@ -4,6 +4,7 @@ use encodercraft_color::PixelFormat;
 use encodercraft_core::{EncoderError, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};
+use crate::yuv::rgba_f32_to_rgb8;
 
 /// Animated GIF encoder conforming to Compuserve GIF89a specification.
 pub struct GifEncoder {
@@ -70,6 +71,13 @@ impl GifEncoder {
 
     /// Quantizes RGB/RGBA pixels to palette indices.
     fn quantize_frame(&self, frame: &VideoFrame) -> Result<Vec<u8>, EncoderError> {
+        if frame.format == PixelFormat::RgbaF32 {
+            let rgb = rgba_f32_to_rgb8(frame)?;
+            return Ok(rgb.as_chunks::<3>().0.iter().map(|pixel| self.find_closest_palette_index(pixel[0], pixel[1], pixel[2])).collect());
+        }
+        if !matches!(frame.format, PixelFormat::Rgb8 | PixelFormat::Rgba8) {
+            return Err(EncoderError::UnsupportedCodec(format!("GIF encoder requires RGB8, RGBA8, or RGBAF32 input, got {:?}", frame.format)));
+        }
         let (plane_data, stride) = frame.plane(0)?;
         let w = frame.dimensions.width as usize;
         let h = frame.dimensions.height as usize;
@@ -235,6 +243,17 @@ mod tests {
         let gif_bytes = encoder.finish();
 
         assert_eq!(&gif_bytes[0..6], b"GIF89a");
+        assert_eq!(gif_bytes.last().copied(), Some(0x3B));
+    }
+
+    #[test]
+    fn float_working_frame_is_quantized_at_the_palette_boundary() {
+        let dims = Dimensions::new(4, 4).unwrap();
+        let frame = VideoFrame::new_allocated(dims, PixelFormat::RgbaF32, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        let mut encoder = GifEncoder::new(4, 4, 10).unwrap();
+        encoder.add_frame(&frame).unwrap();
+        let gif_bytes = encoder.finish();
+        assert_eq!(&gif_bytes[..6], b"GIF89a");
         assert_eq!(gif_bytes.last().copied(), Some(0x3B));
     }
 }

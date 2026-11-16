@@ -16,6 +16,9 @@ pub enum EncoderError {
     #[error("Color / Pixel format error: {0}")]
     Color(#[from] encodercraft_color::ColorError),
 
+    #[error("Color Look-Up Table (LUT) error: {0}")]
+    Lut(#[from] encodercraft_color::LutError),
+
     #[error("Invalid media container: {0}")]
     InvalidContainer(String),
 
@@ -24,6 +27,9 @@ pub enum EncoderError {
 
     #[error("Invalid job specification: {0}")]
     InvalidJobSpec(String),
+
+    #[error("Lossy conversion requires approval: {0}")]
+    ConversionApprovalRequired(String),
 
     #[error("Job not found in queue: {0}")]
     JobNotFound(String),

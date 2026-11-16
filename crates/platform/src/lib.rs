@@ -8,4 +8,4 @@
 
 pub mod capabilities;
 
-pub use capabilities::{HardwareBackend, HardwareCapabilities, detect_hardware};
+pub use capabilities::{HardwareBackend, HardwareCapabilities, available_renderers, detect_hardware};

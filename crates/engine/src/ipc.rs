@@ -2,29 +2,91 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use encodercraft_core::CraftJobSpec;
+use encodercraft_core::{CraftJobSpec, JobStatus, StartPolicy};
 use encodercraft_dispatch::{IpcRequest, IpcResponse};
 use encodercraft_ipc::IpcHandler;
 use encodercraft_presets::PresetRegistry;
 use serde_json::json;
 
+use crate::cmd::CommandRegistry;
 use crate::queue::QueueManager;
 
 /// Reusable IPC handler for encoderCraft engine.
 pub struct EngineIpcHandler {
     pub queue_mgr: Arc<QueueManager>,
     pub preset_registry: Arc<Mutex<PresetRegistry>>,
+    command_registry: CommandRegistry,
 }
 
 impl EngineIpcHandler {
     /// Creates a new `EngineIpcHandler` instance.
     pub fn new(queue_mgr: Arc<QueueManager>, preset_registry: Arc<Mutex<PresetRegistry>>) -> Self {
-        Self { queue_mgr, preset_registry }
+        let command_registry = CommandRegistry::with_preset_registry(Arc::clone(&preset_registry));
+        Self { queue_mgr, preset_registry, command_registry }
     }
 }
 
 impl IpcHandler for EngineIpcHandler {
+    /// `queue.subscribe` acknowledges, then pushes one `queue.event` per job whenever its status or
+    /// whole-percent progress changes, until the client disconnects.
+    fn stream(&self, req: &IpcRequest, emit: &mut dyn FnMut(IpcResponse) -> bool) -> bool {
+        if req.method != "queue.subscribe" {
+            return false;
+        }
+        if !emit(IpcResponse::success(req.id, json!({ "subscribed": true }))) {
+            return true;
+        }
+        let mut seen: std::collections::HashMap<String, (JobStatus, u32, Option<u64>)> = std::collections::HashMap::new();
+        loop {
+            let jobs = self.queue_mgr.list_jobs();
+            for job in &jobs {
+                let key = (job.status.clone(), job.progress_percent.clamp(0.0, 100.0) as u32, job.target_eta_seconds);
+                if seen.get(&job.spec.job_id) != Some(&key) {
+                    let event = json!({
+                        "event": "queue.event",
+                        "jobId": job.spec.job_id,
+                        "status": job.status,
+                        "progressPercent": job.progress_percent,
+                        "fps": job.current_fps,
+                        "targetEtaSeconds": job.target_eta_seconds,
+                    });
+                    if !emit(IpcResponse::success(req.id, event)) {
+                        return true;
+                    }
+                    seen.insert(job.spec.job_id.clone(), key);
+                }
+            }
+            seen.retain(|id, _| jobs.iter().any(|j| &j.spec.job_id == id));
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+
     fn handle(&self, req: &IpcRequest) -> IpcResponse {
+        if req.method == "command.list" {
+            let commands: Vec<_> = self
+                .command_registry
+                .list()
+                .into_iter()
+                .map(|(id, label, description)| json!({ "id": id, "label": label, "description": description }))
+                .collect();
+            return IpcResponse::success(req.id, json!(commands));
+        }
+        if req.method == "command.execute" {
+            let Some(command_id) = req.params.get("commandId").and_then(|value| value.as_str()) else {
+                return IpcResponse::error(req.id, "missing commandId parameter");
+            };
+            let params = req.params.get("params").cloned().unwrap_or_else(|| json!({}));
+            return match self.command_registry.dispatch(&self.queue_mgr, command_id, params) {
+                Ok(result) => IpcResponse::success(req.id, result),
+                Err(error) => IpcResponse::error(req.id, error.to_string()),
+            };
+        }
+        if self.command_registry.contains(&req.method) {
+            return match self.command_registry.dispatch(&self.queue_mgr, &req.method, req.params.clone()) {
+                Ok(result) => IpcResponse::success(req.id, result),
+                Err(error) => IpcResponse::error(req.id, error.to_string()),
+            };
+        }
         match req.method.as_str() {
             "app.ping" => IpcResponse::success(req.id, json!({ "pong": true, "app": "encoderCraft", "version": "0.1.0" })),
             "app.version" => IpcResponse::success(req.id, json!({ "app": "encoderCraft", "version": "0.1.0", "engine": "ArtCraft-Rust" })),
@@ -33,8 +95,21 @@ impl IpcHandler for EngineIpcHandler {
                     Ok(s) => s,
                     Err(e) => return IpcResponse::error(req.id, format!("invalid job spec: {e}")),
                 };
+                let policy = spec.start_policy;
                 match self.queue_mgr.submit_job(spec) {
-                    Ok(id) => IpcResponse::success(req.id, json!(id)),
+                    Ok(id) => {
+                        match policy {
+                            StartPolicy::AutoStart => {
+                                self.queue_mgr.start_queue();
+                            }
+                            StartPolicy::Paused => {
+                                if let Err(e) = self.queue_mgr.pause_job(&id) {
+                                    return IpcResponse::error(req.id, format!("job '{id}' queued but could not be paused: {e}"));
+                                }
+                            }
+                        }
+                        IpcResponse::success(req.id, json!(id))
+                    }
                     Err(e) => IpcResponse::error(req.id, e.to_string()),
                 }
             }
@@ -58,10 +133,7 @@ impl IpcHandler for EngineIpcHandler {
                     Err(e) => IpcResponse::error(req.id, e.to_string()),
                 }
             }
-            "queue.start" => {
-                let _ = self.queue_mgr.process_next_job();
-                IpcResponse::success(req.id, json!(true))
-            }
+            "queue.start" => IpcResponse::success(req.id, json!(self.queue_mgr.start_queue())),
             "queue.pause" => {
                 let job_id = req.params.get("jobId").and_then(|v| v.as_str()).unwrap_or("");
                 if !job_id.is_empty() {

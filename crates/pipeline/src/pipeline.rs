@@ -3,33 +3,359 @@
 //! Orchestrates demuxing, video scaling, audio DSP normalization, encoding, and muxing.
 
 use std::fs::File;
-use std::io::BufWriter;
-use std::sync::Arc;
+use std::io::{BufWriter, Read};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use encodercraft_audio_dsp::{AacEncoderWrapper, normalize_loudness, remix_channels};
-use encodercraft_color::{ColorSpaceTag, PixelFormat};
+use effectcraft_opusenc::OpusEncoder;
+use encodercraft_audio_dsp::{AacEncoderWrapper, SincResampler, normalize_loudness, remix_channels};
+use encodercraft_color::PixelFormat;
 use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor, VideoFrame};
 use encodercraft_geom::{Dimensions, ScaleMode};
+use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
 use encodercraft_muxers::{
     AudioSample, AudioStreamConfig, BextMetadata, BwfWavWriter, MkvMuxerBuilder, Mp4Muxer, MxfMuxer, VideoSample, VideoStreamConfig, WavFormatTag,
 };
-use encodercraft_video_codecs::{VideoCodecKind, Vp8DecoderWrapper, create_video_encoder, decode_video_packet_auto};
+use encodercraft_video_codecs::capabilities::container_accepts;
+use encodercraft_video_codecs::{EncodeParams, VideoCodecKind, VideoEncoder, create_video_encoder_with};
+use hayro::hayro_interpret::InterpreterSettings;
+use hayro::hayro_syntax::Pdf;
+use hayro::{RenderCache, RenderSettings, render};
+use image::ImageEncoder;
 
+use crate::input::{VideoInput, load_audio_required};
 use crate::progress::JobProgress;
 use crate::scale::FrameScaler;
+use crate::stream::{FrameProcessor, PipelineLimits, StreamSpec, StreamStats, run_stages};
+use crate::transform::ColorTransform;
+
+/// Factory for instantiating custom or external video encoders.
+pub type VideoEncoderFactory =
+    Arc<dyn Fn(&OutputTarget, u32, u32, Rational64, &EncodeParams) -> Result<Option<Box<dyn VideoEncoder + Send>>, EncoderError> + Send + Sync>;
 
 /// Execution coordinator for a single transcoding job.
 pub struct TranscodePipeline {
     spec: CraftJobSpec,
     progress: Arc<JobProgress>,
+    limits: PipelineLimits,
+    stats: Mutex<Option<StreamStats>>,
+    video_encoder_factory: Option<VideoEncoderFactory>,
+}
+
+/// Frees a received shared-memory stream when the job that consumed it ends, whatever the outcome.
+struct PipeStreamGuard(Option<String>);
+
+impl PipeStreamGuard {
+    fn new(source: &SourceDescriptor) -> Self {
+        Self(match source {
+            SourceDescriptor::Pipe { endpoint, .. } => Some(endpoint.clone()),
+            _ => None,
+        })
+    }
+}
+
+impl Drop for PipeStreamGuard {
+    fn drop(&mut self) {
+        if let Some(endpoint) = &self.0 {
+            encodercraft_source::pipe::release(endpoint);
+        }
+    }
+}
+
+fn import_texturecraft_mesh(path: &Path) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
+    let imported = texturecraft_formats::import_mesh(path)
+        .map_err(|error| EncoderError::InvalidContainer(format!("failed to import 3D mesh `{}`: {error}", path.display())))?;
+    let source_mesh = imported.mesh;
+    if source_mesh.indices.len() % 3 != 0 {
+        return Err(EncoderError::InvalidContainer("imported 3D mesh has an incomplete triangle".into()));
+    }
+
+    let mut mesh = encodercraft_spatial_io::TriangleMesh::new(path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("ImportedMesh"));
+    mesh.vertices = source_mesh.positions.iter().map(|point| [point.x, point.y, point.z]).collect();
+    mesh.indices = source_mesh.indices.as_chunks::<3>().0.to_vec();
+    mesh.generate_flat_normals();
+    Ok(mesh)
+}
+
+fn to_texturecraft_mesh(mesh: &encodercraft_spatial_io::TriangleMesh) -> Result<texturecraft_geom::Mesh, EncoderError> {
+    let mut indices = Vec::with_capacity(mesh.indices.len().saturating_mul(3));
+    for triangle in &mesh.indices {
+        for &index in triangle {
+            if mesh.vertices.get(index as usize).is_none() {
+                return Err(EncoderError::InvalidContainer("3D mesh triangle references a missing vertex".into()));
+            }
+            indices.push(index);
+        }
+    }
+    let positions = mesh.vertices.iter().map(|point| texturecraft_geom::glam::Vec3::new(point[0], point[1], point[2])).collect();
+    Ok(texturecraft_geom::Mesh { positions, indices, ..Default::default() })
+}
+
+fn prepare_audio_for_target(mut audio: AudioSampleBuffer, target: &OutputTarget) -> Result<AudioSampleBuffer, EncoderError> {
+    if let Some(ref mapping) = target.audio_mapping {
+        audio = encodercraft_audio_dsp::apply_audio_matrix(mapping, &audio)?;
+    } else {
+        let settings = target.audio.as_ref();
+        let layout = settings.and_then(|settings| settings.layout).unwrap_or(encodercraft_core::ChannelLayout::Stereo);
+        if audio.layout != layout {
+            audio = remix_channels(&audio, layout)?;
+        }
+    }
+    let settings = target.audio.as_ref();
+    if let Some(rate) = settings.and_then(|settings| settings.sample_rate)
+        && rate != audio.sample_rate
+    {
+        audio = SincResampler::default().resample(&audio, rate)?;
+    }
+    if let Some(delay_ms) = settings.map(|s| s.delay_ms).filter(|d| *d != 0) {
+        encodercraft_audio_dsp::apply_audio_delay(&mut audio, delay_ms)?;
+    }
+    if let Some(target_lufs) = target.target_lufs {
+        normalize_loudness(&mut audio, f64::from(target_lufs), -1.0)?;
+    }
+    Ok(audio)
+}
+
+enum Mp4AudioEncoder {
+    Aac(Box<AacEncoderWrapper>),
+    Pcm24Le,
+}
+
+enum MatroskaAudioEncoder {
+    Aac(Box<AacEncoderWrapper>),
+    Opus(Box<OpusEncoder>),
+}
+
+fn audio_codec(target: &OutputTarget) -> Option<&str> {
+    target.audio.as_ref().and_then(|settings| settings.codec.as_deref())
+}
+
+fn aac_bitrate_bps(target: &OutputTarget) -> Result<u32, EncoderError> {
+    let Some(bitrate_kbps) = target.audio.as_ref().and_then(|settings| settings.bitrate_kbps) else {
+        return Ok(192_000);
+    };
+    let bitrate = bitrate_kbps
+        .checked_mul(1_000)
+        .filter(|bitrate| *bitrate > 0)
+        .ok_or_else(|| EncoderError::InvalidJobSpec(format!("invalid AAC audio bitrate: {bitrate_kbps} kbps")))?;
+    Ok(bitrate)
+}
+
+fn encode_pcm_s24le(audio: &AudioSampleBuffer) -> Result<Vec<u8>, EncoderError> {
+    let sample_count = audio
+        .channel_count()
+        .checked_mul(audio.samples_per_channel())
+        .and_then(|count| count.checked_mul(3))
+        .ok_or_else(|| EncoderError::Internal("overflow calculating PCM24 output size".into()))?;
+    let mut output = Vec::with_capacity(sample_count);
+    for sample_index in 0..audio.samples_per_channel() {
+        for channel in 0..audio.channel_count() {
+            let sample = audio
+                .channel(channel)?
+                .get(sample_index)
+                .copied()
+                .ok_or_else(|| EncoderError::InvalidJobSpec("audio channels have inconsistent sample counts".into()))?;
+            let sample = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
+            let quantized = (sample * 8_388_608.0).round().clamp(-8_388_608.0, 8_388_607.0) as i32;
+            let [least, middle, most, _] = quantized.to_le_bytes();
+            output.extend_from_slice(&[least, middle, most]);
+        }
+    }
+    Ok(output)
+}
+
+fn opus_bitrate_bps(target: &OutputTarget, channels: usize) -> Result<u32, EncoderError> {
+    let bitrate_kbps = target.audio.as_ref().and_then(|settings| settings.bitrate_kbps).unwrap_or(128);
+    let bitrate =
+        bitrate_kbps.checked_mul(1_000).ok_or_else(|| EncoderError::InvalidJobSpec(format!("invalid Opus audio bitrate: {bitrate_kbps} kbps")))?;
+    let channels = u32::try_from(channels).map_err(|_| EncoderError::InvalidJobSpec("Opus channel count exceeds the encoder limit".into()))?;
+    if !matches!(channels, 1 | 2) || bitrate < 6_000u32.saturating_mul(channels) || bitrate > 510_000 {
+        return Err(EncoderError::InvalidJobSpec(format!("Opus bitrate {bitrate} bps is outside the supported range for {channels} channels")));
+    }
+    Ok(bitrate)
+}
+
+fn encode_opus_buffer(encoder: &mut OpusEncoder, audio: &AudioSampleBuffer, pending: &mut Vec<f32>) -> Result<Vec<Vec<u8>>, EncoderError> {
+    let channels = audio.channel_count();
+    let frame_len =
+        OpusEncoder::FRAME_SIZE.checked_mul(channels).ok_or_else(|| EncoderError::Internal("overflow calculating Opus frame size".into()))?;
+    let mut packets = Vec::new();
+    for sample_index in 0..audio.samples_per_channel() {
+        for channel in 0..channels {
+            let sample = audio
+                .channel(channel)?
+                .get(sample_index)
+                .copied()
+                .ok_or_else(|| EncoderError::InvalidJobSpec("audio channels have inconsistent sample counts".into()))?;
+            pending.push(if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 });
+        }
+        if pending.len() == frame_len {
+            packets.push(encoder.encode_float(pending));
+            pending.clear();
+        }
+    }
+    Ok(packets)
+}
+
+fn samples_to_micros(samples: u64) -> Result<i64, EncoderError> {
+    let micros =
+        u128::from(samples).checked_mul(1_000_000).ok_or_else(|| EncoderError::Internal("overflow calculating Opus timestamp".into()))? / 48_000;
+    i64::try_from(micros).map_err(|_| EncoderError::InvalidJobSpec("Opus timestamp exceeds the container limit".into()))
 }
 
 impl TranscodePipeline {
     /// Creates a new pipeline for the specified job specification.
     pub fn new(spec: CraftJobSpec) -> Self {
+        Self::with_limits(spec, PipelineLimits::default())
+    }
+
+    /// Creates a pipeline whose queues and whole-track audio stay within `limits`.
+    pub fn with_limits(spec: CraftJobSpec, limits: PipelineLimits) -> Self {
         let progress = Arc::new(JobProgress::new(100));
-        Self { spec, progress }
+        Self { spec, progress, limits, stats: Mutex::new(None), video_encoder_factory: None }
+    }
+
+    /// Configures a custom video encoder factory for external codec providers.
+    pub fn with_video_encoder_factory(mut self, factory: VideoEncoderFactory) -> Self {
+        self.video_encoder_factory = Some(factory);
+        self
+    }
+
+    fn create_video_encoder(
+        &self,
+        target: &OutputTarget,
+        codec_kind: VideoCodecKind,
+        dims: Dimensions,
+        fps: Rational64,
+        params: &EncodeParams,
+    ) -> Result<Box<dyn VideoEncoder + Send>, EncoderError> {
+        if let Some(factory) = &self.video_encoder_factory
+            && let Some(encoder) = factory(target, dims.width, dims.height, fps, params)?
+        {
+            return Ok(encoder);
+        }
+        let codec_kind = resolve_codec(target, codec_kind)?;
+        create_video_encoder_with(codec_kind, dims.width, dims.height, fps, params)
+    }
+
+    /// Queue depth and peak frames in flight of the last video stream this pipeline ran.
+    pub fn last_stream_stats(&self) -> Option<StreamStats> {
+        *self.stats.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn frame_processor(&self, target: &OutputTarget, fps: Rational64) -> Result<FrameProcessor, EncoderError> {
+        let lut = match &target.lut_path {
+            Some(path) => {
+                let content = std::fs::read_to_string(path).map_err(|e| EncoderError::Io(format!("failed to read LUT file: {e}")))?;
+                Some(crate::lut::Lut3D::parse_auto(&content)?)
+            }
+            None => None,
+        };
+        let timecode = if let Some(tc_cfg) = &target.timecode_overlay {
+            if tc_cfg.enabled {
+                Some(crate::overlay::TimecodeOverlay {
+                    position: tc_cfg.anchor.into(),
+                    scale: tc_cfg.scale.clamp(1, 5),
+                    text_opacity: tc_cfg.text_opacity.clamp(0.0, 1.0),
+                    bg_opacity: tc_cfg.bg_opacity.clamp(0.0, 1.0),
+                    margin: 20,
+                })
+            } else if target.burn_timecode {
+                Some(crate::overlay::TimecodeOverlay::default())
+            } else {
+                None
+            }
+        } else if target.burn_timecode {
+            Some(crate::overlay::TimecodeOverlay::default())
+        } else {
+            None
+        };
+
+        let watermark = if let Some(wm_cfg) = &target.watermark
+            && wm_cfg.enabled
+            && let Some(wm_path) = &wm_cfg.path
+        {
+            match encodercraft_source::MediaReader::open(wm_path).and_then(|r| r.frame_at_index(0)) {
+                Ok(frame) => match frame.plane(0) {
+                    Ok((data, _)) => Some(crate::overlay::WatermarkOverlay::new(
+                        data.to_vec(),
+                        frame.dimensions.width as usize,
+                        frame.dimensions.height as usize,
+                        wm_cfg.anchor.into(),
+                        wm_cfg.opacity,
+                    )),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        let name_overlay = if let Some(name_cfg) = &target.name_overlay
+            && name_cfg.enabled
+        {
+            let src_name = match &self.spec.source {
+                SourceDescriptor::File { path, .. } => path.file_stem().and_then(|s| s.to_str()).unwrap_or("source"),
+                _ => "source",
+            };
+            let formatted_text = if name_cfg.use_source_name {
+                format!("{}{}{}", name_cfg.prefix, src_name, name_cfg.suffix)
+            } else {
+                format!("{}{}", name_cfg.prefix, name_cfg.suffix)
+            };
+            Some((name_cfg.clone(), formatted_text))
+        } else {
+            None
+        };
+
+        let captions = match (target.burn_captions, &target.caption_path) {
+            (true, Some(path)) => Some((crate::captions::CaptionBurner::default(), crate::captions::CaptionTrack::from_file(path)?)),
+            _ => None,
+        };
+        Ok(FrameProcessor {
+            scaler: FrameScaler::with_filter(target.transform.scale_mode, target.transform.scaling_filter),
+            color: ColorTransform::new(target.video.color),
+            lut,
+            timecode,
+            watermark,
+            name_overlay,
+            video_limiter: target.video_limiter.clone(),
+            sdr_conform: target.sdr_conform.clone(),
+            crop: target.crop,
+            captions,
+            fps,
+        })
+    }
+
+    /// Streams the input through decode, convert and `sink` (encode and mux) with bounded memory.
+    fn stream_video<K>(&self, input: &VideoInput, processor: &FrameProcessor, start_time: Instant, sink: K) -> Result<(), EncoderError>
+    where
+        K: FnMut(u64, &mut VideoFrame) -> Result<(), EncoderError>,
+    {
+        let dims = input.dims();
+        let out_bytes = (dims.width as usize).saturating_mul(dims.height as usize).saturating_mul(4);
+        let spec = StreamSpec {
+            count: input.len(),
+            frame_bytes: input.source_frame_bytes().max(out_bytes),
+            limits: self.limits,
+            progress: &self.progress,
+            start_time,
+        };
+        let stats = run_stages(
+            &spec,
+            dims,
+            |i| {
+                let mut frame = input.frame(i)?;
+                processor.color.apply(&mut frame)?;
+                Ok(frame)
+            },
+            |i, src, out| processor.apply(i, src, out),
+            sink,
+        )?;
+        *self.stats.lock().unwrap_or_else(PoisonError::into_inner) = Some(stats);
+        Ok(())
     }
 
     /// Access the shared job progress reporter.
@@ -45,8 +371,20 @@ impl TranscodePipeline {
             return Err(EncoderError::InvalidJobSpec("job contains no output targets".into()));
         }
 
-        for target in &self.spec.targets {
-            self.execute_target(target, start_time)?;
+        let _pipe_stream = PipeStreamGuard::new(&self.spec.source);
+        let count = self.spec.targets.len();
+        self.progress.set_target_count(count as u64);
+        for (index, target) in self.spec.targets.iter().enumerate() {
+            self.progress.begin_target_at(index as u64, start_time);
+            self.execute_target(target, start_time).map_err(|e| match e {
+                EncoderError::Cancelled => e,
+                other => EncoderError::Internal(format!(
+                    "target {} of {count} ('{}' -> {}) failed: {other}",
+                    index + 1,
+                    target.preset_name,
+                    target.output_path.display()
+                )),
+            })?;
         }
 
         Ok(())
@@ -73,35 +411,102 @@ impl TranscodePipeline {
             std::fs::write(&sidecar_path, xmp_packet.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write sidecar XMP: {e}")))?;
         }
 
+        // Parity with AME: If container supports video or audio, at least one stream must be enabled
+        if (target.container.supports_video() || target.container.supports_audio()) && !target.is_video_enabled() && !target.is_audio_enabled() {
+            return Err(EncoderError::InvalidJobSpec(
+                "Cannot export target: both 'Export Video' and 'Export Audio' are disabled. At least one stream must be enabled.".into(),
+            ));
+        }
+
         match target.container {
             ContainerType::Wave => self.execute_audio_wav(target, start_time)?,
             ContainerType::Flac => self.execute_audio_flac(target, start_time)?,
             ContainerType::Aiff => self.execute_audio_aiff(target, start_time)?,
-            ContainerType::OggAudio | ContainerType::Mp3 => self.execute_audio_flac(target, start_time)?,
+            ContainerType::Mp3 => self.execute_audio_mp3(target, start_time)?,
+            ContainerType::OggAudio => self.execute_audio_ogg(target, start_time)?,
+            ContainerType::Caf => self.execute_audio_caf(target, start_time)?,
+            ContainerType::Opus => self.execute_audio_opus(target, start_time)?,
             ContainerType::IsoBmffMp4 => self.execute_video_mp4(target, false, start_time)?,
             ContainerType::QuickTimeMov => self.execute_video_mp4(target, true, start_time)?,
             ContainerType::MxfOp1a => self.execute_video_mxf(target, false, start_time)?,
             ContainerType::MxfOpAtom => self.execute_video_mxf(target, true, start_time)?,
             ContainerType::MatroskaMkv => self.execute_video_mkv(target, false, start_time)?,
             ContainerType::WebM => self.execute_video_mkv(target, true, start_time)?,
-            ContainerType::AnimatedGif => self.execute_animated_gif(target, start_time)?,
-            ContainerType::Svg => self.execute_vector_svg(target, start_time)?,
-            ContainerType::Pdf | ContainerType::Docx | ContainerType::Idml => self.execute_document_pdf(target, start_time)?,
-            ContainerType::Gltf | ContainerType::Usdz | ContainerType::Obj | ContainerType::Stl | ContainerType::Ply => {
-                self.execute_spatial_3d(target, start_time)?
+            ContainerType::MpegTs => self.execute_video_ts(target, start_time)?,
+            ContainerType::AnimatedGif => {
+                let is_still = match &self.spec.source {
+                    SourceDescriptor::File { path, .. } => {
+                        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+                        encodercraft_source::is_still_extension(&ext) && !encodercraft_source::is_sequence_pattern(path)
+                    }
+                    _ => false,
+                };
+                if is_still || FrameNaming::parse(&target.output_path).is_some() {
+                    self.execute_image_transcode(target, start_time)?
+                } else {
+                    self.execute_animated_gif(target, start_time)?
+                }
             }
-            ContainerType::Png
-            | ContainerType::Jpeg
+            ContainerType::Svg
+            | ContainerType::PostScriptEps
+            | ContainerType::AdobeIllustratorAi
+            | ContainerType::ArtcraftVectorcraft
+            | ContainerType::WindowsMetafile => self.execute_vector_transcode(target, start_time)?,
+            ContainerType::Pdf | ContainerType::Docx | ContainerType::Markdown | ContainerType::Html => {
+                self.execute_document_pdf(target, start_time)?
+            }
+            ContainerType::Idml
+            | ContainerType::AdobeInDesignIndd
+            | ContainerType::ArtcraftDesigncraft
+            | ContainerType::Epub
+            | ContainerType::Pptx => self.execute_document_publication(target, start_time)?,
+            ContainerType::Gltf
+            | ContainerType::Usdz
+            | ContainerType::Usdc
+            | ContainerType::Obj
+            | ContainerType::Stl
+            | ContainerType::Ply
+            | ContainerType::Fbx
+            | ContainerType::Alembic
+            | ContainerType::Collada
+            | ContainerType::Splat
+            | ContainerType::Step => self.execute_spatial_3d(target, start_time)?,
+            ContainerType::Png => self.execute_pdf_or_image_transcode(target, start_time)?,
+            ContainerType::Jpeg
             | ContainerType::WebP
             | ContainerType::Tiff
             | ContainerType::OpenExr
             | ContainerType::Bmp
+            | ContainerType::Dds
+            | ContainerType::Dpx
+            | ContainerType::Jxl
+            | ContainerType::RadianceHdr
+            | ContainerType::Dicom
+            | ContainerType::Fits
             | ContainerType::StillSequence => self.execute_image_transcode(target, start_time)?,
+            ContainerType::AdobePhotoshopPsd | ContainerType::AdobePhotoshopPsb | ContainerType::ArtcraftPhotocraft => {
+                self.execute_layered_image(target, start_time)?
+            }
+            ContainerType::AutocadDxf | ContainerType::AutocadDwg | ContainerType::HpglPlotter | ContainerType::ArtcraftCadcraft => {
+                self.execute_cad_transcode(target, start_time)?
+            }
+            ContainerType::AdobeAfterEffectsAep | ContainerType::ArtcraftEffectcraft => self.execute_motion_project(target, start_time)?,
+            ContainerType::LottieJson => {
+                if self.is_vector_source() {
+                    self.execute_vector_transcode(target, start_time)?
+                } else {
+                    self.execute_motion_project(target, start_time)?
+                }
+            }
+            ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_timeline_project(target, start_time)?,
+            ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => self.execute_daw_session(target, start_time)?,
+            ContainerType::ArtcraftAnicraft => self.execute_image_transcode(target, start_time)?,
         }
 
-        // Export multichannel audio stems if configured
+        // Export multichannel audio stems if configured (for non-DAW sources; DAW sessions export stems directly in execute_daw_session)
         if let Some(mode) = target.audio_stems
             && mode != encodercraft_core::AudioStemMode::None
+            && !self.is_daw_source()
         {
             self.export_audio_stems(target, mode)?;
         }
@@ -109,192 +514,164 @@ impl TranscodePipeline {
         Ok(())
     }
 
-    fn load_source_audio(&self) -> Result<AudioSampleBuffer, EncoderError> {
-        if let SourceDescriptor::File { path, .. } = &self.spec.source
-            && path.exists()
-        {
-            let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source audio file `{}`: {e}", path.display())))?;
-            if let Ok(decoded) = encodercraft_audio_dsp::decode_audio(&bytes) {
-                return Ok(decoded);
-            }
-            if filmcraft_mxf::sniff(&bytes)
-                && let Ok(mxf) = filmcraft_mxf::open(bytes.as_slice())
-            {
-                for track in &mxf.tracks {
-                    if track.kind == filmcraft_mxf::TrackKind::Sound
-                        && let Some(snd) = &track.sound
-                    {
-                        let mut pcm_bytes = Vec::new();
-                        for chunk in &track.chunks {
-                            let start = usize::try_from(chunk.offset).unwrap_or(bytes.len());
-                            let end = start.saturating_add(usize::try_from(chunk.size).unwrap_or(0)).min(bytes.len());
-                            if let Some(slice) = bytes.get(start..end) {
-                                pcm_bytes.extend_from_slice(slice);
-                            }
-                        }
-                        if !pcm_bytes.is_empty()
-                            && let Ok(planes) =
-                                filmcraft_mxf::decode_pcm(&pcm_bytes, track.sound_format, snd.channels as usize, snd.bits, snd.frame_bytes())
-                        {
-                            let sr = if snd.sample_rate.den > 0 {
-                                u32::try_from((snd.sample_rate.num / snd.sample_rate.den).max(8000)).unwrap_or(48_000)
-                            } else {
-                                48_000
-                            };
-                            let layout = match planes.len() {
-                                1 => encodercraft_core::ChannelLayout::Mono,
-                                2 => encodercraft_core::ChannelLayout::Stereo,
-                                6 => encodercraft_core::ChannelLayout::Surround51,
-                                8 => encodercraft_core::ChannelLayout::Surround71,
-                                _ => encodercraft_core::ChannelLayout::Stereo,
-                            };
-                            if let Ok(buf) = AudioSampleBuffer::from_planar_channels(sr, layout, 0, planes) {
-                                return Ok(buf);
-                            }
-                        }
+    fn is_daw_source(&self) -> bool {
+        match &self.spec.source {
+            SourceDescriptor::File { path, .. } => {
+                if let Some(ext) = path.extension().and_then(|s| s.to_str())
+                    && (ext.eq_ignore_ascii_case("sesx") || ext.eq_ignore_ascii_case("soundcraft"))
+                {
+                    return true;
+                }
+
+                let mut head = Vec::with_capacity(512);
+                if let Ok(file) = File::open(path)
+                    && std::io::Read::read_to_end(&mut std::io::Read::take(file, 512), &mut head).is_ok()
+                {
+                    if head.starts_with(b"\x89CRAFT\x00\x01S") {
+                        return true;
+                    }
+                    let text = String::from_utf8_lossy(&head);
+                    if text.contains("<sesx") || text.contains("<session") {
+                        return true;
                     }
                 }
+                false
             }
+            _ => false,
         }
-        let sample_rate = 48000;
-        AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)
     }
 
-    fn load_source_video_frames(&self, fallback_dims: Dimensions, fallback_fps: Rational64) -> Result<Vec<VideoFrame>, EncoderError> {
-        let mut start_frame = 0usize;
-        let mut max_frames: Option<usize> = None;
-
-        if let SourceDescriptor::File { path, start_tick, duration_ticks, timebase } = &self.spec.source {
-            let fps_val = fallback_fps.as_f64().max(1.0);
-            if let Some(st) = start_tick
-                && *st > 0
-            {
-                if let Some(tb) = timebase
-                    && tb.as_f64() > 0.0
-                {
-                    start_frame = ((*st as f64 / tb.as_f64()) * fps_val).floor().max(0.0) as usize;
+    fn is_vector_source(&self) -> bool {
+        match &self.spec.source {
+            SourceDescriptor::File { path, .. } => {
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    matches!(ext.to_ascii_lowercase().as_str(), "vectorcraft" | "svg" | "ai" | "eps" | "wmf")
                 } else {
-                    start_frame = usize::try_from(*st).unwrap_or(0);
+                    false
                 }
             }
-            if let Some(dt) = duration_ticks
-                && *dt > 0
-            {
-                if let Some(tb) = timebase
-                    && tb.as_f64() > 0.0
-                {
-                    max_frames = Some(((*dt as f64 / tb.as_f64()) * fps_val).ceil().max(1.0) as usize);
-                } else {
-                    max_frames = Some(usize::try_from(*dt).unwrap_or(24).max(1));
-                }
-            }
-
-            if path.exists()
-                && let Ok(bytes) = std::fs::read(path)
-            {
-                let decoded_frames = Self::decode_container_video_frames(&bytes, start_frame, max_frames, fallback_fps);
-                if !decoded_frames.is_empty() {
-                    return Ok(decoded_frames);
-                }
-            }
+            _ => false,
         }
-
-        let count = max_frames.unwrap_or(24).clamp(1, 3600);
-        let mut synthetic = Vec::with_capacity(count);
-        for f in 0..count {
-            let frame = VideoFrame::new_allocated(fallback_dims, PixelFormat::Rgb8, ColorSpaceTag::SRGB, (start_frame + f) as i64, 1, fallback_fps)?;
-            synthetic.push(frame);
-        }
-        Ok(synthetic)
     }
 
-    fn decode_container_video_frames(bytes: &[u8], start_frame: usize, max_frames: Option<usize>, fallback_fps: Rational64) -> Vec<VideoFrame> {
-        let mut decoded_frames = Vec::new();
-        let mut vp8_dec: Option<Vp8DecoderWrapper> = None;
+    fn load_source_audio(&self, target: &OutputTarget) -> Result<AudioSampleBuffer, EncoderError> {
+        load_audio_required(&self.spec.source, target)
+    }
 
-        if bytes.starts_with(b"BM") {
-            if let Ok(frame) = encodercraft_image_codecs::decode_bmp(bytes) {
-                decoded_frames.push(frame);
+    fn execute_pdf_or_image_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let is_pdf = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let mut file = File::open(path).map_err(|error| EncoderError::Io(format!("failed to open source `{}`: {error}", path.display())))?;
+                let mut header = [0u8; 5];
+                let read =
+                    file.read(&mut header).map_err(|error| EncoderError::Io(format!("failed to inspect source `{}`: {error}", path.display())))?;
+                header.get(..read) == Some(b"%PDF-".as_slice())
             }
-        } else if filmcraft_mxf::sniff(bytes) {
-            if let Ok(mxf) = filmcraft_mxf::open(bytes) {
-                for track in &mxf.tracks {
-                    if track.kind == filmcraft_mxf::TrackKind::Picture {
-                        for (idx, sample) in track.samples.iter().enumerate() {
-                            if idx < start_frame {
-                                continue;
-                            }
-                            if let Some(limit) = max_frames
-                                && decoded_frames.len() >= limit
-                            {
-                                break;
-                            }
-                            let start = usize::try_from(sample.offset).unwrap_or(bytes.len());
-                            let end = start.saturating_add(sample.size as usize).min(bytes.len());
-                            if let Some(pkt) = bytes.get(start..end)
-                                && let Ok(Some(vf)) = decode_video_packet_auto(pkt, sample.pts, fallback_fps, &mut vp8_dec)
-                            {
-                                decoded_frames.push(vf);
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
-            if let Ok(mkv) = craft_media::matroska::open(bytes)
-                && let Some(v_track_idx) = mkv.track_of_kind(craft_media::matroska::TrackKind::Video)
-                && let Some(track) = mkv.tracks.get(v_track_idx)
-            {
-                for (idx, sample) in track.samples.iter().enumerate() {
-                    if idx < start_frame {
-                        continue;
-                    }
-                    if let Some(limit) = max_frames
-                        && decoded_frames.len() >= limit
-                    {
-                        break;
-                    }
-                    if let Ok(pkt) = mkv.read_sample(&bytes, v_track_idx, idx)
-                        && let Ok(Some(vf)) = decode_video_packet_auto(&pkt, sample.pts, fallback_fps, &mut vp8_dec)
-                    {
-                        decoded_frames.push(vf);
-                    }
-                }
-            }
-        } else if let Ok(mp4) = craft_media::isobmff::open(bytes) {
-            for (t_idx, track) in mp4.tracks.iter().enumerate() {
-                if track.kind == craft_media::isobmff::TrackKind::Video {
-                    for (idx, sample) in track.samples.iter().enumerate() {
-                        if idx < start_frame {
-                            continue;
-                        }
-                        if let Some(limit) = max_frames
-                            && decoded_frames.len() >= limit
-                        {
-                            break;
-                        }
-                        if let Ok(pkt) = mp4.read_sample(&bytes, t_idx, idx)
-                            && let Ok(Some(vf)) = decode_video_packet_auto(&pkt, sample.pts, fallback_fps, &mut vp8_dec)
-                        {
-                            decoded_frames.push(vf);
-                        }
-                    }
-                    break;
-                }
-            }
+            _ => false,
+        };
+        if is_pdf { self.execute_pdf_png_sequence(target, start_time) } else { self.execute_image_transcode(target, start_time) }
+    }
+
+    fn execute_pdf_png_sequence(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
+        const MAX_PDF_PAGES: usize = 10_000;
+        let path = match &self.spec.source {
+            SourceDescriptor::File { path, .. } => path,
+            _ => return Err(EncoderError::InvalidJobSpec("PDF raster export requires a file source".into())),
+        };
+        let bytes = std::fs::read(path).map_err(|error| EncoderError::Io(format!("failed to read PDF `{}`: {error}", path.display())))?;
+        if bytes.len() > MAX_PDF_BYTES {
+            return Err(EncoderError::InvalidContainer(format!("PDF exceeds the {MAX_PDF_BYTES}-byte raster limit")));
         }
-        decoded_frames
+        if !bytes.starts_with(b"%PDF-") {
+            return Err(EncoderError::InvalidContainer("not a PDF file".into()));
+        }
+        let pdf = Pdf::new(bytes).map_err(|error| EncoderError::InvalidContainer(format!("failed to open PDF for rasterization: {error:?}")))?;
+        let pages = pdf.pages();
+        let page_count = pages.len();
+        if page_count == 0 {
+            return Err(EncoderError::InvalidContainer("PDF contains no pages".into()));
+        }
+        if page_count > MAX_PDF_PAGES {
+            return Err(EncoderError::InvalidContainer(format!("PDF exceeds the {MAX_PDF_PAGES}-page raster limit")));
+        }
+        let (first_page, last_page) = match target.selection.pages {
+            Some((first, last)) if first > 0 && last >= first && first as usize <= page_count => (first as usize, (last as usize).min(page_count)),
+            Some((first, last)) => return Err(EncoderError::InvalidJobSpec(format!("invalid PDF page range {first}-{last} for {page_count} pages"))),
+            None => (1, page_count),
+        };
+        let selected_page_count = last_page - first_page + 1;
+        let total_frames = u64::try_from(selected_page_count)
+            .map_err(|_| EncoderError::InvalidJobSpec("PDF page count exceeds the progress counter range".into()))?;
+        self.progress.set_total_frames(total_frames);
+
+        for page_number in first_page..=last_page {
+            const MAX_RENDER_SIDE: f32 = 8192.0;
+            const MAX_RENDER_PIXELS: u64 = 32_000_000;
+            let page = pages.get(page_number - 1).ok_or_else(|| EncoderError::InvalidContainer(format!("PDF page {page_number} is unavailable")))?;
+            let scale = 300.0 / 72.0;
+            let (page_width, page_height) = page.render_dimensions();
+            let width_px = page_width * scale;
+            let height_px = page_height * scale;
+            if !width_px.is_finite()
+                || !height_px.is_finite()
+                || width_px <= 0.0
+                || height_px <= 0.0
+                || width_px > MAX_RENDER_SIDE
+                || height_px > MAX_RENDER_SIDE
+            {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} exceeds the 300-DPI raster dimension limit")));
+            }
+            let pixel_count = (width_px.ceil() as u64)
+                .checked_mul(height_px.ceil() as u64)
+                .ok_or_else(|| EncoderError::InvalidContainer(format!("PDF page {page_number} raster size overflowed")))?;
+            if pixel_count > MAX_RENDER_PIXELS {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} exceeds the {MAX_RENDER_PIXELS}-pixel raster limit")));
+            }
+            let cache = RenderCache::new();
+            let rendered = render(
+                page,
+                &cache,
+                &InterpreterSettings::default(),
+                &RenderSettings { x_scale: scale, y_scale: scale, ..RenderSettings::default() },
+            );
+            let width = u32::from(rendered.width());
+            let height = u32::from(rendered.height());
+            if width == 0 || height == 0 {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} produced an empty raster")));
+            }
+            let expected_bytes = usize::try_from(width)
+                .ok()
+                .and_then(|width| usize::try_from(height).ok().and_then(|height| width.checked_mul(height)))
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| EncoderError::InvalidContainer(format!("PDF page {page_number} raster buffer size overflowed")))?;
+            if rendered.data_as_u8_slice().len() != expected_bytes {
+                return Err(EncoderError::InvalidContainer(format!("PDF page {page_number} renderer returned an invalid RGBA buffer")));
+            }
+            let mut png_bytes = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut png_bytes)
+                .write_image(rendered.data_as_u8_slice(), width, height, image::ExtendedColorType::Rgba8)
+                .map_err(|error| EncoderError::InvalidContainer(format!("failed to encode PDF page {page_number} as PNG: {error}")))?;
+            let output_path = pdf_page_output_path(&target.output_path, page_number, selected_page_count)?;
+            if let Some(parent) = output_path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| EncoderError::Io(format!("failed to create output directory `{}`: {error}", parent.display())))?;
+            }
+            std::fs::write(&output_path, png_bytes)
+                .map_err(|error| EncoderError::Io(format!("failed to write PDF page PNG `{}`: {error}", output_path.display())))?;
+            self.progress.advance_frame(start_time);
+        }
+        Ok(())
     }
 
     fn execute_audio_flac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let mut sample_buf = self.load_source_audio()?;
-
-        sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
-
-        if let Some(target_lufs) = target.target_lufs {
-            let _ = normalize_loudness(&mut sample_buf, target_lufs as f64, -1.0)?;
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
         }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
 
         let flac_bytes = encodercraft_audio_dsp::encode_audio_flac(&sample_buf)?;
         std::fs::write(&target.output_path, flac_bytes).map_err(|e| EncoderError::Io(format!("failed to write FLAC file: {e}")))?;
@@ -306,13 +683,11 @@ impl TranscodePipeline {
     }
 
     fn execute_audio_aiff(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let mut sample_buf = self.load_source_audio()?;
-
-        sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
-
-        if let Some(target_lufs) = target.target_lufs {
-            let _ = normalize_loudness(&mut sample_buf, target_lufs as f64, -1.0)?;
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
         }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
 
         let aiff_bytes = encodercraft_audio_dsp::encode_audio_aiff(&sample_buf)?;
         std::fs::write(&target.output_path, aiff_bytes).map_err(|e| EncoderError::Io(format!("failed to write AIFF file: {e}")))?;
@@ -323,7 +698,76 @@ impl TranscodePipeline {
         Ok(())
     }
 
+    fn execute_audio_mp3(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let bitrate_kbps = target.audio.as_ref().and_then(|a| a.bitrate_kbps).unwrap_or(192);
+
+        let mp3_bytes = encodercraft_audio_dsp::encode_audio_mp3(&sample_buf, bitrate_kbps, target.metadata.as_ref())?;
+        std::fs::write(&target.output_path, mp3_bytes).map_err(|e| EncoderError::Io(format!("failed to write MP3 file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
+    }
+
+    fn execute_audio_ogg(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+
+        let ogg_bytes = encodercraft_audio_dsp::encode_audio_ogg_vorbis(&sample_buf, 0.7)?;
+        std::fs::write(&target.output_path, ogg_bytes).map_err(|e| EncoderError::Io(format!("failed to write Ogg Vorbis file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
+    }
+
+    fn execute_audio_caf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let caf_bytes = encodercraft_audio_dsp::encode_audio_caf(&sample_buf)?;
+        std::fs::write(&target.output_path, caf_bytes).map_err(|e| EncoderError::Io(format!("failed to write CAF file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
+    }
+
+    fn execute_audio_opus(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let bitrate_kbps = target.audio.as_ref().and_then(|a| a.bitrate_kbps).unwrap_or(128);
+
+        let opus_bytes = encodercraft_audio_dsp::encode_audio_opus(&sample_buf, bitrate_kbps, target.metadata.as_ref())?;
+        std::fs::write(&target.output_path, opus_bytes).map_err(|e| EncoderError::Io(format!("failed to write Opus file: {e}")))?;
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+
+        Ok(())
+    }
+
     fn execute_audio_wav(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+
         let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
         let writer = BufWriter::new(out_file);
 
@@ -333,20 +777,17 @@ impl TranscodePipeline {
             ..Default::default()
         };
 
-        let mut sample_buf = self.load_source_audio()?;
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
         let sample_rate = sample_buf.sample_rate;
         let xmp_xml = target.metadata.as_ref().map(|m| m.to_xmp_packet());
-        let mut wav_writer = BwfWavWriter::new_with_xmp(writer, sample_rate, 2, WavFormatTag::Pcm16, Some(&bext), xmp_xml.as_deref())?;
-
-        // 1. Remix channels if needed
-        sample_buf = remix_channels(&sample_buf, encodercraft_core::ChannelLayout::Stereo)?;
-
-        // 2. Loudness normalization if specified
-        if let Some(target_lufs) = target.target_lufs {
-            let _ = normalize_loudness(&mut sample_buf, target_lufs as f64, -1.0)?;
-        }
-
-        // 3. Write buffer
+        let format = match target.audio.as_ref().and_then(|audio| audio.codec.as_deref()) {
+            Some("pcm_s24le" | "pcm_s24be") => WavFormatTag::Pcm24,
+            Some("pcm_f32le" | "pcm_f32be") => WavFormatTag::IeeeFloat32,
+            _ => WavFormatTag::Pcm16,
+        };
+        let channels = u16::try_from(sample_buf.channel_count())
+            .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the WAV format limit".into()))?;
+        let mut wav_writer = BwfWavWriter::new_with_xmp(writer, sample_rate, channels, format, Some(&bext), xmp_xml.as_deref())?;
         wav_writer.write_buffer(&sample_buf)?;
         wav_writer.finish()?;
 
@@ -356,32 +797,264 @@ impl TranscodePipeline {
         Ok(())
     }
 
-    fn execute_vector_svg(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let content = match &self.spec.source {
+    fn execute_vector_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        // Direct SVG passthrough and CAD-to-SVG specialization
+        if target.container == ContainerType::Svg
+            && let SourceDescriptor::File { path, .. } = &self.spec.source
+            && let Ok(bytes) = std::fs::read(path)
+        {
+            if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                let svg = cad.to_svg();
+                std::fs::write(&target.output_path, svg.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+                self.progress.advance_frame(start_time);
+                self.progress.set_total_frames(1);
+                return Ok(());
+            } else if let Ok(text) = std::str::from_utf8(&bytes)
+                && text.contains("<svg")
+            {
+                std::fs::write(&target.output_path, text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+                self.progress.advance_frame(start_time);
+                self.progress.set_total_frames(1);
+                return Ok(());
+            }
+        }
+
+        let mut canvas = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
-                let bytes = std::fs::read(path)
-                    .map_err(|e| EncoderError::Io(format!("failed to read source vector file `{}`: {e}", path.display())))?;
-                if let Ok(text) = std::str::from_utf8(&bytes) {
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source vector file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"\x89CRAFT\x00\x01V") {
+                    encodercraft_image_codecs::VectorCanvas::from_vectorcraft(&bytes)
+                        .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse .vectorcraft: {e}")))?
+                } else if bytes.starts_with(b"%PDF-") || bytes.starts_with(b"%AI") || bytes.windows(26).any(|w| w == b"Creator: Adobe Illustrator") {
+                    encodercraft_image_codecs::VectorCanvas::from_ai_or_pdf(&bytes)
+                        .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse Illustrator AI / PDF: {e}")))?
+                } else if bytes.starts_with(b"%!PS") {
+                    let text = String::from_utf8_lossy(&bytes);
+                    encodercraft_image_codecs::VectorCanvas::from_eps(&text)
+                        .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse EPS: {e}")))?
+                } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                    let (min_x, min_y, max_x, max_y) = cad.bounding_box();
+                    let w = if (max_x - min_x).is_finite() && (max_x - min_x) > 0.0 { max_x - min_x } else { 800.0 };
+                    let h = if (max_y - min_y).is_finite() && (max_y - min_y) > 0.0 { max_y - min_y } else { 600.0 };
+                    let mut c = encodercraft_image_codecs::VectorCanvas::new(w, h);
+                    for ent in &cad.entities {
+                        match ent {
+                            encodercraft_spatial_io::CadEntity::Line { start, end, .. } => {
+                                let mut path = encodercraft_image_codecs::VectorPath::new()
+                                    .with_stroke(encodercraft_image_codecs::VectorStroke::new(encodercraft_image_codecs::VectorColor::BLACK, 1.0));
+                                path.move_to(start.x, start.y);
+                                path.line_to(end.x, end.y);
+                                c.add_path(path);
+                            }
+                            encodercraft_spatial_io::CadEntity::Polyline { points, closed, .. } => {
+                                let mut path = encodercraft_image_codecs::VectorPath::new()
+                                    .with_stroke(encodercraft_image_codecs::VectorStroke::new(encodercraft_image_codecs::VectorColor::BLACK, 1.0));
+                                for (i, pt) in points.iter().enumerate() {
+                                    if i == 0 {
+                                        path.move_to(pt.x, pt.y);
+                                    } else {
+                                        path.line_to(pt.x, pt.y);
+                                    }
+                                }
+                                if *closed {
+                                    path.close();
+                                }
+                                c.add_path(path);
+                            }
+                            _ => {}
+                        }
+                    }
+                    c
+                } else if let Ok(text) = std::str::from_utf8(&bytes) {
                     if text.contains("<svg") {
-                        text.to_string()
+                        encodercraft_image_codecs::VectorCanvas::from_svg(text)
+                            .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to parse SVG: {e}")))?
                     } else {
-                        format!(
-                            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><!-- Converted from {} --><text x="50" y="100" font-family="sans-serif" font-size="24">{}</text></svg>"#,
-                            path.file_name().and_then(|n| n.to_str()).unwrap_or("vector"),
-                            quick_xml_escape(&path.display().to_string())
-                        )
+                        let mut c = encodercraft_image_codecs::VectorCanvas::new(1920.0, 1080.0);
+                        c.add_text(encodercraft_image_codecs::VectorText {
+                            text: path.file_name().and_then(|n| n.to_str()).unwrap_or("vector").to_string(),
+                            x: 50.0,
+                            y: 100.0,
+                            font_family: "sans-serif".to_string(),
+                            font_size: 24.0,
+                            fill: Some(encodercraft_image_codecs::VectorColor::BLACK),
+                            stroke: None,
+                        });
+                        c
                     }
                 } else {
-                    format!(
-                        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><!-- Converted from binary {} --></svg>"#,
-                        path.file_name().and_then(|n| n.to_str()).unwrap_or("vector")
-                    )
+                    encodercraft_image_codecs::VectorCanvas::new(1920.0, 1080.0)
                 }
             }
-            _ => r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080"><rect width="100%" height="100%" fill="#1a1a1a"/></svg>"##.to_string(),
+            _ => encodercraft_image_codecs::VectorCanvas::new(1920.0, 1080.0),
         };
 
-        std::fs::write(&target.output_path, content.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+        // Text preservation and outlines
+        canvas.text_to_outlines();
+
+        match target.container {
+            ContainerType::ArtcraftVectorcraft => {
+                let bytes = canvas.to_vectorcraft().map_err(|e| EncoderError::Io(format!("failed to serialize .vectorcraft: {e}")))?;
+                std::fs::write(&target.output_path, &bytes).map_err(|e| EncoderError::Io(format!("failed to write .vectorcraft file: {e}")))?;
+            }
+            ContainerType::AdobeIllustratorAi | ContainerType::Pdf => {
+                let ai_pdf = canvas.to_ai().map_err(|e| EncoderError::Io(format!("failed to serialize Illustrator AI/PDF: {e}")))?;
+                std::fs::write(&target.output_path, &ai_pdf).map_err(|e| EncoderError::Io(format!("failed to write Illustrator AI file: {e}")))?;
+            }
+            ContainerType::PostScriptEps => {
+                let eps = canvas.to_eps();
+                std::fs::write(&target.output_path, eps.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write EPS file: {e}")))?;
+            }
+            ContainerType::AutocadDxf => {
+                let mut cad = encodercraft_spatial_io::CadDrawing::new("VectorCraft Export");
+                for path in &canvas.paths {
+                    let mut cur_x = 0.0;
+                    let mut cur_y = 0.0;
+                    for cmd in &path.commands {
+                        match *cmd {
+                            encodercraft_image_codecs::PathCommand::MoveTo(x, y) => {
+                                cur_x = x;
+                                cur_y = y;
+                            }
+                            encodercraft_image_codecs::PathCommand::LineTo(x, y) => {
+                                cad.add_line(
+                                    encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                    encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                    "0",
+                                );
+                                cur_x = x;
+                                cur_y = y;
+                            }
+                            encodercraft_image_codecs::PathCommand::CubicTo(_, _, _, _, x, y)
+                            | encodercraft_image_codecs::PathCommand::QuadTo(_, _, x, y) => {
+                                cad.add_line(
+                                    encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                    encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                    "0",
+                                );
+                                cur_x = x;
+                                cur_y = y;
+                            }
+                            encodercraft_image_codecs::PathCommand::Close => {}
+                        }
+                    }
+                }
+                let dxf_str = cad.to_dxf_ascii();
+                std::fs::write(&target.output_path, dxf_str.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write DXF file: {e}")))?;
+            }
+            ContainerType::WindowsMetafile => {
+                let wmf = canvas.to_wmf_bytes();
+                std::fs::write(&target.output_path, &wmf).map_err(|e| EncoderError::Io(format!("failed to write WMF file: {e}")))?;
+            }
+            ContainerType::LottieJson => {
+                let lottie = canvas.to_lottie_json().map_err(|e| EncoderError::InvalidJobSpec(e.to_string()))?;
+                std::fs::write(&target.output_path, lottie.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write Lottie JSON: {e}")))?;
+            }
+            _ => {
+                // Default to standard SVG
+                let svg = canvas.to_svg();
+                std::fs::write(&target.output_path, svg.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+            }
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_cad_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let mut drawing = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source CAD file `{}`: {e}", path.display())))?;
+                if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                    cad
+                } else if let Ok(canvas) = encodercraft_image_codecs::VectorCanvas::from_svg(&String::from_utf8_lossy(&bytes))
+                    .or_else(|_| encodercraft_image_codecs::VectorCanvas::from_vectorcraft(&bytes))
+                    .or_else(|_| encodercraft_image_codecs::VectorCanvas::from_ai_or_pdf(&bytes))
+                {
+                    let mut cad = encodercraft_spatial_io::CadDrawing::new("VectorCraft CAD Export");
+                    for path in &canvas.paths {
+                        let mut cur_x = 0.0;
+                        let mut cur_y = 0.0;
+                        for cmd in &path.commands {
+                            match *cmd {
+                                encodercraft_image_codecs::PathCommand::MoveTo(x, y) => {
+                                    cur_x = x;
+                                    cur_y = y;
+                                }
+                                encodercraft_image_codecs::PathCommand::LineTo(x, y) => {
+                                    cad.add_line(
+                                        encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                        encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                        "0",
+                                    );
+                                    cur_x = x;
+                                    cur_y = y;
+                                }
+                                encodercraft_image_codecs::PathCommand::CubicTo(_, _, _, _, x, y)
+                                | encodercraft_image_codecs::PathCommand::QuadTo(_, _, x, y) => {
+                                    cad.add_line(
+                                        encodercraft_spatial_io::CadPoint3D::new(cur_x, cur_y, 0.0),
+                                        encodercraft_spatial_io::CadPoint3D::new(x, y, 0.0),
+                                        "0",
+                                    );
+                                    cur_x = x;
+                                    cur_y = y;
+                                }
+                                encodercraft_image_codecs::PathCommand::Close => {}
+                            }
+                        }
+                    }
+                    cad
+                } else {
+                    encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes)?
+                }
+            }
+            _ => {
+                let mut cad = encodercraft_spatial_io::CadDrawing::new("Default Drawing");
+                cad.add_line(
+                    encodercraft_spatial_io::CadPoint3D::new(0.0, 0.0, 0.0),
+                    encodercraft_spatial_io::CadPoint3D::new(100.0, 100.0, 0.0),
+                    "0",
+                );
+                cad
+            }
+        };
+
+        if let Some(layers) = &target.selection.layers {
+            drawing.retain_layers(layers)?;
+        }
+
+        match target.container {
+            ContainerType::AutocadDxf | ContainerType::AutocadDwg => {
+                let dxf = drawing.to_dxf_ascii();
+                std::fs::write(&target.output_path, dxf.as_bytes())
+                    .map_err(|e| EncoderError::Io(format!("failed to write CAD DXF output file: {e}")))?;
+            }
+            ContainerType::HpglPlotter => {
+                let hpgl = drawing.to_hpgl();
+                std::fs::write(&target.output_path, hpgl.as_bytes())
+                    .map_err(|e| EncoderError::Io(format!("failed to write HPGL plotter file: {e}")))?;
+            }
+            ContainerType::ArtcraftCadcraft => {
+                let bin = drawing.to_cadcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .cadcraft binary file: {e}")))?;
+            }
+            ContainerType::Svg => {
+                let svg = drawing.to_svg();
+                std::fs::write(&target.output_path, svg.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write SVG file: {e}")))?;
+            }
+            ContainerType::Pdf => {
+                let pdf = drawing.to_pdf_bytes()?;
+                std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write PDF blueprint file: {e}")))?;
+            }
+            _ => {
+                let dxf = drawing.to_dxf_ascii();
+                std::fs::write(&target.output_path, dxf.as_bytes())
+                    .map_err(|e| EncoderError::Io(format!("failed to write default CAD file: {e}")))?;
+            }
+        }
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
@@ -391,70 +1064,61 @@ impl TranscodePipeline {
     fn execute_spatial_3d(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
         let mesh = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
-                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source 3D file `{}`: {e}", path.display())))?;
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                 match ext.as_str() {
-                    "obj" => {
-                        let text = std::str::from_utf8(&bytes).map_err(|e| EncoderError::InvalidContainer(format!("invalid OBJ text: {e}")))?;
-                        encodercraft_spatial_io::parse_obj(text)?
+                    "obj" | "stl" | "ply" | "glb" | "gltf" | "usdz" | "dae" | "fbx" | "abc" | "usdc" | "usd" | "usda" => {
+                        import_texturecraft_mesh(path)?
                     }
-                    "stl" => encodercraft_spatial_io::parse_stl_binary(&bytes)?,
-                    "ply" => encodercraft_spatial_io::parse_ply_binary(&bytes)?,
-                    "glb" | "gltf" => encodercraft_spatial_io::parse_glb(&bytes)?,
-                    _ => {
-                        if bytes.starts_with(b"glTF") {
-                            encodercraft_spatial_io::parse_glb(&bytes)?
-                        } else if bytes.starts_with(b"ply\n") || bytes.starts_with(b"ply\r\n") {
-                            encodercraft_spatial_io::parse_ply_binary(&bytes)?
-                        } else if let Ok(text) = std::str::from_utf8(&bytes)
-                            && (text.starts_with("v ") || text.starts_with('#') || text.starts_with("o "))
-                        {
-                            encodercraft_spatial_io::parse_obj(text)?
-                        } else {
-                            encodercraft_spatial_io::parse_stl_binary(&bytes)?
+                    "step" | "stp" | "splat" => {
+                        let metadata = std::fs::metadata(path)
+                            .map_err(|error| EncoderError::Io(format!("failed to inspect source 3D file `{}`: {error}", path.display())))?;
+                        const MAX_SPATIAL_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
+                        if metadata.len() > MAX_SPATIAL_SOURCE_BYTES {
+                            return Err(EncoderError::InvalidContainer(format!(
+                                "source 3D file `{}` exceeds the {MAX_SPATIAL_SOURCE_BYTES}-byte limit",
+                                path.display()
+                            )));
+                        }
+                        let bytes = std::fs::read(path)
+                            .map_err(|error| EncoderError::Io(format!("failed to read source 3D file `{}`: {error}", path.display())))?;
+                        match ext.as_str() {
+                            "step" | "stp" => {
+                                let text = std::str::from_utf8(&bytes)
+                                    .map_err(|error| EncoderError::InvalidContainer(format!("invalid STEP text: {error}")))?;
+                                encodercraft_spatial_io::parse_step(text)?
+                            }
+                            "splat" => encodercraft_spatial_io::parse_splat(&bytes)?,
+                            _ => return Err(EncoderError::InvalidContainer(format!("unsupported 3D source extension: {ext}"))),
                         }
                     }
+                    _ => return Err(EncoderError::InvalidContainer(format!("unsupported 3D source extension: {ext}"))),
                 }
             }
-            _ => {
-                let mut m = encodercraft_spatial_io::TriangleMesh::new("UnitCube");
-                m.vertices = vec![
-                    [-0.5, -0.5, -0.5],
-                    [0.5, -0.5, -0.5],
-                    [0.5, 0.5, -0.5],
-                    [-0.5, 0.5, -0.5],
-                    [-0.5, -0.5, 0.5],
-                    [0.5, -0.5, 0.5],
-                    [0.5, 0.5, 0.5],
-                    [-0.5, 0.5, 0.5],
-                ];
-                m.indices = vec![
-                    [0, 1, 2],
-                    [0, 2, 3],
-                    [4, 6, 5],
-                    [4, 7, 6],
-                    [0, 4, 5],
-                    [0, 5, 1],
-                    [2, 6, 7],
-                    [2, 7, 3],
-                    [0, 3, 7],
-                    [0, 7, 4],
-                    [1, 5, 6],
-                    [1, 6, 2],
-                ];
-                m.generate_flat_normals();
-                m
+            SourceDescriptor::File { path, .. } => {
+                return Err(EncoderError::Io(format!("source 3D file does not exist: {}", path.display())));
             }
+            _ => return Err(EncoderError::InvalidJobSpec("3D conversion requires a file source".into())),
         };
 
+        let target_ext = target.output_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if target_ext == "step" || target_ext == "stp" {
+            let step_text = encodercraft_spatial_io::write_step(&mesh);
+            std::fs::write(&target.output_path, step_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write STEP file: {e}")))?;
+            self.progress.advance_frame(start_time);
+            self.progress.set_total_frames(1);
+            return Ok(());
+        }
+
+        let texturecraft_mesh = to_texturecraft_mesh(&mesh)?;
         match target.container {
             ContainerType::Gltf => {
-                let glb_bytes = encodercraft_spatial_io::write_glb(&mesh)?;
+                let glb_bytes = texturecraft_formats::glb_bytes(&texturecraft_mesh, &mesh.name, &[])
+                    .map_err(|error| EncoderError::UnsupportedCodec(format!("failed to export GLB: {error}")))?;
                 std::fs::write(&target.output_path, glb_bytes).map_err(|e| EncoderError::Io(format!("failed to write GLB file: {e}")))?;
             }
             ContainerType::Obj => {
-                let obj_text = encodercraft_spatial_io::write_obj(&mesh);
-                std::fs::write(&target.output_path, obj_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OBJ file: {e}")))?;
+                let obj_bytes = texturecraft_formats::obj_bytes(&texturecraft_mesh, &mesh.name);
+                std::fs::write(&target.output_path, obj_bytes).map_err(|e| EncoderError::Io(format!("failed to write OBJ file: {e}")))?;
             }
             ContainerType::Stl => {
                 let stl_bytes = encodercraft_spatial_io::write_stl_binary(&mesh);
@@ -465,8 +1129,33 @@ impl TranscodePipeline {
                 std::fs::write(&target.output_path, ply_bytes).map_err(|e| EncoderError::Io(format!("failed to write PLY file: {e}")))?;
             }
             ContainerType::Usdz => {
-                let usdz_bytes = encodercraft_spatial_io::write_usdz(&mesh)?;
-                std::fs::write(&target.output_path, usdz_bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
+                let usdz = texturecraft_formats::usd_bytes(&texturecraft_mesh, &mesh.name, &[], texturecraft_formats::UsdFormat::Usdz)
+                    .map_err(|error| EncoderError::UnsupportedCodec(format!("failed to export USDZ: {error}")))?;
+                std::fs::write(&target.output_path, usdz.bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
+            }
+            ContainerType::Usdc => {
+                let usdc_bytes = encodercraft_spatial_io::write_usdc(&mesh);
+                std::fs::write(&target.output_path, usdc_bytes).map_err(|e| EncoderError::Io(format!("failed to write USDC file: {e}")))?;
+            }
+            ContainerType::Fbx => {
+                let fbx_bytes = encodercraft_spatial_io::write_fbx_binary(&mesh);
+                std::fs::write(&target.output_path, fbx_bytes).map_err(|e| EncoderError::Io(format!("failed to write FBX file: {e}")))?;
+            }
+            ContainerType::Collada => {
+                let dae_text = encodercraft_spatial_io::write_collada(&mesh);
+                std::fs::write(&target.output_path, dae_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write DAE file: {e}")))?;
+            }
+            ContainerType::Alembic => {
+                let abc_bytes = encodercraft_spatial_io::write_alembic_ogawa(&mesh);
+                std::fs::write(&target.output_path, abc_bytes).map_err(|e| EncoderError::Io(format!("failed to write ABC file: {e}")))?;
+            }
+            ContainerType::Splat => {
+                let splat_bytes = encodercraft_spatial_io::write_splat(&mesh);
+                std::fs::write(&target.output_path, splat_bytes).map_err(|e| EncoderError::Io(format!("failed to write SPLAT file: {e}")))?;
+            }
+            ContainerType::Step => {
+                let step_text = encodercraft_spatial_io::write_step(&mesh);
+                std::fs::write(&target.output_path, step_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write STEP file: {e}")))?;
             }
             _ => return Err(EncoderError::UnsupportedCodec(format!("unsupported 3D container: {:?}", target.container))),
         }
@@ -477,37 +1166,45 @@ impl TranscodePipeline {
     }
 
     fn execute_image_transcode(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let frame = match &self.spec.source {
-            SourceDescriptor::File { path, .. } if path.exists() => {
-                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source image `{}`: {e}", path.display())))?;
-                if bytes.starts_with(b"BM") {
-                    encodercraft_image_codecs::decode_bmp(&bytes)?
-                } else {
-                    let w = target.custom_width.unwrap_or(1920);
-                    let h = target.custom_height.unwrap_or(1080);
-                    let dims = Dimensions::new(w, h)?;
-                    let mut f = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24)?;
-                    let (plane, _) = f.plane_mut(0)?;
-                    plane.fill(128);
-                    f
-                }
-            }
-            _ => {
-                let w = target.custom_width.unwrap_or(1920);
-                let h = target.custom_height.unwrap_or(1080);
-                let dims = Dimensions::new(w, h)?;
-                let mut f = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24)?;
-                let (plane, _) = f.plane_mut(0)?;
-                plane.fill(64);
-                f
-            }
-        };
+        if let Some(naming) = FrameNaming::parse(&target.output_path) {
+            return self.execute_frame_export(target, &naming, start_time);
+        }
+        let reader = crate::input::open_reader(&self.spec.source)?;
+        let frame = reader.frame_at_index(0)?;
+        self.write_still(target, frame, &target.output_path)?;
+        self.progress.set_total_frames(1);
+        self.progress.advance_frame(start_time);
+        Ok(())
+    }
 
+    /// Exports every frame of the (trimmed) source as `name_0001.png`, `name_0002.png`, ... for an
+    /// output path such as `name_%04d.png`. Files written so far are removed if a frame fails.
+    fn execute_frame_export(&self, target: &OutputTarget, naming: &FrameNaming, start_time: Instant) -> Result<(), EncoderError> {
+        let input = crate::input::VideoInput::open(&self.spec.source, target)?;
+        self.progress.set_total_frames(input.len());
+        let mut written: Vec<PathBuf> = Vec::new();
+        let result = (|| {
+            for i in 0..input.len() {
+                self.progress.checkpoint()?;
+                let path = naming.path(i + 1);
+                self.write_still(target, input.frame(i)?, &path)?;
+                written.push(path);
+                self.progress.advance_frame(start_time);
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            for path in &written {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        result
+    }
+
+    fn write_still(&self, target: &OutputTarget, frame: VideoFrame, path: &Path) -> Result<(), EncoderError> {
         let final_frame = if let (Some(w), Some(h)) = (target.custom_width, target.custom_height) {
             if w != frame.dimensions.width || h != frame.dimensions.height {
-                let target_dims = Dimensions::new(w, h)?;
-                let scaler = FrameScaler::new(ScaleMode::Fit);
-                scaler.scale(&frame, target_dims)?
+                FrameScaler::new(ScaleMode::Fit).scale(&frame, Dimensions::new(w, h)?)?
             } else {
                 frame
             }
@@ -515,26 +1212,185 @@ impl TranscodePipeline {
             frame
         };
 
+        let (format, mut options) = match target.container {
+            ContainerType::Png | ContainerType::StillSequence => (StillFormat::Png, StillOptions::default()),
+            ContainerType::Tiff => (StillFormat::Tiff, StillOptions::default()),
+            ContainerType::OpenExr => (StillFormat::OpenExr, StillOptions::default()),
+            ContainerType::Bmp => (StillFormat::Bmp, StillOptions::default()),
+            ContainerType::Jpeg => (StillFormat::Jpeg, StillOptions::default()),
+            ContainerType::WebP => (StillFormat::WebP, StillOptions { webp_lossless: target.image_quality.is_none(), ..StillOptions::default() }),
+            ContainerType::AnimatedGif => (StillFormat::Gif, StillOptions::default()),
+            ContainerType::Dds => (StillFormat::Dds, StillOptions::default()),
+            ContainerType::Dpx => (StillFormat::Dpx, StillOptions::default()),
+            ContainerType::Jxl => (StillFormat::Jxl, StillOptions::default()),
+            ContainerType::RadianceHdr => (StillFormat::RadianceHdr, StillOptions::default()),
+            ContainerType::Dicom => (StillFormat::Dicom, StillOptions::default()),
+            ContainerType::Fits => (StillFormat::Fits, StillOptions::default()),
+            other => return Err(EncoderError::UnsupportedCodec(format!("{other:?} is not a still-image container"))),
+        };
+        if let Some(q) = target.image_quality {
+            options.quality = q.clamp(1, 100);
+        }
+        let bytes = encode_still(&final_frame, format, &options)?;
+        std::fs::write(path, bytes).map_err(|e| EncoderError::Io(format!("failed to write {}: {e}", path.display())))
+    }
+
+    fn execute_document_pdf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let pages = target.selection.pages;
+        let is_docx_target = target.container == ContainerType::Docx;
+        let is_md_target = target.container == ContainerType::Markdown;
+        let is_html_target = target.container == ContainerType::Html;
+
+        let mut doc =
+            match &self.spec.source {
+                SourceDescriptor::File { path, .. } if path.exists() => {
+                    let bytes = std::fs::read(path)
+                        .map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
+                    if bytes.starts_with(b"%PDF-") {
+                        if !is_docx_target && !is_md_target && !is_html_target && pages.is_none() {
+                            std::fs::write(&target.output_path, &bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+                            self.progress.advance_frame(start_time);
+                            self.progress.set_total_frames(1);
+                            return Ok(());
+                        }
+                        if !is_docx_target && !is_md_target && !is_html_target {
+                            return Err(EncoderError::UnsupportedCodec(
+                                "PDF page selection requires a lossless page-copy operation, which is not supported".into(),
+                            ));
+                        }
+                        crate::document::DocumentCanvas::from_pdf_bytes(&bytes)?
+                    } else if let Ok(cad) = encodercraft_spatial_io::CadDrawing::from_bytes_auto(&bytes) {
+                        if !is_docx_target && !is_md_target && !is_html_target {
+                            if pages.is_some() {
+                                return Err(EncoderError::InvalidJobSpec("a page range cannot be applied to a CAD drawing".into()));
+                            }
+                            let pdf = cad.to_pdf_bytes()?;
+                            std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write PDF blueprint: {e}")))?;
+                            self.progress.advance_frame(start_time);
+                            self.progress.set_total_frames(1);
+                            return Ok(());
+                        }
+                        return Err(EncoderError::UnsupportedCodec("CAD-to-document conversion is not supported for this target".into()));
+                    } else if path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+                        ["txt", "md", "markdown", "html", "htm"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed))
+                    }) {
+                        let text =
+                            std::str::from_utf8(&bytes).map_err(|e| EncoderError::InvalidContainer(format!("document is not valid UTF-8: {e}")))?;
+                        let title = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("Document");
+                        if path
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| ["html", "htm"].iter().any(|ext| extension.eq_ignore_ascii_case(ext)))
+                        {
+                            crate::document::DocumentCanvas::from_html(title, text)?
+                        } else {
+                            let is_markdown = path
+                                .extension()
+                                .and_then(|extension| extension.to_str())
+                                .is_some_and(|extension| ["md", "markdown"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed)));
+                            crate::document::DocumentCanvas::from_text(title, text, is_markdown)?
+                        }
+                    } else {
+                        crate::document::DocumentCanvas::from_bytes_auto(&bytes)
+                            .map_err(|error| EncoderError::InvalidContainer(format!("failed to import document `{}`: {error}", path.display())))?
+                    }
+                }
+                SourceDescriptor::File { path, .. } => {
+                    return Err(EncoderError::Io(format!("source document file does not exist: {}", path.display())));
+                }
+                _ => {
+                    return Err(EncoderError::InvalidJobSpec("document export requires a valid file source".into()));
+                }
+            };
+
+        if let Some((first, last)) = pages {
+            doc.select_pages(first, last)?;
+        }
+
+        if is_md_target {
+            let md_str = doc.to_markdown();
+            std::fs::write(&target.output_path, md_str.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write Markdown file: {e}")))?;
+        } else if is_html_target {
+            let html_str = doc.to_html();
+            std::fs::write(&target.output_path, html_str.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write HTML file: {e}")))?;
+        } else if is_docx_target {
+            let docx_bytes = doc.to_docx_bytes()?;
+            std::fs::write(&target.output_path, &docx_bytes).map_err(|e| EncoderError::Io(format!("failed to write DOCX file: {e}")))?;
+        } else {
+            let pdf_bytes = doc.to_pdf_x4_bytes()?;
+            std::fs::write(&target.output_path, &pdf_bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_document_publication(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let mut doc =
+            match &self.spec.source {
+                SourceDescriptor::File { path, .. } if path.exists() => {
+                    let bytes = std::fs::read(path)
+                        .map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
+                    if bytes.starts_with(b"%PDF-") {
+                        crate::document::DocumentCanvas::from_pdf_bytes(&bytes)?
+                    } else if path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+                        ["txt", "md", "markdown", "html", "htm"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed))
+                    }) {
+                        let text = std::str::from_utf8(&bytes)
+                            .map_err(|error| EncoderError::InvalidContainer(format!("document is not valid UTF-8: {error}")))?;
+                        let title = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("Document");
+                        if path
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| ["html", "htm"].iter().any(|ext| extension.eq_ignore_ascii_case(ext)))
+                        {
+                            crate::document::DocumentCanvas::from_html(title, text)?
+                        } else {
+                            let is_markdown = path
+                                .extension()
+                                .and_then(|extension| extension.to_str())
+                                .is_some_and(|extension| ["md", "markdown"].iter().any(|allowed| extension.eq_ignore_ascii_case(allowed)));
+                            crate::document::DocumentCanvas::from_text(title, text, is_markdown)?
+                        }
+                    } else {
+                        crate::document::DocumentCanvas::from_bytes_auto(&bytes)
+                            .map_err(|error| EncoderError::InvalidContainer(format!("failed to import document `{}`: {error}", path.display())))?
+                    }
+                }
+                SourceDescriptor::File { path, .. } => {
+                    return Err(EncoderError::Io(format!("source document file does not exist: {}", path.display())));
+                }
+                _ => return Err(EncoderError::InvalidJobSpec("document publication export requires a file source".into())),
+            };
+        if let Some((first, last)) = target.selection.pages {
+            doc.select_pages(first, last)?;
+        }
+
         match target.container {
-            ContainerType::Png | ContainerType::StillSequence => {
-                let png_bytes = encodercraft_image_codecs::encode_png(&final_frame)?;
-                std::fs::write(&target.output_path, png_bytes).map_err(|e| EncoderError::Io(format!("failed to write PNG: {e}")))?;
+            ContainerType::ArtcraftDesigncraft => {
+                let bin = doc.to_designcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .designcraft file: {e}")))?;
             }
-            ContainerType::Tiff => {
-                let tiff_bytes = encodercraft_image_codecs::encode_tiff(&final_frame)?;
-                std::fs::write(&target.output_path, tiff_bytes).map_err(|e| EncoderError::Io(format!("failed to write TIFF: {e}")))?;
+            ContainerType::Idml | ContainerType::AdobeInDesignIndd => {
+                let idml = doc.to_idml_bytes()?;
+                std::fs::write(&target.output_path, &idml).map_err(|e| EncoderError::Io(format!("failed to write IDML package: {e}")))?;
             }
-            ContainerType::OpenExr => {
-                let exr_bytes = encodercraft_image_codecs::encode_exr_half(&final_frame)?;
-                std::fs::write(&target.output_path, exr_bytes).map_err(|e| EncoderError::Io(format!("failed to write OpenEXR: {e}")))?;
+            ContainerType::Pdf => {
+                let pdf = doc.to_pdf_x4_bytes()?;
+                std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write PDF/X-4 document: {e}")))?;
             }
-            ContainerType::Bmp => {
-                let bmp_bytes = encodercraft_image_codecs::encode_bmp(&final_frame)?;
-                std::fs::write(&target.output_path, bmp_bytes).map_err(|e| EncoderError::Io(format!("failed to write BMP: {e}")))?;
+            ContainerType::Epub => {
+                let epub = doc.to_epub_bytes()?;
+                std::fs::write(&target.output_path, &epub).map_err(|e| EncoderError::Io(format!("failed to write EPUB publication: {e}")))?;
+            }
+            ContainerType::Pptx => {
+                let pptx = doc.to_pptx_bytes()?;
+                std::fs::write(&target.output_path, &pptx).map_err(|e| EncoderError::Io(format!("failed to write PPTX slide presentation: {e}")))?;
             }
             _ => {
-                let png_bytes = encodercraft_image_codecs::encode_png(&final_frame)?;
-                std::fs::write(&target.output_path, png_bytes).map_err(|e| EncoderError::Io(format!("failed to write PNG: {e}")))?;
+                let pdf = doc.to_pdf_x4_bytes()?;
+                std::fs::write(&target.output_path, &pdf).map_err(|e| EncoderError::Io(format!("failed to write default publication file: {e}")))?;
             }
         }
 
@@ -543,21 +1399,297 @@ impl TranscodePipeline {
         Ok(())
     }
 
-    fn execute_document_pdf(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let pdf_bytes = match &self.spec.source {
+    fn execute_layered_image(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let mut image = match &self.spec.source {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let bytes =
-                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source document file `{}`: {e}", path.display())))?;
-                if bytes.starts_with(b"%PDF-") {
-                    bytes
-                } else {
-                    generate_minimal_pdf(&format!("Document export: {}", path.file_name().and_then(|n| n.to_str()).unwrap_or("document")))
-                }
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source layered image `{}`: {e}", path.display())))?;
+                encodercraft_image_codecs::LayeredImage::from_bytes_auto(&bytes)?
             }
-            _ => generate_minimal_pdf("Exported Document"),
+            _ => {
+                let mut img = encodercraft_image_codecs::LayeredImage::new("Default Composition", 100, 100);
+                let layer = encodercraft_image_codecs::ImageLayer::new("Background", 100, 100, vec![200; 100 * 100 * 4]);
+                img.add_layer(layer);
+                img
+            }
         };
 
-        std::fs::write(&target.output_path, &pdf_bytes).map_err(|e| EncoderError::Io(format!("failed to write PDF file: {e}")))?;
+        if let Some(layers) = &target.selection.layers {
+            image.select_layers(layers)?;
+        }
+
+        match target.container {
+            ContainerType::ArtcraftPhotocraft => {
+                let bin = image.to_photocraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .photocraft file: {e}")))?;
+            }
+            ContainerType::AdobePhotoshopPsb => {
+                let psb = image.to_psd_bytes(true)?;
+                std::fs::write(&target.output_path, &psb).map_err(|e| EncoderError::Io(format!("failed to write PSB file: {e}")))?;
+            }
+            ContainerType::AdobePhotoshopPsd => {
+                let psd = image.to_psd_bytes(false)?;
+                std::fs::write(&target.output_path, &psd).map_err(|e| EncoderError::Io(format!("failed to write PSD file: {e}")))?;
+            }
+            ContainerType::OpenExr => {
+                let dims = encodercraft_geom::Dimensions::new(image.width, image.height)?;
+                let frame = encodercraft_core::VideoFrame::from_raw_bytes(
+                    dims,
+                    encodercraft_color::PixelFormat::Rgba8,
+                    encodercraft_color::ColorSpaceTag::SRGB,
+                    0,
+                    1,
+                    encodercraft_core::Rational64::FPS_24,
+                    image.composite_rgba,
+                )?;
+                let exr_bytes = encodercraft_image_codecs::encode_exr_half(&frame)?;
+                std::fs::write(&target.output_path, &exr_bytes).map_err(|e| EncoderError::Io(format!("failed to write EXR file: {e}")))?;
+            }
+            _ => {
+                let psd = image.to_psd_bytes(false)?;
+                std::fs::write(&target.output_path, &psd).map_err(|e| EncoderError::Io(format!("failed to write default layered file: {e}")))?;
+            }
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_motion_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let mut project = match &self.spec.source {
+            SourceDescriptor::File { path, .. } => {
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source motion file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"\x89CRAFT\x00\x01E") {
+                    crate::project::MotionProject::from_effectcraft_binary(&bytes)?
+                } else if bytes.starts_with(b"RIFX") {
+                    crate::project::MotionProject::from_aep(&bytes)?
+                } else {
+                    return Err(EncoderError::InvalidContainer(format!("unrecognized motion graphics format in `{}`", path.display())));
+                }
+            }
+            _ => {
+                return Err(EncoderError::UnsupportedCodec("motion graphics projects require a file source".into()));
+            }
+        };
+
+        if let Some(key) = &target.selection.sequence {
+            project.select_comp(key)?;
+        }
+
+        match target.container {
+            ContainerType::ArtcraftEffectcraft => {
+                let bin = project.to_effectcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .effectcraft file: {e}")))?;
+            }
+            ContainerType::AdobeAfterEffectsAep => {
+                let mut out = Vec::new();
+                out.extend_from_slice(b"RIFX");
+                let comp = project.comps.first();
+                let w = comp.map(|c| c.width).unwrap_or(1920);
+                let h = comp.map(|c| c.height).unwrap_or(1080);
+                let mut chunk = Vec::new();
+                chunk.extend_from_slice(b"Egg!");
+                chunk.extend_from_slice(b"Comp");
+                chunk.extend_from_slice(&8u32.to_be_bytes());
+                chunk.extend_from_slice(&w.to_be_bytes());
+                chunk.extend_from_slice(&h.to_be_bytes());
+                out.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+                out.extend_from_slice(&chunk);
+                std::fs::write(&target.output_path, &out).map_err(|e| EncoderError::Io(format!("failed to write AEP file: {e}")))?;
+            }
+            ContainerType::LottieJson => {
+                let lottie = project.to_lottie_json()?;
+                std::fs::write(&target.output_path, lottie.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write Lottie JSON: {e}")))?;
+            }
+            _ => {
+                let lottie = project.to_lottie_json()?;
+                std::fs::write(&target.output_path, lottie.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write motion file: {e}")))?;
+            }
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_timeline_project(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let mut project = match &self.spec.source {
+            SourceDescriptor::File { path, .. } => {
+                let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source NLE file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"\x89CRAFT\x00\x01F") {
+                    crate::project::TimelineProject::from_filmcraft_binary(&bytes)?
+                } else if bytes.starts_with(&[0x1f, 0x8b]) || bytes.windows(13).any(|w| w == b"<PremiereData") {
+                    crate::project::TimelineProject::from_prproj(&bytes)?
+                } else {
+                    return Err(EncoderError::InvalidContainer(format!("unrecognized timeline project format in `{}`", path.display())));
+                }
+            }
+            _ => {
+                return Err(EncoderError::UnsupportedCodec("timeline projects require a file source".into()));
+            }
+        };
+
+        if let Some(key) = &target.selection.sequence {
+            project.select_sequence(key)?;
+        }
+
+        let ext = target.output_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        match target.container {
+            ContainerType::ArtcraftFilmcraft => {
+                let bin = project.to_filmcraft_binary()?;
+                std::fs::write(&target.output_path, &bin).map_err(|e| EncoderError::Io(format!("failed to write .filmcraft file: {e}")))?;
+            }
+            ContainerType::AdobePremierePrproj if ext == "fcpxml" => {
+                let fcpxml = project.to_fcpxml();
+                std::fs::write(&target.output_path, fcpxml.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write FCPXML file: {e}")))?;
+            }
+            ContainerType::AdobePremierePrproj if ext == "otio" => {
+                let otio = project.to_otio_json()?;
+                std::fs::write(&target.output_path, otio.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OTIO file: {e}")))?;
+            }
+            ContainerType::AdobePremierePrproj => {
+                let gzip = project.to_prproj();
+                std::fs::write(&target.output_path, &gzip).map_err(|e| EncoderError::Io(format!("failed to write PRPROJ file: {e}")))?;
+            }
+            _ => {
+                let otio = project.to_otio_json()?;
+                std::fs::write(&target.output_path, otio.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OTIO file: {e}")))?;
+            }
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_daw_session(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let session = match &self.spec.source {
+            SourceDescriptor::File { path, .. } if path.exists() => {
+                let bytes =
+                    std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read source DAW session file `{}`: {e}", path.display())))?;
+                if bytes.starts_with(b"\x89CRAFT\x00\x01S") {
+                    encodercraft_audio_dsp::DawSession::from_soundcraft_binary(&bytes)?
+                } else {
+                    let text = std::str::from_utf8(&bytes)
+                        .map_err(|_| EncoderError::InvalidJobSpec("DAW session file did not contain valid UTF-8 XML".into()))?;
+                    encodercraft_audio_dsp::DawSession::from_sesx_xml(text)?
+                }
+            }
+            _ => {
+                return Err(EncoderError::InvalidJobSpec("DAW session source file is missing".into()));
+            }
+        };
+
+        let session_dir = match &self.spec.source {
+            SourceDescriptor::File { path, .. } => path.parent().map(std::path::Path::to_path_buf),
+            _ => None,
+        };
+
+        if let Some(parent) = target.output_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| EncoderError::Io(format!("failed to create output directory `{}`: {e}", parent.display())))?;
+        }
+
+        match target.container {
+            ContainerType::ArtcraftSoundcraft => {
+                let binary = session.to_soundcraft_binary()?;
+                std::fs::write(&target.output_path, binary).map_err(|e| EncoderError::Io(format!("failed to write .soundcraft file: {e}")))?;
+            }
+            ContainerType::AdobeAuditionSesx => {
+                let xml = session.to_sesx_xml();
+                std::fs::write(&target.output_path, xml.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write .sesx XML file: {e}")))?;
+            }
+            ContainerType::Wave => {
+                let bext = BextMetadata {
+                    description: format!("Encoded by encoderCraft - {}", target.preset_name),
+                    originator: "encoderCraft".into(),
+                    ..Default::default()
+                };
+
+                let xmp_xml = target.metadata.as_ref().map(|m| m.to_xmp_packet());
+                let ixml_xml = session.to_ixml(None);
+
+                let wav_format = match session.bit_depth {
+                    0..=16 => WavFormatTag::Pcm16,
+                    17..=24 => WavFormatTag::Pcm24,
+                    _ => WavFormatTag::IeeeFloat32,
+                };
+                let target_lufs = target.target_lufs.map(|l| l as f64);
+                let mut renderer = session.renderer(session_dir.as_deref())?;
+                let master_buf = renderer.render_master(target_lufs)?;
+
+                let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create output WAV file: {e}")))?;
+                let writer = BufWriter::new(out_file);
+
+                let mut wav_writer =
+                    BwfWavWriter::new_with_metadata(writer, session.sample_rate, 2, wav_format, Some(&bext), xmp_xml.as_deref(), Some(&ixml_xml))?;
+
+                wav_writer.write_buffer(&master_buf)?;
+                wav_writer.finish()?;
+
+                // If stems requested, export track stems with iXML metadata
+                if let Some(mode) = target.audio_stems
+                    && mode != encodercraft_core::AudioStemMode::None
+                {
+                    let parent = target.output_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+                    let base_stem = target.output_path.file_stem().and_then(|s| s.to_str()).unwrap_or("stem");
+
+                    for track_index in renderer.stem_track_indices() {
+                        let (stem_name, stem_buf) = renderer.render_stem(track_index)?;
+                        let track_name = session.tracks.get(track_index).map(|t| t.name.as_str());
+                        let stem_ixml = session.to_ixml(track_name);
+
+                        let mut outputs: Vec<(String, AudioSampleBuffer)> = Vec::new();
+                        if mode == encodercraft_core::AudioStemMode::DiscreteMono && stem_buf.channel_count() == 2 {
+                            for (suffix, ch) in [("L", 0usize), ("R", 1usize)] {
+                                let plane = stem_buf.channel(ch)?.to_vec();
+                                let mono = AudioSampleBuffer::from_planar_channels(
+                                    stem_buf.sample_rate,
+                                    encodercraft_core::ChannelLayout::Mono,
+                                    0,
+                                    vec![plane],
+                                )?;
+                                outputs.push((format!("{stem_name}_{suffix}"), mono));
+                            }
+                        } else {
+                            outputs.push((stem_name, stem_buf));
+                        }
+
+                        for (name, buf) in outputs {
+                            let stem_path = parent.join(format!("{base_stem}_Stem_{name}.wav"));
+                            let stem_file =
+                                File::create(&stem_path).map_err(|e| EncoderError::Io(format!("failed to create audio stem file: {e}")))?;
+                            let mut s_writer = BwfWavWriter::new_with_metadata(
+                                BufWriter::new(stem_file),
+                                session.sample_rate,
+                                buf.channel_count() as u16,
+                                wav_format,
+                                Some(&bext),
+                                None,
+                                Some(&stem_ixml),
+                            )?;
+                            s_writer.write_buffer(&buf)?;
+                            s_writer.finish()?;
+                        }
+                    }
+                }
+            }
+            ContainerType::Flac => {
+                let master_buf = session.renderer(session_dir.as_deref())?.render_master(target.target_lufs.map(|l| l as f64))?;
+                let flac_bytes = encodercraft_audio_dsp::encode_audio_flac(&master_buf)?;
+                std::fs::write(&target.output_path, flac_bytes).map_err(|e| EncoderError::Io(format!("failed to write FLAC file: {e}")))?;
+            }
+            ContainerType::Aiff => {
+                let master_buf = session.renderer(session_dir.as_deref())?.render_master(target.target_lufs.map(|l| l as f64))?;
+                let aiff_bytes = encodercraft_audio_dsp::encode_audio_aiff(&master_buf)?;
+                std::fs::write(&target.output_path, aiff_bytes).map_err(|e| EncoderError::Io(format!("failed to write AIFF file: {e}")))?;
+            }
+            _ => {
+                return Err(EncoderError::InvalidJobSpec(format!("unsupported export container {:?} for DAW session", target.container)));
+            }
+        }
 
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
@@ -565,8 +1697,13 @@ impl TranscodePipeline {
     }
 
     fn execute_video_mp4(&self, target: &OutputTarget, is_mov: bool, start_time: Instant) -> Result<(), EncoderError> {
-        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
-        let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
+        if !target.is_video_enabled() {
+            return self.execute_audio_mp4(target, is_mov, start_time);
+        }
+        let input = VideoInput::open(&self.spec.source, target)?;
+        let dims = input.dims();
+        let fps = input.fps();
+        let frame_ticks = u32::try_from(fps.den).map_err(|_| EncoderError::InvalidJobSpec("frame rate denominator is too large".into()))?;
 
         if target.hardware_acceleration {
             let caps = encodercraft_platform::detect_hardware();
@@ -578,11 +1715,6 @@ impl TranscodePipeline {
                 caps.supports_prores
             );
         }
-
-        let w = target.custom_width.unwrap_or(1920);
-        let h = target.custom_height.unwrap_or(1080);
-        let dims = Dimensions::new(w, h)?;
-        let fps = target.custom_frame_rate.unwrap_or(Rational64::FPS_24);
 
         let lower_preset = target.preset_name.to_ascii_lowercase();
         let codec_kind = if is_mov && lower_preset.contains("prores") {
@@ -598,130 +1730,307 @@ impl TranscodePipeline {
         } else {
             VideoCodecKind::H264
         };
-
+        let codec_kind = resolve_codec(target, codec_kind)?;
+        let pixel_format = target_pixel_format(target)?;
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &encode_params(target))?;
+        // Faststart relocates `moov` and so must read the file back.
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(staged.path())
+            .map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
+        let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
+        let is_spatial = lower_preset.contains("spatial") || lower_preset.contains("mv-hevc");
+        let spatial_config = if is_spatial { Some(encodercraft_muxers::SpatialVideoConfig::default()) } else { None };
         let v_cfg = VideoStreamConfig {
-            codec_fourcc: codec_kind.default_fourcc(),
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
             frame_rate: fps,
-            pixel_format: PixelFormat::Yuv420p,
-            color_space: ColorSpaceTag::REC709,
-            bit_depth: 8,
-            codec_private: vec![0, 0, 0, 1],
+            pixel_format,
+            color_space: ColorTransform::target_tag(target.video.color),
+            bit_depth: pixel_format.bits_per_component(),
+            codec_private: encoder.config_record(),
+            spatial: spatial_config,
         };
-
         let v_track_idx = mp4_muxer.add_video_stream(&v_cfg)?;
-        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
 
-        // Prepare and add multiplexed AAC-LC audio stream
-        let mut audio_buf = self.load_source_audio()?;
-        audio_buf = remix_channels(&audio_buf, encodercraft_core::ChannelLayout::Stereo)?;
-        if let Some(target_lufs) = target.target_lufs {
-            let _ = normalize_loudness(&mut audio_buf, target_lufs as f64, -1.0)?;
-        }
-        let mut aac_enc = AacEncoderWrapper::new(audio_buf.sample_rate, 2, 192_000)?;
-        let a_cfg = AudioStreamConfig {
-            codec_fourcc: *b"mp4a",
-            sample_rate: audio_buf.sample_rate,
-            layout: encodercraft_core::ChannelLayout::Stereo,
-            bits_per_sample: 16,
-            codec_private: aac_enc.audio_specific_config(),
-        };
-        let a_track_idx = mp4_muxer.add_audio_stream(&a_cfg)?;
-
-        let source_frames = self.load_source_video_frames(dims, fps)?;
-        let total_frames = source_frames.len() as u64;
-        self.progress.set_total_frames(total_frames);
-
-        let scaler = FrameScaler::new(ScaleMode::Fit);
-
-        let lut = if let Some(ref lut_path) = target.lut_path {
-            let content = std::fs::read_to_string(lut_path).map_err(|e| EncoderError::Io(format!("failed to read LUT file: {e}")))?;
-            Some(crate::lut::Lut3D::parse_cube(&content)?)
-        } else {
-            None
+        let mut audio = match input.audio_feed(target, &self.limits)? {
+            Some(feed) => {
+                let codec = audio_codec(target).unwrap_or("aac");
+                let (codec_fourcc, bits_per_sample, codec_private, audio_encoder) = if codec.eq_ignore_ascii_case("aac") {
+                    let channels = u8::try_from(feed.layout().channel_count())
+                        .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the AAC encoder limit".into()))?;
+                    let aac_enc = AacEncoderWrapper::new(feed.rate(), channels, aac_bitrate_bps(target)?)?;
+                    (*b"mp4a", 16, aac_enc.audio_specific_config(), Mp4AudioEncoder::Aac(Box::new(aac_enc)))
+                } else if is_mov && codec.eq_ignore_ascii_case("pcm_s24le") {
+                    (*b"lpcm", 24, Vec::new(), Mp4AudioEncoder::Pcm24Le)
+                } else {
+                    return Err(EncoderError::UnsupportedCodec(format!("audio codec {codec} is not supported in this output container")));
+                };
+                let a_cfg = AudioStreamConfig { codec_fourcc, sample_rate: feed.rate(), layout: feed.layout(), bits_per_sample, codec_private };
+                let track = mp4_muxer.add_audio_stream(&a_cfg)?;
+                Some((feed, audio_encoder, track))
+            }
+            None => None,
         };
 
-        let tc_overlay = if target.burn_timecode { Some(crate::overlay::TimecodeOverlay::default()) } else { None };
+        self.progress.set_total_frames(input.len());
 
-        let (caption_burner, caption_track) = if target.burn_captions {
-            if let Some(cap_path) = &target.caption_path {
-                let track = crate::captions::CaptionTrack::from_file(cap_path)?;
-                (Some(crate::captions::CaptionBurner::default()), Some(track))
-            } else {
-                (None, None)
-            }
-        } else {
-            (None, None)
-        };
-
-        for (f, mut frame) in source_frames.into_iter().enumerate() {
-            if self.progress.is_cancelled() {
-                return Err(EncoderError::Internal("job cancelled by user".into()));
-            }
-
-            frame.pts = f as i64;
-            let mut scaled_frame = scaler.scale(&frame, dims)?;
-
-            if let Some(ref l) = lut {
-                l.apply_to_frame(&mut scaled_frame)?;
-            }
-
-            if let Some(ref tc) = tc_overlay {
-                let timecode = encodercraft_core::MediaTimecode::new(0, 0, (f / 24) as u8, (f % 24) as u8, false, fps);
-                tc.draw(&mut scaled_frame, &timecode)?;
-            }
-
-            if let (Some(burner), Some(track)) = (&caption_burner, &caption_track) {
-                let pts_seconds = f as f64 / fps.as_f64();
-                burner.burn(&mut scaled_frame, track, pts_seconds)?;
-            }
-
-            let packets = encoder.encode_frame(&scaled_frame)?;
-            for pkt in packets {
-                let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: 1000, is_keyframe: pkt.is_keyframe };
+        let processor = self.frame_processor(target, fps)?;
+        self.stream_video(&input, &processor, start_time, |index, frame| {
+            // The track clock runs at `fps.num` Hz, so frame `index` starts at `index * fps.den`.
+            frame.pts = i64::try_from(index).unwrap_or(i64::MAX).saturating_mul(fps.den);
+            for pkt in encoder.encode_frame(frame)? {
+                let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_ticks, is_keyframe: pkt.is_keyframe };
                 mp4_muxer.write_video_sample(v_track_idx, sample)?;
             }
+            Ok(())
+        })?;
 
-            self.progress.advance_frame(start_time);
-        }
-
-        let flushed = encoder.flush()?;
-        for pkt in flushed {
-            let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: 1000, is_keyframe: pkt.is_keyframe };
+        for pkt in encoder.flush()? {
+            let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_ticks, is_keyframe: pkt.is_keyframe };
             mp4_muxer.write_video_sample(v_track_idx, sample)?;
         }
 
-        // Write encoded AAC audio packets
-        let mut aac_packets = aac_enc.encode_buffer(&audio_buf)?;
-        aac_packets.extend(aac_enc.flush()?);
-        for (a_idx, pkt) in aac_packets.iter().enumerate() {
-            let a_sample = AudioSample { data: pkt, pts: (a_idx as i64) * 1024, duration_ticks: 1024 };
-            mp4_muxer.write_audio_sample(a_track_idx, a_sample)?;
+        if let Some((feed, audio_encoder, a_track_idx)) = audio.as_mut() {
+            let mut next_pts = 0i64;
+            match audio_encoder {
+                Mp4AudioEncoder::Aac(aac_encoder) => {
+                    let mut write = |packets: Vec<Vec<u8>>, muxer: &mut Mp4Muxer<std::fs::File>| -> Result<(), EncoderError> {
+                        for pkt in &packets {
+                            muxer.write_audio_sample(*a_track_idx, AudioSample { data: pkt, pts: next_pts, duration_ticks: 1024 })?;
+                            next_pts += 1024;
+                        }
+                        Ok(())
+                    };
+                    while let Some(window) = feed.next_window()? {
+                        self.progress.checkpoint()?;
+                        write(aac_encoder.encode_buffer(&window)?, &mut mp4_muxer)?;
+                    }
+                    write(aac_encoder.flush()?, &mut mp4_muxer)?;
+                }
+                Mp4AudioEncoder::Pcm24Le => {
+                    while let Some(window) = feed.next_window()? {
+                        self.progress.checkpoint()?;
+                        let data = encode_pcm_s24le(&window)?;
+                        let duration = u32::try_from(window.samples_per_channel())
+                            .map_err(|_| EncoderError::InvalidJobSpec("PCM audio sample window exceeds the MP4 duration limit".into()))?;
+                        mp4_muxer.write_audio_sample(*a_track_idx, AudioSample { data: &data, pts: next_pts, duration_ticks: duration })?;
+                        next_pts = next_pts.saturating_add(i64::from(duration));
+                    }
+                }
+            }
         }
 
-        mp4_muxer.finish(false)?;
+        mp4_muxer.finish(!is_mov)?;
 
         // Append Adobe XMP UUID box if metadata is defined
         if let Some(ref meta) = target.metadata {
             let xmp_packet = meta.to_xmp_packet();
             let mut file = std::fs::OpenOptions::new()
                 .append(true)
-                .open(&target.output_path)
+                .open(staged.path())
                 .map_err(|e| EncoderError::Io(format!("failed to open MP4 for XMP embedding: {e}")))?;
             encodercraft_muxers::append_xmp_uuid_box(&mut file, &xmp_packet)?;
         }
 
-        Ok(())
+        // Append Apple Spatial Video (MV-HEVC) 3D stereoscopic metadata boxes if requested
+        if let Some(ref spatial) = spatial_config {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(staged.path())
+                .map_err(|e| EncoderError::Io(format!("failed to open MP4 for spatial metadata embedding: {e}")))?;
+            encodercraft_muxers::append_spatial_video_boxes(&mut file, spatial, &encoder.config_record())?;
+        }
+
+        staged.commit()
+    }
+
+    fn execute_audio_mp4(&self, target: &OutputTarget, is_mov: bool, start_time: Instant) -> Result<(), EncoderError> {
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(staged.path())
+            .map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
+        let mut mp4_muxer = Mp4Muxer::new(out_file, is_mov)?;
+
+        let codec = audio_codec(target).unwrap_or("aac");
+        let channels = u8::try_from(sample_buf.channel_count())
+            .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the encoder limit".into()))?;
+
+        let (codec_fourcc, bits_per_sample, codec_private, mut audio_encoder) = if codec.eq_ignore_ascii_case("aac") {
+            let aac_enc = AacEncoderWrapper::new(sample_buf.sample_rate, channels, aac_bitrate_bps(target)?)?;
+            (*b"mp4a", 16, aac_enc.audio_specific_config(), Mp4AudioEncoder::Aac(Box::new(aac_enc)))
+        } else if is_mov && codec.eq_ignore_ascii_case("pcm_s24le") {
+            (*b"lpcm", 24, Vec::new(), Mp4AudioEncoder::Pcm24Le)
+        } else {
+            return Err(EncoderError::UnsupportedCodec(format!("audio codec {codec} is not supported in this output container")));
+        };
+
+        let a_cfg =
+            AudioStreamConfig { codec_fourcc, sample_rate: sample_buf.sample_rate, layout: sample_buf.layout, bits_per_sample, codec_private };
+        let a_track_idx = mp4_muxer.add_audio_stream(&a_cfg)?;
+
+        let total_samples = sample_buf.samples_per_channel();
+        let chunk_size = 1024;
+        let mut offset = 0;
+        let mut next_pts = 0i64;
+
+        match &mut audio_encoder {
+            Mp4AudioEncoder::Aac(aac_encoder) => {
+                let mut write = |packets: Vec<Vec<u8>>, muxer: &mut Mp4Muxer<std::fs::File>| -> Result<(), EncoderError> {
+                    for pkt in &packets {
+                        muxer.write_audio_sample(a_track_idx, AudioSample { data: pkt, pts: next_pts, duration_ticks: 1024 })?;
+                        next_pts += 1024;
+                    }
+                    Ok(())
+                };
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    write(aac_encoder.encode_buffer(&window)?, &mut mp4_muxer)?;
+                    offset += count;
+                }
+                write(aac_encoder.flush()?, &mut mp4_muxer)?;
+            }
+            Mp4AudioEncoder::Pcm24Le => {
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    let data = encode_pcm_s24le(&window)?;
+                    let duration = u32::try_from(count)
+                        .map_err(|_| EncoderError::InvalidJobSpec("PCM audio sample window exceeds the MP4 duration limit".into()))?;
+                    mp4_muxer.write_audio_sample(a_track_idx, AudioSample { data: &data, pts: next_pts, duration_ticks: duration })?;
+                    next_pts = next_pts.saturating_add(i64::from(duration));
+                    offset += count;
+                }
+            }
+        }
+
+        mp4_muxer.finish(!is_mov)?;
+
+        if let Some(ref meta) = target.metadata {
+            let xmp_packet = meta.to_xmp_packet();
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(staged.path())
+                .map_err(|e| EncoderError::Io(format!("failed to open MP4 for XMP embedding: {e}")))?;
+            encodercraft_muxers::append_xmp_uuid_box(&mut file, &xmp_packet)?;
+        }
+
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        staged.commit()
+    }
+
+    fn execute_video_ts(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let input = VideoInput::open(&self.spec.source, target)?;
+        let dims = input.dims();
+        let fps = input.fps();
+        let frame_ticks = u32::try_from(fps.den).map_err(|_| EncoderError::InvalidJobSpec("frame rate denominator is too large".into()))?;
+
+        let codec_kind = VideoCodecKind::H264;
+        let codec_kind = resolve_codec(target, codec_kind)?;
+        let pixel_format = target_pixel_format(target)?;
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &encode_params(target))?;
+
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(staged.path())
+            .map_err(|e| EncoderError::Io(format!("failed to create output file: {e}")))?;
+
+        let mut ts_muxer = encodercraft_muxers::TsMuxer::new(out_file)?;
+        let v_cfg = VideoStreamConfig {
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
+            dimensions: dims,
+            frame_rate: fps,
+            pixel_format,
+            color_space: ColorTransform::target_tag(target.video.color),
+            bit_depth: pixel_format.bits_per_component(),
+            codec_private: encoder.config_record(),
+            spatial: None,
+        };
+        let v_track_idx = ts_muxer.add_video_stream(&v_cfg)?;
+
+        let audio = match input.audio_feed(target, &self.limits)? {
+            Some(feed) => {
+                let channels = u8::try_from(feed.layout().channel_count())
+                    .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the AAC encoder limit".into()))?;
+                let aac_enc = AacEncoderWrapper::new(feed.rate(), channels, aac_bitrate_bps(target)?)?;
+                let a_cfg = AudioStreamConfig {
+                    codec_fourcc: *b"mp4a",
+                    sample_rate: feed.rate(),
+                    layout: feed.layout(),
+                    bits_per_sample: 16,
+                    codec_private: aac_enc.audio_specific_config(),
+                };
+                let track = ts_muxer.add_audio_stream(&a_cfg)?;
+                Some((feed, aac_enc, track))
+            }
+            None => None,
+        };
+
+        self.progress.set_total_frames(input.len());
+        let processor = self.frame_processor(target, fps)?;
+        self.stream_video(&input, &processor, start_time, |index, frame| {
+            frame.pts = i64::try_from(index).unwrap_or(i64::MAX).saturating_mul(fps.den);
+            for pkt in encoder.encode_frame(frame)? {
+                let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_ticks, is_keyframe: pkt.is_keyframe };
+                ts_muxer.write_video_sample(v_track_idx, sample)?;
+            }
+            Ok(())
+        })?;
+
+        for pkt in encoder.flush()? {
+            let sample = VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_ticks, is_keyframe: pkt.is_keyframe };
+            ts_muxer.write_video_sample(v_track_idx, sample)?;
+        }
+
+        if let Some((mut feed, mut aac_enc, a_track_idx)) = audio {
+            let mut next_pts = 0i64;
+            while let Some(window) = feed.next_window()? {
+                self.progress.checkpoint()?;
+                let packets = aac_enc.encode_buffer(&window)?;
+                for pkt in &packets {
+                    ts_muxer.write_audio_sample(a_track_idx, AudioSample { data: pkt, pts: next_pts, duration_ticks: 1024 })?;
+                    next_pts += 1024;
+                }
+            }
+            for pkt in aac_enc.flush()? {
+                ts_muxer.write_audio_sample(a_track_idx, AudioSample { data: &pkt, pts: next_pts, duration_ticks: 1024 })?;
+                next_pts += 1024;
+            }
+        }
+
+        let _ = ts_muxer.finish()?;
+        staged.commit()
     }
 
     fn execute_video_mxf(&self, target: &OutputTarget, is_op_atom: bool, start_time: Instant) -> Result<(), EncoderError> {
-        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MXF output file: {e}")))?;
-        let writer = BufWriter::new(out_file);
-
-        let w = target.custom_width.unwrap_or(1920);
-        let h = target.custom_height.unwrap_or(1080);
-        let dims = Dimensions::new(w, h)?;
-        let fps = target.custom_frame_rate.unwrap_or(Rational64::FPS_24);
+        let input = VideoInput::open(&self.spec.source, target)?;
+        let dims = input.dims();
+        let fps = input.fps();
 
         let lower_preset = target.preset_name.to_ascii_lowercase();
         let codec_kind = if lower_preset.contains("prores") {
@@ -731,50 +2040,53 @@ impl TranscodePipeline {
         } else {
             VideoCodecKind::DnxHd
         };
+        let codec_kind = resolve_codec(target, codec_kind)?;
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = File::create(staged.path()).map_err(|e| EncoderError::Io(format!("failed to create MXF output file: {e}")))?;
+        let writer = BufWriter::new(out_file);
 
-        let bit_depth = if lower_preset.contains("hqx") || lower_preset.contains("10-bit") || codec_kind == VideoCodecKind::ProRes { 10 } else { 8 };
+        let pixel_format = target_pixel_format(target)?;
+        let bit_depth = pixel_format.bits_per_component();
 
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &EncodeParams { annex_b: true, ..encode_params(target) })?;
         let v_cfg = VideoStreamConfig {
-            codec_fourcc: codec_kind.default_fourcc(),
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
             frame_rate: fps,
-            pixel_format: if bit_depth >= 10 { PixelFormat::Yuv422p10 } else { PixelFormat::Yuv422p },
-            color_space: ColorSpaceTag::REC709,
+            pixel_format,
+            color_space: ColorTransform::target_tag(target.video.color),
             bit_depth,
-            codec_private: Vec::new(),
+            codec_private: encoder.config_record(),
+            spatial: None,
         };
 
-        let mut audio_buf = self.load_source_audio()?;
-        audio_buf = remix_channels(&audio_buf, encodercraft_core::ChannelLayout::Stereo)?;
-        if let Some(target_lufs) = target.target_lufs {
-            let _ = normalize_loudness(&mut audio_buf, target_lufs as f64, -1.0)?;
+        let mut audio = input.audio_feed(target, &self.limits)?;
+        if let Some(codec) = audio_codec(target)
+            && !codec.eq_ignore_ascii_case("pcm_s24le")
+        {
+            return Err(EncoderError::UnsupportedCodec(format!("MXF audio codec {codec} is not supported")));
         }
-
-        let a_cfg = AudioStreamConfig {
+        let a_cfg = audio.as_ref().map(|feed| AudioStreamConfig {
             codec_fourcc: *b"sowt",
-            sample_rate: audio_buf.sample_rate,
-            layout: encodercraft_core::ChannelLayout::Stereo,
+            sample_rate: feed.rate(),
+            layout: feed.layout(),
             bits_per_sample: 24,
             codec_private: Vec::new(),
-        };
+        });
 
         let pkg_name = target.output_path.file_stem().and_then(|s| s.to_str()).unwrap_or("encoderCraft_MXF");
-        let audio_cfgs: &[AudioStreamConfig] = if is_op_atom { &[] } else { std::slice::from_ref(&a_cfg) };
+        let audio_cfgs: &[AudioStreamConfig] = match (&a_cfg, is_op_atom) {
+            (Some(cfg), false) => std::slice::from_ref(cfg),
+            _ => &[],
+        };
         let mut mxf_muxer = MxfMuxer::new(writer, is_op_atom, pkg_name, Some(&v_cfg), audio_cfgs)?;
 
-        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
-        let source_frames = self.load_source_video_frames(dims, fps)?;
-        self.progress.set_total_frames(source_frames.len() as u64);
+        self.progress.set_total_frames(input.len());
 
-        let scaler = FrameScaler::new(ScaleMode::Fit);
-        for (f, mut frame) in source_frames.into_iter().enumerate() {
-            if self.progress.is_cancelled() {
-                return Err(EncoderError::Internal("job cancelled by user".into()));
-            }
-            frame.pts = f as i64;
-            let scaled_frame = scaler.scale(&frame, dims)?;
-            let packets = encoder.encode_frame(&scaled_frame)?;
-            for pkt in packets {
+        let processor = self.frame_processor(target, fps)?;
+        self.stream_video(&input, &processor, start_time, |index, frame| {
+            frame.pts = i64::try_from(index).unwrap_or(i64::MAX);
+            for pkt in encoder.encode_frame(frame)? {
                 mxf_muxer.write_video_sample(VideoSample {
                     data: &pkt.data,
                     pts: pkt.pts,
@@ -783,11 +2095,10 @@ impl TranscodePipeline {
                     is_keyframe: pkt.is_keyframe,
                 })?;
             }
-            self.progress.advance_frame(start_time);
-        }
+            Ok(())
+        })?;
 
-        let flushed = encoder.flush()?;
-        for pkt in flushed {
+        for pkt in encoder.flush()? {
             mxf_muxer.write_video_sample(VideoSample {
                 data: &pkt.data,
                 pts: pkt.pts,
@@ -797,23 +2108,26 @@ impl TranscodePipeline {
             })?;
         }
 
-        if !is_op_atom {
-            mxf_muxer.write_audio_buffer(0, &audio_buf, 24)?;
+        if let (Some(feed), false) = (audio.as_mut(), is_op_atom) {
+            while let Some(window) = feed.next_window()? {
+                self.progress.checkpoint()?;
+                mxf_muxer.write_audio_buffer(0, &window, 24)?;
+            }
         }
 
         let mut finished = mxf_muxer.finish()?;
         std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush MXF file: {e}")))?;
-        Ok(())
+        drop(finished);
+        staged.commit()
     }
 
     fn execute_video_mkv(&self, target: &OutputTarget, is_webm: bool, start_time: Instant) -> Result<(), EncoderError> {
-        let out_file = File::create(&target.output_path).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
-        let writer = BufWriter::new(out_file);
-
-        let w = target.custom_width.unwrap_or(1920);
-        let h = target.custom_height.unwrap_or(1080);
-        let dims = Dimensions::new(w, h)?;
-        let fps = target.custom_frame_rate.unwrap_or(Rational64::FPS_24);
+        if !target.is_video_enabled() {
+            return self.execute_audio_mkv(target, is_webm, start_time);
+        }
+        let input = VideoInput::open(&self.spec.source, target)?;
+        let dims = input.dims();
+        let fps = input.fps();
 
         let lower_preset = target.preset_name.to_ascii_lowercase();
         let codec_kind = if is_webm {
@@ -827,87 +2141,339 @@ impl TranscodePipeline {
         } else {
             VideoCodecKind::H264
         };
+        let codec_kind = resolve_codec(target, codec_kind)?;
+        let pixel_format = target_pixel_format(target)?;
 
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = File::create(staged.path()).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
+        let writer = BufWriter::new(out_file);
+
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &encode_params(target))?;
         let v_cfg = VideoStreamConfig {
-            codec_fourcc: codec_kind.default_fourcc(),
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
             dimensions: dims,
             frame_rate: fps,
-            pixel_format: PixelFormat::Yuv420p,
-            color_space: ColorSpaceTag::REC709,
-            bit_depth: 8,
-            codec_private: Vec::new(),
+            pixel_format,
+            color_space: ColorTransform::target_tag(target.video.color),
+            bit_depth: pixel_format.bits_per_component(),
+            codec_private: encoder.config_record(),
+            spatial: None,
         };
 
         let mut builder = MkvMuxerBuilder::new(writer, is_webm);
         let v_track = builder.add_video_stream(&v_cfg);
+
+        let configured_codec = audio_codec(target);
+        if is_webm
+            && let Some(codec) = configured_codec
+            && !codec.eq_ignore_ascii_case("opus")
+        {
+            return Err(EncoderError::UnsupportedCodec(format!("WebM does not support audio codec {codec}")));
+        }
+        let use_opus = is_webm || configured_codec.is_some_and(|codec| codec.eq_ignore_ascii_case("opus"));
+        let mut opus_target;
+        let audio_target = if use_opus {
+            opus_target = target.clone();
+            let settings = opus_target.audio.get_or_insert_with(Default::default);
+            let layout = settings.layout.unwrap_or(encodercraft_core::ChannelLayout::Stereo);
+            if !matches!(layout, encodercraft_core::ChannelLayout::Mono | encodercraft_core::ChannelLayout::Stereo) {
+                return Err(EncoderError::UnsupportedCodec("Opus encoding supports mono or stereo channel layouts".into()));
+            }
+            settings.codec = Some("opus".into());
+            settings.sample_rate = Some(48_000);
+            settings.layout = Some(layout);
+            &opus_target
+        } else {
+            target
+        };
+        let mut audio = match input.audio_feed(audio_target, &self.limits)? {
+            Some(feed) if use_opus => {
+                let channels = u8::try_from(feed.layout().channel_count())
+                    .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the Opus encoder limit".into()))?;
+                let encoder = OpusEncoder::new(channels, opus_bitrate_bps(target, usize::from(channels))?);
+                let a_cfg = AudioStreamConfig {
+                    codec_fourcc: *b"Opus",
+                    sample_rate: 48_000,
+                    layout: feed.layout(),
+                    bits_per_sample: 16,
+                    codec_private: encoder.opus_head(),
+                };
+                let track = builder.add_audio_stream(&a_cfg)?;
+                Some((feed, MatroskaAudioEncoder::Opus(Box::new(encoder)), track))
+            }
+            Some(feed) => {
+                let codec = configured_codec.unwrap_or("aac");
+                if !codec.eq_ignore_ascii_case("aac") {
+                    return Err(EncoderError::UnsupportedCodec(format!("Matroska audio codec {codec} is not supported")));
+                }
+                let channels = u8::try_from(feed.layout().channel_count())
+                    .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the AAC encoder limit".into()))?;
+                let aac_enc = AacEncoderWrapper::new(feed.rate(), channels, aac_bitrate_bps(target)?)?;
+                let a_cfg = AudioStreamConfig {
+                    codec_fourcc: *b"mp4a",
+                    sample_rate: feed.rate(),
+                    layout: feed.layout(),
+                    bits_per_sample: 16,
+                    codec_private: aac_enc.audio_specific_config(),
+                };
+                let track = builder.add_audio_stream(&a_cfg)?;
+                Some((feed, MatroskaAudioEncoder::Aac(Box::new(aac_enc)), track))
+            }
+            None => None,
+        };
+
         let mut mkv_muxer = builder.build()?;
 
-        let mut encoder = create_video_encoder(codec_kind, dims.width, dims.height, fps, target.target_bitrate_kbps)?;
-        let source_frames = self.load_source_video_frames(dims, fps)?;
-        self.progress.set_total_frames(source_frames.len() as u64);
+        self.progress.set_total_frames(input.len());
 
-        let scaler = FrameScaler::new(ScaleMode::Fit);
-        let frame_dur_ms = (1000.0 / fps.as_f64().max(1.0)).round() as u32;
+        // The Matroska muxer takes microsecond ticks.
+        let micros = |index: u64| -> i64 { (index as f64 * 1_000_000.0 * fps.den as f64 / fps.num as f64).round() as i64 };
 
-        for (f, mut frame) in source_frames.into_iter().enumerate() {
-            if self.progress.is_cancelled() {
-                return Err(EncoderError::Internal("job cancelled by user".into()));
-            }
-            frame.pts = (f as i64) * i64::from(frame_dur_ms);
-            let scaled_frame = scaler.scale(&frame, dims)?;
-            let packets = encoder.encode_frame(&scaled_frame)?;
-            for pkt in packets {
+        let processor = self.frame_processor(target, fps)?;
+        self.stream_video(&input, &processor, start_time, |index, frame| {
+            frame.pts = micros(index);
+            let duration = u32::try_from(micros(index + 1) - micros(index)).unwrap_or(u32::MAX);
+            for pkt in encoder.encode_frame(frame)? {
                 mkv_muxer.write_video_sample(
                     v_track,
-                    VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_dur_ms, is_keyframe: pkt.is_keyframe },
+                    VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: duration, is_keyframe: pkt.is_keyframe },
                 )?;
             }
-            self.progress.advance_frame(start_time);
-        }
+            Ok(())
+        })?;
 
-        let flushed = encoder.flush()?;
-        for pkt in flushed {
+        let last_duration = u32::try_from(micros(input.len()) - micros(input.len().saturating_sub(1))).unwrap_or(u32::MAX);
+        for pkt in encoder.flush()? {
             mkv_muxer.write_video_sample(
                 v_track,
-                VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: frame_dur_ms, is_keyframe: pkt.is_keyframe },
+                VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: last_duration, is_keyframe: pkt.is_keyframe },
             )?;
+        }
+
+        if let Some((feed, audio_encoder, audio_track)) = audio.as_mut() {
+            match audio_encoder {
+                MatroskaAudioEncoder::Aac(aac_encoder) => {
+                    let rate = f64::from(feed.rate());
+                    let duration = (1024.0 * 1_000_000.0 / rate).round() as u32;
+                    let mut idx = 0u64;
+                    let mut write = |packets: Vec<Vec<u8>>, muxer: &mut encodercraft_muxers::MkvMuxer<BufWriter<File>>| -> Result<(), EncoderError> {
+                        for pkt in &packets {
+                            let pts = (idx as f64 * 1024.0 * 1_000_000.0 / rate).round() as i64;
+                            muxer.write_audio_sample(*audio_track, AudioSample { data: pkt, pts, duration_ticks: duration })?;
+                            idx += 1;
+                        }
+                        Ok(())
+                    };
+                    while let Some(window) = feed.next_window()? {
+                        self.progress.checkpoint()?;
+                        write(aac_encoder.encode_buffer(&window)?, &mut mkv_muxer)?;
+                    }
+                    write(aac_encoder.flush()?, &mut mkv_muxer)?;
+                }
+                MatroskaAudioEncoder::Opus(opus_encoder) => {
+                    let channels = feed.layout().channel_count();
+                    let frame_len = OpusEncoder::FRAME_SIZE
+                        .checked_mul(channels)
+                        .ok_or_else(|| EncoderError::Internal("overflow calculating Opus frame size".into()))?;
+                    let frame_samples = u64::try_from(OpusEncoder::FRAME_SIZE)
+                        .map_err(|_| EncoderError::Internal("Opus frame size exceeds the timestamp limit".into()))?;
+                    let frame_duration = u32::try_from(samples_to_micros(frame_samples)?)
+                        .map_err(|_| EncoderError::Internal("Opus packet duration exceeds the container limit".into()))?;
+                    let mut pending = Vec::with_capacity(frame_len);
+                    let mut next_sample = 0u64;
+                    while let Some(window) = feed.next_window()? {
+                        self.progress.checkpoint()?;
+                        for packet in encode_opus_buffer(opus_encoder, &window, &mut pending)? {
+                            let pts = samples_to_micros(next_sample)?;
+                            mkv_muxer.write_audio_sample(*audio_track, AudioSample { data: &packet, pts, duration_ticks: frame_duration })?;
+                            next_sample = next_sample
+                                .checked_add(frame_samples)
+                                .ok_or_else(|| EncoderError::Internal("Opus sample timeline overflow".into()))?;
+                        }
+                    }
+                    if pending.len() % channels != 0 {
+                        return Err(EncoderError::Internal("incomplete interleaved Opus sample group".into()));
+                    }
+                    let remaining_samples = pending.len() / channels;
+                    if remaining_samples > 0 {
+                        pending.resize(frame_len, 0.0);
+                        let packet = opus_encoder.encode_float(&pending);
+                        let pts = samples_to_micros(next_sample)?;
+                        let duration = u32::try_from(samples_to_micros(
+                            u64::try_from(remaining_samples).map_err(|_| EncoderError::Internal("Opus tail exceeds the timestamp limit".into()))?,
+                        )?)
+                        .map_err(|_| EncoderError::Internal("Opus tail duration exceeds the container limit".into()))?;
+                        mkv_muxer.write_audio_sample(*audio_track, AudioSample { data: &packet, pts, duration_ticks: duration })?;
+                    }
+                }
+            }
         }
 
         let mut finished = mkv_muxer.finish()?;
         std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush MKV file: {e}")))?;
-        Ok(())
+        drop(finished);
+        staged.commit()
+    }
+
+    fn execute_audio_mkv(&self, target: &OutputTarget, is_webm: bool, start_time: Instant) -> Result<(), EncoderError> {
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = File::create(staged.path()).map_err(|e| EncoderError::Io(format!("failed to create MKV/WebM file: {e}")))?;
+        let writer = BufWriter::new(out_file);
+        let mut builder = MkvMuxerBuilder::new(writer, is_webm);
+
+        let configured_codec = audio_codec(target);
+        if is_webm
+            && let Some(codec) = configured_codec
+            && !codec.eq_ignore_ascii_case("opus")
+        {
+            return Err(EncoderError::UnsupportedCodec(format!("WebM does not support audio codec {codec}")));
+        }
+        let use_opus = is_webm || configured_codec.is_some_and(|codec| codec.eq_ignore_ascii_case("opus"));
+
+        let channels = u8::try_from(sample_buf.channel_count())
+            .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the encoder limit".into()))?;
+
+        let (mut audio_encoder, audio_track) = if use_opus {
+            let encoder = OpusEncoder::new(channels, opus_bitrate_bps(target, usize::from(channels))?);
+            let a_cfg = AudioStreamConfig {
+                codec_fourcc: *b"Opus",
+                sample_rate: 48_000,
+                layout: sample_buf.layout,
+                bits_per_sample: 16,
+                codec_private: encoder.opus_head(),
+            };
+            let track = builder.add_audio_stream(&a_cfg)?;
+            (MatroskaAudioEncoder::Opus(Box::new(encoder)), track)
+        } else {
+            let codec = configured_codec.unwrap_or("aac");
+            if !codec.eq_ignore_ascii_case("aac") {
+                return Err(EncoderError::UnsupportedCodec(format!("Matroska audio codec {codec} is not supported")));
+            }
+            let aac_enc = AacEncoderWrapper::new(sample_buf.sample_rate, channels, aac_bitrate_bps(target)?)?;
+            let a_cfg = AudioStreamConfig {
+                codec_fourcc: *b"mp4a",
+                sample_rate: sample_buf.sample_rate,
+                layout: sample_buf.layout,
+                bits_per_sample: 16,
+                codec_private: aac_enc.audio_specific_config(),
+            };
+            let track = builder.add_audio_stream(&a_cfg)?;
+            (MatroskaAudioEncoder::Aac(Box::new(aac_enc)), track)
+        };
+
+        let mut mkv_muxer = builder.build()?;
+        let total_samples = sample_buf.samples_per_channel();
+        let chunk_size = 1024;
+        let mut offset = 0;
+
+        match &mut audio_encoder {
+            MatroskaAudioEncoder::Aac(aac_encoder) => {
+                let rate = f64::from(sample_buf.sample_rate);
+                let duration = (1024.0 * 1_000_000.0 / rate).round() as u32;
+                let mut idx = 0u64;
+                let mut write = |packets: Vec<Vec<u8>>, muxer: &mut encodercraft_muxers::MkvMuxer<BufWriter<File>>| -> Result<(), EncoderError> {
+                    for pkt in &packets {
+                        let pts = (idx as f64 * 1024.0 * 1_000_000.0 / rate).round() as i64;
+                        muxer.write_audio_sample(audio_track, AudioSample { data: pkt, pts, duration_ticks: duration })?;
+                        idx += 1;
+                    }
+                    Ok(())
+                };
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    write(aac_encoder.encode_buffer(&window)?, &mut mkv_muxer)?;
+                    offset += count;
+                }
+                write(aac_encoder.flush()?, &mut mkv_muxer)?;
+            }
+            MatroskaAudioEncoder::Opus(opus_encoder) => {
+                let ch_count = sample_buf.channel_count();
+                let frame_len = OpusEncoder::FRAME_SIZE
+                    .checked_mul(ch_count)
+                    .ok_or_else(|| EncoderError::Internal("overflow calculating Opus frame size".into()))?;
+                let frame_samples = u64::try_from(OpusEncoder::FRAME_SIZE)
+                    .map_err(|_| EncoderError::Internal("Opus frame size exceeds the timestamp limit".into()))?;
+                let frame_duration = u32::try_from(samples_to_micros(frame_samples)?)
+                    .map_err(|_| EncoderError::Internal("Opus packet duration exceeds the container limit".into()))?;
+                let mut pending = Vec::with_capacity(frame_len);
+                let mut next_sample = 0u64;
+                while offset < total_samples {
+                    self.progress.checkpoint()?;
+                    let count = (total_samples - offset).min(chunk_size);
+                    let mut sub_channels = Vec::with_capacity(sample_buf.channel_count());
+                    for ch in sample_buf.channels() {
+                        sub_channels.push(ch.get(offset..offset + count).unwrap_or_default().to_vec());
+                    }
+                    let window = AudioSampleBuffer::from_planar_channels(sample_buf.sample_rate, sample_buf.layout, offset as i64, sub_channels)?;
+                    for packet in encode_opus_buffer(opus_encoder, &window, &mut pending)? {
+                        let pts = samples_to_micros(next_sample)?;
+                        mkv_muxer.write_audio_sample(audio_track, AudioSample { data: &packet, pts, duration_ticks: frame_duration })?;
+                        next_sample =
+                            next_sample.checked_add(frame_samples).ok_or_else(|| EncoderError::Internal("Opus sample timeline overflow".into()))?;
+                    }
+                    offset += count;
+                }
+                if pending.len() % ch_count != 0 {
+                    return Err(EncoderError::Internal("incomplete interleaved Opus sample group".into()));
+                }
+                let remaining_samples = pending.len() / ch_count;
+                if remaining_samples > 0 {
+                    pending.resize(frame_len, 0.0);
+                    let packet = opus_encoder.encode_float(&pending);
+                    let pts = samples_to_micros(next_sample)?;
+                    let duration = u32::try_from(samples_to_micros(
+                        u64::try_from(remaining_samples).map_err(|_| EncoderError::Internal("Opus tail exceeds the timestamp limit".into()))?,
+                    )?)
+                    .map_err(|_| EncoderError::Internal("Opus tail duration exceeds the container limit".into()))?;
+                    mkv_muxer.write_audio_sample(audio_track, AudioSample { data: &packet, pts, duration_ticks: duration })?;
+                }
+            }
+        }
+
+        let mut finished = mkv_muxer.finish()?;
+        std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush MKV file: {e}")))?;
+        drop(finished);
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        staged.commit()
     }
 
     fn execute_animated_gif(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
-        let w = target.custom_width.unwrap_or(480);
-        let h = target.custom_height.unwrap_or(270);
-        let dims = Dimensions::new(w, h)?;
-        let fps = target.custom_frame_rate.unwrap_or(Rational64::new(12, 1)?);
-
-        let source_frames = self.load_source_video_frames(dims, fps)?;
-        self.progress.set_total_frames(source_frames.len() as u64);
-
-        let scaler = FrameScaler::new(ScaleMode::Fit);
-        let fps_u32 = (fps.as_f64().round() as u32).max(1);
-        let mut gif_enc = encodercraft_video_codecs::GifEncoder::new(dims.width as u16, dims.height as u16, fps_u32)?;
-
-        for frame in source_frames {
-            let scaled = scaler.scale(&frame, dims)?;
-            gif_enc.add_frame(&scaled)?;
-            self.progress.advance_frame(start_time);
+        let mut gif_target = target.clone();
+        if gif_target.custom_frame_rate.is_none() {
+            gif_target.custom_frame_rate = Some(Rational64::new(12, 1)?);
         }
+        let input = VideoInput::open(&self.spec.source, &gif_target)?;
+        let dims = input.dims();
+        let fps = input.fps();
+        let width = u16::try_from(dims.width).map_err(|_| EncoderError::InvalidJobSpec("GIF width exceeds 65535 pixels".into()))?;
+        let height = u16::try_from(dims.height).map_err(|_| EncoderError::InvalidJobSpec("GIF height exceeds 65535 pixels".into()))?;
+
+        self.progress.set_total_frames(input.len());
+        let fps_u32 = (fps.as_f64().round() as u32).max(1);
+        let mut gif_enc = encodercraft_video_codecs::GifEncoder::new(width, height, fps_u32)?;
+
+        let processor = self.frame_processor(&gif_target, fps)?;
+        self.stream_video(&input, &processor, start_time, |_, frame| gif_enc.add_frame(frame))?;
 
         let gif_bytes = gif_enc.finish();
-        std::fs::write(&target.output_path, gif_bytes).map_err(|e| EncoderError::Io(format!("failed to write GIF file: {e}")))?;
-        Ok(())
+        let staged = StagedOutput::new(&target.output_path)?;
+        std::fs::write(staged.path(), gif_bytes).map_err(|e| EncoderError::Io(format!("failed to write GIF file: {e}")))?;
+        staged.commit()
     }
 
     /// Exports multichannel audio stems (discrete mono or stereo pairs) conforming to AME multichannel workflow.
     fn export_audio_stems(&self, target: &OutputTarget, mode: encodercraft_core::AudioStemMode) -> Result<(), EncoderError> {
-        let sample_rate = 48000;
-        let channels = 2; // Default stereo source
-        let sample_buf =
-            encodercraft_core::AudioSampleBuffer::new_silent(sample_rate, encodercraft_core::ChannelLayout::Stereo, sample_rate as usize, 0)?;
+        let sample_buf = self.load_source_audio(target)?;
+        let sample_rate = sample_buf.sample_rate;
+        let channels = sample_buf.layout.channel_count();
 
         let stem_base = target.output_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
         let parent = target.output_path.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -952,44 +2518,221 @@ impl TranscodePipeline {
     }
 }
 
-fn quick_xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+/// An output written beside its destination and moved into place only when complete, so a failed
+/// or cancelled job never leaves a truncated file (nor replaces an existing one).
+struct StagedOutput {
+    final_path: PathBuf,
+    staged_path: PathBuf,
 }
 
-fn generate_minimal_pdf(title: &str) -> Vec<u8> {
-    let safe_title = title.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
-    let content_stream = format!("BT\n/F1 18 Tf\n50 750 Td\n({}) Tj\nET\n", safe_title);
-    let stream_len = content_stream.len();
+impl StagedOutput {
+    fn new(final_path: &Path) -> Result<Self, EncoderError> {
+        static NEXT_STAGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let name = final_path
+            .file_name()
+            .ok_or_else(|| EncoderError::InvalidJobSpec(format!("output path {} has no file name", final_path.display())))?
+            .to_string_lossy();
+        for _ in 0..8 {
+            let sequence = NEXT_STAGE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let staged_path = final_path.with_file_name(format!(".{name}.{}.{}.partial", std::process::id(), sequence));
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&staged_path) {
+                Ok(file) => {
+                    drop(file);
+                    return Ok(Self { final_path: final_path.to_path_buf(), staged_path });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(EncoderError::Io(format!("failed to create staged output {}: {error}", staged_path.display())));
+                }
+            }
+        }
+        Err(EncoderError::Io(format!("could not reserve a unique staged output beside {}", final_path.display())))
+    }
 
-    let mut pdf = Vec::new();
-    pdf.extend_from_slice(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
-    let o1 = pdf.len();
-    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-    let o2 = pdf.len();
-    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-    let o3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
-    );
-    let o4 = pdf.len();
-    let stream_obj = format!("4 0 obj\n<< /Length {} >>\nstream\n{}endstream\nendobj\n", stream_len, content_stream);
-    pdf.extend_from_slice(stream_obj.as_bytes());
-    let o5 = pdf.len();
-    pdf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
-    let xref_pos = pdf.len();
-    let xref = format!(
-        "xref\n0 6\n0000000000 65535 f \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \n{:010} 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
-        o1, o2, o3, o4, o5, xref_pos
-    );
-    pdf.extend_from_slice(xref.as_bytes());
-    pdf
+    fn path(&self) -> &Path {
+        &self.staged_path
+    }
+
+    /// Flushes the staged output and atomically replaces the destination through craft-atomic.
+    fn commit(self) -> Result<(), EncoderError> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.staged_path)
+            .map_err(|e| EncoderError::Io(format!("failed to reopen {}: {e}", self.staged_path.display())))?;
+        craft_atomic::sync_file(&file).map_err(|e| EncoderError::Io(format!("failed to flush {}: {e}", self.staged_path.display())))?;
+        drop(file);
+        let mut staged =
+            File::open(&self.staged_path).map_err(|e| EncoderError::Io(format!("failed to read {}: {e}", self.staged_path.display())))?;
+        craft_atomic::atomic_write_with(&self.final_path, |dest| std::io::copy(&mut staged, dest).map(|_| ()))
+            .map_err(|e| EncoderError::Io(format!("failed to atomically replace {}: {e}", self.final_path.display())))?;
+        Ok(())
+    }
+}
+
+impl Drop for StagedOutput {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.staged_path);
+    }
+}
+
+#[cfg(test)]
+mod staged_output_tests {
+    use super::*;
+
+    #[test]
+    fn dropping_staged_output_preserves_destination_and_removes_partial() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("render.mp4");
+        std::fs::write(&destination, b"previous render").unwrap();
+        let staged = StagedOutput::new(&destination).unwrap();
+        let partial = staged.path().to_path_buf();
+        std::fs::write(&partial, b"incomplete render").unwrap();
+
+        drop(staged);
+
+        assert_eq!(std::fs::read(destination).unwrap(), b"previous render");
+        assert!(!partial.exists());
+    }
+
+    #[test]
+    fn commit_replaces_existing_destination_and_removes_staging_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("render.mp4");
+        std::fs::write(&destination, b"previous render").unwrap();
+        let staged = StagedOutput::new(&destination).unwrap();
+        let partial = staged.path().to_path_buf();
+        std::fs::write(&partial, b"finished render").unwrap();
+
+        staged.commit().unwrap();
+
+        assert_eq!(std::fs::read(destination).unwrap(), b"finished render");
+        assert!(!partial.exists());
+    }
+}
+
+/// SMPTE-style timecode for output frame `f`, counting nominal (rounded) frames per second.
+pub(crate) fn timecode_for_frame(f: u64, fps: Rational64) -> encodercraft_core::MediaTimecode {
+    let nominal = (fps.as_f64().round() as u64).max(1);
+    let total_seconds = f / nominal;
+    let frames = (f % nominal) as u8;
+    let seconds = (total_seconds % 60) as u8;
+    let minutes = ((total_seconds / 60) % 60) as u8;
+    let hours = ((total_seconds / 3600) % 100) as u8;
+    encodercraft_core::MediaTimecode::new(hours, minutes, seconds, frames, false, fps)
+}
+
+/// Picks the video codec: an explicit target codec wins over the preset-name heuristic, and the
+/// container must be able to store it.
+fn resolve_codec(target: &OutputTarget, inferred: VideoCodecKind) -> Result<VideoCodecKind, EncoderError> {
+    let kind = match target.video.codec.as_deref() {
+        Some(id) => VideoCodecKind::parse(id).ok_or_else(|| EncoderError::UnsupportedCodec(format!("unknown video codec `{id}`")))?,
+        None => inferred,
+    };
+    if !container_accepts(target.container, kind) {
+        return Err(EncoderError::UnsupportedCodec(format!("{kind:?} video cannot be stored in {:?}", target.container)));
+    }
+    Ok(kind)
+}
+
+/// Pixel layout emitted by the selected software encoder. Explicit unsupported layouts fail
+/// instead of being silently written with metadata that disagrees with the encoded bitstream.
+pub fn target_pixel_format(target: &OutputTarget) -> Result<PixelFormat, EncoderError> {
+    let name = target.preset_name.to_ascii_lowercase();
+    let inferred = if target.container == ContainerType::AnimatedGif {
+        VideoCodecKind::Gif
+    } else if target.container == ContainerType::WebM {
+        if name.contains("av1") { VideoCodecKind::Av1 } else { VideoCodecKind::Vp9 }
+    } else if name.contains("prores") {
+        VideoCodecKind::ProRes
+    } else if name.contains("dnx") {
+        VideoCodecKind::DnxHd
+    } else if name.contains("hevc") || name.contains("h265") {
+        VideoCodecKind::Hevc
+    } else if name.contains("av1") {
+        VideoCodecKind::Av1
+    } else if name.contains("vp9") {
+        VideoCodecKind::Vp9
+    } else if name.contains("mjpeg") || name.contains("motion jpeg") {
+        VideoCodecKind::Mjpeg
+    } else if matches!(target.container, ContainerType::MxfOp1a | ContainerType::MxfOpAtom) {
+        VideoCodecKind::DnxHd
+    } else {
+        VideoCodecKind::H264
+    };
+    let kind = resolve_codec(target, inferred)?;
+    let output = match kind {
+        VideoCodecKind::Hevc | VideoCodecKind::Av1 => PixelFormat::Yuv420p10,
+        VideoCodecKind::ProRes => PixelFormat::Yuv422p10,
+        VideoCodecKind::DnxHd if target.video.profile.as_deref().is_some_and(|p| p.eq_ignore_ascii_case("hqx")) || name.contains("hqx") => {
+            PixelFormat::Yuv422p10
+        }
+        VideoCodecKind::DnxHd => PixelFormat::Yuv422p,
+        VideoCodecKind::H264 | VideoCodecKind::Vp9 | VideoCodecKind::Mjpeg | VideoCodecKind::Gif => PixelFormat::Yuv420p,
+    };
+    if let Some(requested) = target.video.pixel_format
+        && requested != output
+    {
+        return Err(EncoderError::UnsupportedCodec(format!("{kind:?} outputs {output:?}; requested pixel format {requested:?} is not supported")));
+    }
+    Ok(output)
+}
+
+fn encode_params(target: &OutputTarget) -> EncodeParams {
+    EncodeParams::from_settings(&target.video, target.target_bitrate_kbps)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use encodercraft_core::{ClientInfo, JobPriority, SourceDescriptor, StartPolicy};
+    use encodercraft_color::ColorSpaceTag;
+    use encodercraft_core::{ClientInfo, JobPriority, SourceDescriptor, StartPolicy, VideoFrame};
     use tempfile::tempdir;
+
+    #[test]
+    fn pcm24_audio_is_interleaved_little_endian_and_clamped() {
+        let audio = AudioSampleBuffer::from_planar_channels(
+            48_000,
+            encodercraft_core::ChannelLayout::Stereo,
+            0,
+            vec![vec![-1.0, 0.5, f32::NAN], vec![1.0, -0.5, 0.0]],
+        )
+        .unwrap();
+
+        assert_eq!(
+            encode_pcm_s24le(&audio).unwrap(),
+            vec![0x00, 0x00, 0x80, 0xff, 0xff, 0x7f, 0x00, 0x00, 0x40, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
+    }
+
+    /// A 64x48 RGBA gradient written as a real BMP file.
+    pub(super) fn write_test_bmp(dir: &std::path::Path) -> std::path::PathBuf {
+        let dims = Dimensions::new(64, 48).unwrap();
+        let mut frame = VideoFrame::new_allocated(dims, PixelFormat::Rgba8, ColorSpaceTag::SRGB, 0, 1, Rational64::FPS_24).unwrap();
+        let (plane, _) = frame.plane_mut(0).unwrap();
+        for (i, px) in plane.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            px.copy_from_slice(&[(i % 64 * 4) as u8, (i / 64 * 5) as u8, 200, 255]);
+        }
+        let path = dir.join("source.bmp");
+        std::fs::write(&path, encodercraft_image_codecs::encode_bmp(&frame).unwrap()).unwrap();
+        path
+    }
+
+    /// Half a second of 440 Hz stereo audio written as a real WAV file.
+    pub(super) fn write_test_wav(dir: &std::path::Path) -> std::path::PathBuf {
+        let mut buf = AudioSampleBuffer::new_silent(48_000, encodercraft_core::ChannelLayout::Stereo, 24_000, 0).unwrap();
+        for c in 0..2 {
+            for (i, v) in buf.channel_mut(c).unwrap().iter_mut().enumerate() {
+                *v = (i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 0.5;
+            }
+        }
+        let path = dir.join("source.wav");
+        let file = File::create(&path).unwrap();
+        let mut writer = BwfWavWriter::new(file, 48_000, 2, WavFormatTag::Pcm16, None).unwrap();
+        writer.write_buffer(&buf).unwrap();
+        writer.finish().unwrap();
+        path
+    }
 
     #[test]
     fn test_execute_audio_transcode() {
@@ -1002,7 +2745,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_wav(dir.path()), start_tick: None, duration_ticks: None, timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t1".into(),
                 output_path: target_file.clone(),
@@ -1034,7 +2777,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_bmp(dir.path()), start_tick: None, duration_ticks: Some(6), timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t1".into(),
                 output_path: target_file.clone(),
@@ -1067,7 +2810,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_wav(dir.path()), start_tick: None, duration_ticks: None, timebase: None },
             targets: vec![
                 OutputTarget {
                     target_id: "t_flac".into(),
@@ -1115,7 +2858,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_bmp(dir.path()), start_tick: None, duration_ticks: Some(6), timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t1".into(),
                 output_path: target_file.clone(),
@@ -1150,7 +2893,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_bmp(dir.path()), start_tick: None, duration_ticks: Some(6), timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t1".into(),
                 output_path: target_video.clone(),
@@ -1192,6 +2935,7 @@ mod tests {
             create_date: Some("2026-11-02T12:00:00Z".into()),
             start_timecode: Some("01:00:00:00".into()),
             export_sidecar_xmp: true,
+            ..Default::default()
         };
 
         let spec = CraftJobSpec {
@@ -1200,7 +2944,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_bmp(dir.path()), start_tick: None, duration_ticks: Some(6), timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t1".into(),
                 output_path: target_video.clone(),
@@ -1243,7 +2987,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_wav(dir.path()), start_tick: None, duration_ticks: None, timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t1".into(),
                 output_path: target_audio.clone(),
@@ -1268,6 +3012,39 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_audio_matrix_routing() {
+        let dir = tempdir().unwrap();
+        let target_audio = dir.path().join("routed.wav");
+
+        let mut mapping = encodercraft_core::AudioChannelMapping::new_pass_through(2);
+        // Swap left and right channels
+        mapping.matrix = vec![vec![0.0, 1.0], vec![1.0, 0.0]];
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-matrix-audio-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: write_test_wav(dir.path()), start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: target_audio.clone(),
+                preset_name: "Broadcast WAV".into(),
+                container: ContainerType::Wave,
+                audio_mapping: Some(mapping),
+                ..Default::default()
+            }],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(target_audio.exists());
+        assert!(target_audio.metadata().unwrap().len() > 100);
+    }
+
+    #[test]
     fn test_execute_dnxhr_transcode() {
         let dir = tempdir().unwrap();
         let target_video = dir.path().join("output_dnx.mov");
@@ -1278,7 +3055,7 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: "input.raw".into(), start_tick: None, duration_ticks: None, timebase: None },
+            source: SourceDescriptor::File { path: write_test_bmp(dir.path()), start_tick: None, duration_ticks: Some(6), timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t1".into(),
                 output_path: target_video.clone(),
@@ -1327,9 +3104,295 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_cad_dxf_and_cadcraft_transcode() {
+        let dir = tempdir().unwrap();
+        let dxf_in = dir.path().join("blueprint.dxf");
+        let cadcraft_out = dir.path().join("blueprint.cadcraft");
+        let svg_out = dir.path().join("blueprint.svg");
+        let hpgl_out = dir.path().join("blueprint.plt");
+
+        let mut cad = encodercraft_spatial_io::CadDrawing::new("Foundation");
+        cad.add_line(encodercraft_spatial_io::CadPoint3D::new(0.0, 0.0, 0.0), encodercraft_spatial_io::CadPoint3D::new(500.0, 200.0, 0.0), "Walls");
+        cad.add_circle(encodercraft_spatial_io::CadPoint3D::new(250.0, 100.0, 0.0), 50.0, "Walls");
+        std::fs::write(&dxf_in, cad.to_dxf_ascii()).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-cad-job".into(),
+            client_info: ClientInfo { app_name: "cadcraft".into(), app_version: "1.0".into(), pid: 42, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: dxf_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_cadcraft".into(),
+                    output_path: cadcraft_out.clone(),
+                    preset_name: "ArtCraft Native CadCraft".into(),
+                    container: ContainerType::ArtcraftCadcraft,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_svg".into(),
+                    output_path: svg_out.clone(),
+                    preset_name: "Web Vector SVG".into(),
+                    container: ContainerType::Svg,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_hpgl".into(),
+                    output_path: hpgl_out.clone(),
+                    preset_name: "HPGL Pen Plotter".into(),
+                    container: ContainerType::HpglPlotter,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(cadcraft_out.exists());
+        let cad_bytes = std::fs::read(&cadcraft_out).unwrap();
+        assert!(cad_bytes.starts_with(b"\x89CRAFT\x00\x01C"));
+
+        assert!(svg_out.exists());
+        let svg_text = std::fs::read_to_string(&svg_out).unwrap();
+        assert!(svg_text.contains("<svg"));
+        assert!(svg_text.contains("<line"));
+        assert!(svg_text.contains("<circle"));
+
+        assert!(hpgl_out.exists());
+        let hpgl_text = std::fs::read_to_string(&hpgl_out).unwrap();
+        assert!(hpgl_text.starts_with("IN;SP1;"));
+    }
+
+    #[test]
+    fn test_execute_prepress_indd_and_designcraft_transcode() {
+        let dir = tempdir().unwrap();
+        let indd_in = dir.path().join("brochure.indd");
+        let designcraft_out = dir.path().join("brochure.designcraft");
+        let idml_out = dir.path().join("brochure.idml");
+        let pdf_out = dir.path().join("brochure.pdf");
+
+        let mut indd_bytes = vec![0x06, 0x06, 0xED, 0xF5, 0xD8, 0x1D, 0x46, 0xE5, 0xBD, 0x31, 0xEF, 0xE7, 0xFE, 0x74, 0xB7, 0x1D];
+        indd_bytes.extend_from_slice(b"ObjectStreams<spread><story>Spring Collection</story></spread>");
+        std::fs::write(&indd_in, &indd_bytes).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-prepress-job".into(),
+            client_info: ClientInfo { app_name: "designcraft".into(), app_version: "1.0".into(), pid: 101, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: indd_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_designcraft".into(),
+                    output_path: designcraft_out.clone(),
+                    preset_name: "ArtCraft Native DesignCraft".into(),
+                    container: ContainerType::ArtcraftDesigncraft,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_idml".into(),
+                    output_path: idml_out.clone(),
+                    preset_name: "InDesign IDML Package".into(),
+                    container: ContainerType::Idml,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_pdf".into(),
+                    output_path: pdf_out.clone(),
+                    preset_name: "Press Quality PDF/X-4".into(),
+                    container: ContainerType::Pdf,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(designcraft_out.exists());
+        let dc_bytes = std::fs::read(&designcraft_out).unwrap();
+        assert!(dc_bytes.starts_with(b"\x89CRAFT\x00\x01D"));
+
+        assert!(idml_out.exists());
+        let idml_bytes = std::fs::read(&idml_out).unwrap();
+        assert!(idml_bytes.starts_with(b"PK\x03\x04"));
+
+        assert!(pdf_out.exists());
+        let pdf_data = std::fs::read(&pdf_out).unwrap();
+        assert!(pdf_data.starts_with(b"%PDF-1.6"));
+        let pdf_str = String::from_utf8_lossy(&pdf_data);
+        assert!(pdf_str.contains("/GTS_PDFXVersion (PDF/X-4)"));
+    }
+
+    #[test]
+    fn test_execute_layered_psd_and_photocraft_transcode() {
+        let dir = tempdir().unwrap();
+        let psd_in = dir.path().join("artwork.psd");
+        let photocraft_out = dir.path().join("artwork.photocraft");
+        let psb_out = dir.path().join("artwork.psb");
+        let exr_out = dir.path().join("artwork.exr");
+
+        let mut img = encodercraft_image_codecs::LayeredImage::new("Artwork", 64, 64);
+        let layer = encodercraft_image_codecs::ImageLayer::new("Layer 1", 64, 64, vec![180; 64 * 64 * 4]);
+        img.add_layer(layer);
+        let psd_bytes = img.to_psd_bytes(false).unwrap();
+        std::fs::write(&psd_in, &psd_bytes).unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "test-layered-job".into(),
+            client_info: ClientInfo { app_name: "photocraft".into(), app_version: "1.0".into(), pid: 202, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: psd_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_photocraft".into(),
+                    output_path: photocraft_out.clone(),
+                    preset_name: "ArtCraft Native PhotoCraft".into(),
+                    container: ContainerType::ArtcraftPhotocraft,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_psb".into(),
+                    output_path: psb_out.clone(),
+                    preset_name: "Photoshop Large Document PSB".into(),
+                    container: ContainerType::AdobePhotoshopPsb,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_exr".into(),
+                    output_path: exr_out.clone(),
+                    preset_name: "VFX Composite OpenEXR".into(),
+                    container: ContainerType::OpenExr,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let pipeline = TranscodePipeline::new(spec);
+        pipeline.execute().unwrap();
+
+        assert!(photocraft_out.exists());
+        let pc_bytes = std::fs::read(&photocraft_out).unwrap();
+        assert!(pc_bytes.starts_with(b"\x89CRAFT\x00\x01P"));
+
+        assert!(psb_out.exists());
+        let psb_bytes = std::fs::read(&psb_out).unwrap();
+        assert!(psb_bytes.starts_with(b"8BPS"));
+        assert_eq!(psb_bytes[4..6], [0, 2]); // Version 2
+
+        assert!(exr_out.exists());
+        let exr_data = std::fs::read(&exr_out).unwrap();
+        assert!(exr_data.starts_with(b"\x76\x2F\x31\x01")); // OpenEXR magic
+    }
+
+    fn selection_spec(
+        source: std::path::PathBuf,
+        out: std::path::PathBuf,
+        container: ContainerType,
+        selection: encodercraft_core::SourceSelection,
+    ) -> CraftJobSpec {
+        CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "selection-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: source, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t".into(),
+                output_path: out,
+                preset_name: "p".into(),
+                container,
+                selection,
+                ..Default::default()
+            }],
+        }
+    }
+
+    #[test]
+    fn selection_restricts_timeline_sequences_and_rejects_unknown() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("in.prproj");
+        let mut t = crate::project::TimelineProject::new("P");
+        t.add_sequence(crate::project::TimelineSequence::new("Main", 1920, 1080, 25.0));
+        t.add_sequence(crate::project::TimelineSequence::new("Social", 1080, 1920, 30.0));
+        std::fs::write(&src, t.to_prproj()).unwrap();
+
+        let out = dir.path().join("all.prproj");
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::AdobePremierePrproj, Default::default())).execute().unwrap();
+        assert_eq!(crate::inventory::inspect_source(&out).sequences.len(), 2);
+
+        let out = dir.path().join("one.prproj");
+        let sel = encodercraft_core::SourceSelection { sequence: Some("Social".into()), ..Default::default() };
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::AdobePremierePrproj, sel)).execute().unwrap();
+        let inv = crate::inventory::inspect_source(&out);
+        assert_eq!(inv.sequences.len(), 1);
+        assert_eq!(inv.sequences[0].name, "Social");
+        assert_eq!(inv.sequences[0].width, 1080);
+
+        let out = dir.path().join("bad.prproj");
+        let sel = encodercraft_core::SourceSelection { sequence: Some("Nope".into()), ..Default::default() };
+        assert!(TranscodePipeline::new(selection_spec(src, out.clone(), ContainerType::AdobePremierePrproj, sel)).execute().is_err());
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn selection_restricts_document_pages_and_cad_layers() {
+        let dir = tempdir().unwrap();
+        let mut doc = crate::document::DocumentCanvas::new("Report");
+        doc.pages[0].add_text(54.0, 720.0, 100.0, 20.0, "PAGE-ONE", 14.0);
+        doc.add_page().add_text(54.0, 720.0, 100.0, 20.0, "PAGE-TWO", 14.0);
+        let src = dir.path().join("in.designcraft");
+        std::fs::write(&src, doc.to_designcraft_binary().unwrap()).unwrap();
+
+        let out = dir.path().join("p2.pdf");
+        let sel = encodercraft_core::SourceSelection { pages: Some((2, 2)), ..Default::default() };
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::Pdf, sel)).execute().unwrap();
+        let pdf = String::from_utf8_lossy(&std::fs::read(&out).unwrap()).to_string();
+        assert!(pdf.contains("PAGE-TWO") && !pdf.contains("PAGE-ONE"));
+
+        let out = dir.path().join("bad.pdf");
+        let sel = encodercraft_core::SourceSelection { pages: Some((9, 9)), ..Default::default() };
+        assert!(TranscodePipeline::new(selection_spec(src, out.clone(), ContainerType::Pdf, sel)).execute().is_err());
+        assert!(!out.exists());
+
+        let mut cad = encodercraft_spatial_io::CadDrawing::new("Plan");
+        let p0 = encodercraft_spatial_io::CadPoint3D::new(0.0, 0.0, 0.0);
+        cad.add_line(p0, encodercraft_spatial_io::CadPoint3D::new(10.0, 0.0, 0.0), "WALLS");
+        cad.add_line(p0, encodercraft_spatial_io::CadPoint3D::new(0.0, 10.0, 0.0), "FURNITURE");
+        let src = dir.path().join("plan.cadcraft");
+        std::fs::write(&src, cad.to_cadcraft_binary().unwrap()).unwrap();
+        let out = dir.path().join("walls.cadcraft");
+        let sel = encodercraft_core::SourceSelection { layers: Some(vec!["WALLS".into()]), ..Default::default() };
+        TranscodePipeline::new(selection_spec(src.clone(), out.clone(), ContainerType::ArtcraftCadcraft, sel)).execute().unwrap();
+        let back = encodercraft_spatial_io::CadDrawing::from_cadcraft_binary(&std::fs::read(&out).unwrap()).unwrap();
+        assert_eq!(back.entities.len(), 1);
+        assert!(!back.layer_names().contains(&"FURNITURE".to_string()));
+
+        let out = dir.path().join("bad.cadcraft");
+        let sel = encodercraft_core::SourceSelection { layers: Some(vec!["NOPE".into()]), ..Default::default() };
+        assert!(TranscodePipeline::new(selection_spec(src, out.clone(), ContainerType::ArtcraftCadcraft, sel)).execute().is_err());
+        assert!(!out.exists());
+    }
+
+    #[test]
     fn test_execute_document_pdf_transcode() {
         let dir = tempdir().unwrap();
+        let docx_src = dir.path().join("sample.docx");
         let pdf_out = dir.path().join("output.pdf");
+        let md_out = dir.path().join("output.md");
+
+        let mut doc = crate::document::DocumentCanvas::new("Sample Report");
+        doc.pages[0].add_text(54.0, 720.0, 500.0, 24.0, "Quarterly Results", 18.0);
+        doc.pages[0].add_text(54.0, 680.0, 500.0, 16.0, "All metrics exceeded expectations.", 12.0);
+        doc.add_page().add_text(54.0, 720.0, 500.0, 20.0, "Second page content survives import", 12.0);
+        std::fs::write(&docx_src, doc.to_docx_bytes().unwrap()).unwrap();
 
         let spec = CraftJobSpec {
             version: "1.0".into(),
@@ -1337,21 +3400,189 @@ mod tests {
             client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: dir.path().join("sample.docx"), start_tick: None, duration_ticks: None, timebase: None },
-            targets: vec![OutputTarget {
-                target_id: "t_pdf".into(),
-                output_path: pdf_out.clone(),
-                preset_name: "Print-Ready PDF/X-4".into(),
-                container: ContainerType::Pdf,
-                ..Default::default()
-            }],
+            source: SourceDescriptor::File { path: docx_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_pdf".into(),
+                    output_path: pdf_out.clone(),
+                    preset_name: "Print-Ready PDF/X-4".into(),
+                    container: ContainerType::Pdf,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_md".into(),
+                    output_path: md_out.clone(),
+                    preset_name: "Markdown".into(),
+                    container: ContainerType::Markdown,
+                    ..Default::default()
+                },
+            ],
         };
 
         let pipeline = TranscodePipeline::new(spec);
         pipeline.execute().unwrap();
         assert!(pdf_out.exists());
         let pdf_bytes = std::fs::read(pdf_out).unwrap();
-        assert!(pdf_bytes.starts_with(b"%PDF-1.7"));
+        assert!(pdf_bytes.starts_with(b"%PDF-"));
+        assert!(String::from_utf8_lossy(&pdf_bytes).contains("/Count 2"));
+        assert!(String::from_utf8_lossy(&pdf_bytes).contains("Second page content survives import"));
+
+        assert!(md_out.exists());
+        let md_str = std::fs::read_to_string(md_out).unwrap();
+        assert!(md_str.contains("Quarterly Results"));
+    }
+
+    #[test]
+    fn document_conversion_preserves_long_text_and_extracts_pdf_text() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("long.txt");
+        let output = dir.path().join("long.md");
+        let text = (0..80).map(|i| format!("line-{i:03}\n")).collect::<String>();
+        std::fs::write(&source, text).unwrap();
+        TranscodePipeline::new(selection_spec(source, output.clone(), ContainerType::Markdown, Default::default())).execute().unwrap();
+        let result = std::fs::read_to_string(output).unwrap();
+        for i in 0..80 {
+            assert!(result.contains(&format!("line-{i:03}")), "missing line {i}");
+        }
+
+        let source = dir.path().join("source.pdf");
+        let output = dir.path().join("result.md");
+        let mut pdf_doc = crate::document::DocumentCanvas::new("Source PDF");
+        pdf_doc.pages[0].add_text(54.0, 720.0, 500.0, 20.0, "Extracted from a real PDF page", 12.0);
+        std::fs::write(&source, pdf_doc.to_pdf_x4_bytes().unwrap()).unwrap();
+        TranscodePipeline::new(selection_spec(source, output.clone(), ContainerType::Markdown, Default::default())).execute().unwrap();
+        let result = std::fs::read_to_string(output).unwrap();
+        assert!(result.contains("Extracted from a real PDF page"));
+    }
+
+    #[test]
+    fn pdf_to_png_renders_a_300_dpi_page_sequence() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source.pdf");
+        let output = dir.path().join("rendered.png");
+        let mut pdf_doc = crate::document::DocumentCanvas::new("Two-page PDF");
+        pdf_doc.pages[0].add_text(54.0, 720.0, 500.0, 20.0, "Page one", 12.0);
+        pdf_doc.add_page().add_text(54.0, 720.0, 500.0, 20.0, "Page two", 12.0);
+        std::fs::write(&source, pdf_doc.to_pdf_x4_bytes().unwrap()).unwrap();
+
+        TranscodePipeline::new(selection_spec(source, output.clone(), ContainerType::Png, Default::default())).execute().unwrap();
+        let first = std::fs::read(dir.path().join("rendered_0001.png")).unwrap();
+        let second = std::fs::read(dir.path().join("rendered_0002.png")).unwrap();
+        assert!(first.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(second.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(u32::from_be_bytes(first[16..20].try_into().unwrap()), 2625);
+        assert!(u32::from_be_bytes(first[20..24].try_into().unwrap()).abs_diff(3375) <= 1);
+    }
+
+    #[test]
+    fn test_execute_spatial_3d_ascii_stl_and_step_to_glb() {
+        let dir = tempdir().unwrap();
+
+        // 1. ASCII STL source
+        let ascii_stl = dir.path().join("triangle.stl");
+        let glb_from_stl = dir.path().join("from_stl.glb");
+        let mut stl_mesh = encodercraft_spatial_io::TriangleMesh::new("TestTriangle");
+        stl_mesh.vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        stl_mesh.indices = vec![[0, 1, 2]];
+        std::fs::write(&ascii_stl, encodercraft_spatial_io::write_stl_ascii(&stl_mesh)).unwrap();
+
+        let stl_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "stl-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: ascii_stl, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![OutputTarget {
+                target_id: "t_glb1".into(),
+                output_path: glb_from_stl.clone(),
+                preset_name: "glTF 2.0 Binary (.glb)".into(),
+                container: ContainerType::Gltf,
+                ..Default::default()
+            }],
+        };
+        TranscodePipeline::new(stl_spec).execute().unwrap();
+        assert!(glb_from_stl.exists());
+        let glb_bytes = std::fs::read(&glb_from_stl).unwrap();
+        assert!(glb_bytes.starts_with(b"glTF"));
+
+        // 2. STEP CAD source
+        let step_src = dir.path().join("part.step");
+        let glb_from_step = dir.path().join("from_step.glb");
+        let step_out = dir.path().join("converted.step");
+        let stl_from_step = dir.path().join("from_step.stl");
+        let usdz_from_step = dir.path().join("from_step.usdz");
+        let obj_from_step = dir.path().join("from_step.obj");
+        let step_bytes = encodercraft_spatial_io::write_step(&stl_mesh);
+        std::fs::write(&step_src, &step_bytes).unwrap();
+
+        let step_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "step-job".into(),
+            client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: step_src, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_glb2".into(),
+                    output_path: glb_from_step.clone(),
+                    preset_name: "glTF 2.0 Binary (.glb)".into(),
+                    container: ContainerType::Gltf,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_step".into(),
+                    output_path: step_out.clone(),
+                    preset_name: "STEP CAD".into(),
+                    container: ContainerType::Step,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_stl".into(),
+                    output_path: stl_from_step.clone(),
+                    preset_name: "STL".into(),
+                    container: ContainerType::Stl,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_usdz".into(),
+                    output_path: usdz_from_step.clone(),
+                    preset_name: "USDZ".into(),
+                    container: ContainerType::Usdz,
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_obj".into(),
+                    output_path: obj_from_step.clone(),
+                    preset_name: "OBJ".into(),
+                    container: ContainerType::Obj,
+                    ..Default::default()
+                },
+            ],
+        };
+        TranscodePipeline::new(step_spec).execute().unwrap();
+        assert!(glb_from_step.exists());
+        assert!(step_out.exists());
+        assert!(stl_from_step.exists());
+        assert!(usdz_from_step.exists());
+        assert!(obj_from_step.exists());
+        let step_str = std::fs::read_to_string(step_out).unwrap();
+        assert!(step_str.starts_with("ISO-10303-21;"));
+        for (name, output) in
+            [("from_step.stl", stl_from_step), ("from_step.glb", glb_from_step), ("from_step.usdz", usdz_from_step), ("from_step.obj", obj_from_step)]
+        {
+            let bytes = std::fs::read(output).unwrap();
+            let imported = texturecraft_formats::import_mesh_bytes(name, &bytes).unwrap();
+            assert_eq!(imported.mesh.indices.len(), 3, "{name}");
+        }
+
+        let stp_src = dir.path().join("part.stp");
+        let stp_glb = dir.path().join("from_stp.glb");
+        std::fs::write(&stp_src, step_bytes).unwrap();
+        TranscodePipeline::new(selection_spec(stp_src, stp_glb.clone(), ContainerType::Gltf, Default::default())).execute().unwrap();
+        let stp_mesh = texturecraft_formats::import_mesh_bytes("from_stp.glb", &std::fs::read(stp_glb).unwrap()).unwrap();
+        assert_eq!(stp_mesh.mesh.indices.len(), 3);
     }
 
     #[test]
@@ -1503,7 +3734,67 @@ mod tests {
         assert!(usdz_out.exists());
         let usdz_bytes = std::fs::read(&usdz_out).unwrap();
         assert!(usdz_bytes.starts_with(b"PK\x03\x04"));
-        assert!(usdz_bytes.windows(10).any(|w| w == b"model.usda"));
+        let imported = texturecraft_formats::import_mesh_bytes("pyramid.usdz", &usdz_bytes).unwrap();
+        assert_eq!(imported.mesh.positions.len(), 3);
+        assert_eq!(imported.mesh.indices.len(), 3);
+    }
+
+    #[test]
+    fn mesh_formats_roundtrip_through_each_supported_exporter() {
+        let dir = tempdir().unwrap();
+        let mut mesh = encodercraft_spatial_io::TriangleMesh::new("RoundTrip");
+        mesh.vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        mesh.indices = vec![[0, 1, 2]];
+        mesh.generate_flat_normals();
+        let texture_mesh = to_texturecraft_mesh(&mesh).unwrap();
+        let sources = [
+            ("obj", texturecraft_formats::obj_bytes(&texture_mesh, "RoundTrip")),
+            ("stl", encodercraft_spatial_io::write_stl_binary(&mesh)),
+            ("ply", encodercraft_spatial_io::write_ply_binary(&mesh)),
+            ("glb", texturecraft_formats::glb_bytes(&texture_mesh, "RoundTrip", &[]).unwrap()),
+            ("usdz", texturecraft_formats::usd_bytes(&texture_mesh, "RoundTrip", &[], texturecraft_formats::UsdFormat::Usdz).unwrap().bytes),
+        ];
+        let output_formats = [
+            ("obj", ContainerType::Obj),
+            ("stl", ContainerType::Stl),
+            ("ply", ContainerType::Ply),
+            ("glb", ContainerType::Gltf),
+            ("usdz", ContainerType::Usdz),
+        ];
+
+        for (source_extension, source_bytes) in sources {
+            let source = dir.path().join(format!("source.{source_extension}"));
+            std::fs::write(&source, source_bytes).unwrap();
+            let targets = output_formats
+                .iter()
+                .map(|(output_extension, container)| {
+                    let output_path = dir.path().join(format!("{source_extension}_to_{output_extension}.{output_extension}"));
+                    OutputTarget {
+                        target_id: format!("{source_extension}-{output_extension}"),
+                        output_path,
+                        preset_name: format!("Test {output_extension}"),
+                        container: *container,
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            let spec = CraftJobSpec {
+                version: "1.0".into(),
+                job_id: format!("mesh-roundtrip-{source_extension}"),
+                client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1234, user_notes: None },
+                priority: JobPriority::Normal,
+                start_policy: StartPolicy::AutoStart,
+                source: SourceDescriptor::File { path: source, start_tick: None, duration_ticks: None, timebase: None },
+                targets,
+            };
+            TranscodePipeline::new(spec).execute().unwrap();
+            for (output_extension, _) in output_formats {
+                let path = dir.path().join(format!("{source_extension}_to_{output_extension}.{output_extension}"));
+                let bytes = std::fs::read(&path).unwrap();
+                let imported = texturecraft_formats::import_mesh_bytes(path.file_name().unwrap().to_str().unwrap(), &bytes).unwrap();
+                assert_eq!(imported.mesh.indices.len(), 3, "{} -> {output_extension}", source_extension);
+            }
+        }
     }
 
     #[test]
@@ -1558,7 +3849,7 @@ mod tests {
             client_info: ClientInfo { app_name: "FilmCraft".into(), app_version: "1.0".into(), pid: 100, user_notes: None },
             priority: JobPriority::Normal,
             start_policy: StartPolicy::AutoStart,
-            source: SourceDescriptor::File { path: dir.path().join("synthetic.raw"), start_tick: Some(0), duration_ticks: Some(4), timebase: None },
+            source: SourceDescriptor::File { path: write_test_bmp(dir.path()), start_tick: Some(0), duration_ticks: Some(4), timebase: None },
             targets: vec![OutputTarget {
                 target_id: "t_mov".into(),
                 output_path: prores_mov.clone(),
@@ -1575,7 +3866,7 @@ mod tests {
 
         let mov_info = encodercraft_demux::probe_file(&prores_mov).unwrap();
         assert_eq!(mov_info.video_streams.len(), 1);
-        assert_eq!(mov_info.audio_streams.len(), 1);
+        assert_eq!(mov_info.audio_streams.len(), 0, "a still source has no audio, so no audio track is written");
 
         // 2. Transcode the real ProRes MOV (decoding real ProRes frames!) into Broadcast MXF OP1a (DNxHR + 24-bit PCM)
         let spec_mxf = CraftJobSpec {
@@ -1601,7 +3892,7 @@ mod tests {
 
         let mxf_info = encodercraft_demux::probe_file(&dnx_mxf).unwrap();
         assert_eq!(mxf_info.video_streams.len(), 1);
-        assert_eq!(mxf_info.audio_streams.len(), 1);
+        assert_eq!(mxf_info.audio_streams.len(), 0, "a still source has no audio, so no audio track is written");
         assert_eq!(mxf_info.video_streams[0].codec_name, "VC-3");
 
         // 3. Transcode the real DNxHR MXF (decoding VC-3 frames + PCM audio!) into H.264 MP4 + AAC
@@ -1628,6 +3919,445 @@ mod tests {
 
         let mp4_info = encodercraft_demux::probe_file(&delivery_mp4).unwrap();
         assert_eq!(mp4_info.video_streams.len(), 1);
-        assert_eq!(mp4_info.audio_streams.len(), 1);
+        assert_eq!(mp4_info.audio_streams.len(), 0, "a still source has no audio, so no audio track is written");
+    }
+
+    #[test]
+    fn test_vector_transcoding_pipeline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_svg = tmp.path().join("input.svg");
+        let out_vc = tmp.path().join("output.vectorcraft");
+        let out_ai = tmp.path().join("output.ai");
+        let out_eps = tmp.path().join("output.eps");
+        let out_dxf = tmp.path().join("output.dxf");
+
+        std::fs::write(
+            &src_svg,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
+  <path d="M 0.00 0.00 L 100.00 0.00 L 100.00 100.00 Z" fill="#ff0000" stroke="#000000" stroke-width="2" />
+</svg>"##,
+        )
+        .unwrap();
+
+        let spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-vector-test".into(),
+            client_info: ClientInfo { app_name: "encoderCraft".into(), app_version: "1.0".into(), pid: 100, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: src_svg, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_vc".into(),
+                    container: ContainerType::ArtcraftVectorcraft,
+                    output_path: out_vc.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_ai".into(),
+                    container: ContainerType::AdobeIllustratorAi,
+                    output_path: out_ai.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_eps".into(),
+                    container: ContainerType::PostScriptEps,
+                    output_path: out_eps.clone(),
+                    ..Default::default()
+                },
+                OutputTarget { target_id: "t_dxf".into(), container: ContainerType::AutocadDxf, output_path: out_dxf.clone(), ..Default::default() },
+            ],
+        };
+
+        TranscodePipeline::new(spec).execute().unwrap();
+
+        assert!(out_vc.exists());
+        let vc_bytes = std::fs::read(&out_vc).unwrap();
+        assert!(vc_bytes.starts_with(b"\x89CRAFT\x00\x01V"));
+
+        assert!(out_ai.exists());
+        let ai_bytes = std::fs::read(&out_ai).unwrap();
+        assert!(ai_bytes.starts_with(b"%PDF-1.5"));
+        assert!(String::from_utf8_lossy(&ai_bytes).contains("Adobe Illustrator"));
+
+        assert!(out_eps.exists());
+        let eps_str = std::fs::read_to_string(&out_eps).unwrap();
+        assert!(eps_str.starts_with("%!PS-Adobe-3.0 EPSF-3.0"));
+
+        assert!(out_dxf.exists());
+        let dxf_str = std::fs::read_to_string(&out_dxf).unwrap();
+        assert!(dxf_str.contains("ENTITIES"));
+    }
+
+    #[test]
+    fn test_motion_and_nle_pipeline() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // 1. Motion Graphics: AEP -> EffectCraft
+        let aep_in = tmp.path().join("motion.aep");
+        let effectcraft_out = tmp.path().join("motion.effectcraft");
+        let aep_out = tmp.path().join("exported.aep");
+
+        let mut rifx = Vec::new();
+        rifx.extend_from_slice(b"RIFX");
+        rifx.extend_from_slice(&24u32.to_be_bytes());
+        rifx.extend_from_slice(b"Egg!Comp");
+        rifx.extend_from_slice(&8u32.to_be_bytes());
+        rifx.extend_from_slice(&1920u32.to_be_bytes());
+        rifx.extend_from_slice(&1080u32.to_be_bytes());
+        std::fs::write(&aep_in, &rifx).unwrap();
+
+        let motion_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-motion".into(),
+            client_info: ClientInfo { app_name: "effectcraft".into(), app_version: "1.0".into(), pid: 10, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: aep_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_eff".into(),
+                    container: ContainerType::ArtcraftEffectcraft,
+                    output_path: effectcraft_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_aep".into(),
+                    container: ContainerType::AdobeAfterEffectsAep,
+                    output_path: aep_out.clone(),
+                    ..Default::default()
+                },
+            ],
+        };
+        TranscodePipeline::new(motion_spec).execute().unwrap();
+        assert!(effectcraft_out.exists());
+        let eff_bytes = std::fs::read(&effectcraft_out).unwrap();
+        assert!(eff_bytes.starts_with(b"\x89CRAFT\x00\x01E"));
+        assert!(aep_out.exists());
+        let aep_bytes = std::fs::read(&aep_out).unwrap();
+        assert!(aep_bytes.starts_with(b"RIFX"));
+
+        // 2. NLE Timelines: PRPROJ -> FilmCraft, FCPXML, OTIO
+        let prproj_in = tmp.path().join("edit.prproj");
+        let filmcraft_out = tmp.path().join("edit.filmcraft");
+        let fcpxml_out = tmp.path().join("edit.fcpxml");
+        let otio_out = tmp.path().join("edit.otio");
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?><PremiereData Version="3"><Sequence><Name>Cut_v01</Name></Sequence></PremiereData>"#;
+        let compressed = miniz_oxide::deflate::compress_to_vec(xml.as_bytes(), 6);
+        let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+        gzip.extend_from_slice(&compressed);
+        std::fs::write(&prproj_in, &gzip).unwrap();
+
+        let nle_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "job-nle".into(),
+            client_info: ClientInfo { app_name: "filmcraft".into(), app_version: "1.0".into(), pid: 11, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: prproj_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_film".into(),
+                    container: ContainerType::ArtcraftFilmcraft,
+                    output_path: filmcraft_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_fcp".into(),
+                    container: ContainerType::AdobePremierePrproj,
+                    output_path: fcpxml_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_otio".into(),
+                    container: ContainerType::AdobePremierePrproj,
+                    output_path: otio_out.clone(),
+                    ..Default::default()
+                },
+            ],
+        };
+        TranscodePipeline::new(nle_spec).execute().unwrap();
+        assert!(filmcraft_out.exists());
+        let film_bytes = std::fs::read(&filmcraft_out).unwrap();
+        assert!(film_bytes.starts_with(b"\x89CRAFT\x00\x01F"));
+        assert!(fcpxml_out.exists());
+        let fcpxml_str = std::fs::read_to_string(&fcpxml_out).unwrap();
+        assert!(fcpxml_str.contains("<fcpxml version=\"1.9\">"));
+        assert!(otio_out.exists());
+        let otio_str = std::fs::read_to_string(&otio_out).unwrap();
+        assert!(otio_str.contains("Timeline.1"));
+    }
+
+    #[test]
+    fn test_daw_multitrack_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let sesx_in = dir.path().join("session.sesx");
+
+        let tone = |freq: f32, amp: f32, rate: u32| -> Vec<f32> {
+            (0..rate * 2).map(|i| amp * (2.0 * std::f32::consts::PI * freq * i as f32 / rate as f32).sin()).collect()
+        };
+        let vocal_src = AudioSampleBuffer::from_planar_channels(
+            44_100,
+            encodercraft_core::ChannelLayout::Stereo,
+            0,
+            vec![tone(440.0, 0.3, 44_100), tone(440.0, 0.3, 44_100)],
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("vocal.aiff"), encodercraft_audio_dsp::encode_audio_aiff(&vocal_src).unwrap()).unwrap();
+        let guitar_src =
+            AudioSampleBuffer::from_planar_channels(48_000, encodercraft_core::ChannelLayout::Mono, 0, vec![tone(110.0, 0.4, 48_000)]).unwrap();
+        std::fs::write(dir.path().join("guitar.flac"), encodercraft_audio_dsp::encode_audio_flac(&guitar_src).unwrap()).unwrap();
+
+        let mut session = encodercraft_audio_dsp::DawSession::new("Album Mix", 48000, 24);
+        let mut t1 = encodercraft_audio_dsp::DawTrack::new(1, "Vocal", encodercraft_audio_dsp::DawTrackType::Audio);
+        t1.volume_db = -2.0;
+        t1.pan = -0.2;
+        t1.clips.push(encodercraft_audio_dsp::DawClip {
+            id: 1,
+            name: "Verse 1".to_string(),
+            start_samples: 0,
+            length_samples: 96000,
+            source_in_samples: 0,
+            source_path: Some("vocal.aiff".into()),
+            gain_db: 0.0,
+        });
+
+        let mut t2 = encodercraft_audio_dsp::DawTrack::new(2, "Guitar", encodercraft_audio_dsp::DawTrackType::Audio);
+        t2.volume_db = -4.0;
+        t2.pan = 0.4;
+        t2.clips.push(encodercraft_audio_dsp::DawClip {
+            id: 2,
+            name: "Rhythm".to_string(),
+            start_samples: 0,
+            length_samples: 96000,
+            source_in_samples: 0,
+            source_path: Some("guitar.flac".into()),
+            gain_db: 0.0,
+        });
+
+        session.tracks.push(t1);
+        session.tracks.push(t2);
+
+        std::fs::write(&sesx_in, session.to_sesx_xml().as_bytes()).unwrap();
+
+        let soundcraft_out = dir.path().join("session.soundcraft");
+        let sesx_out = dir.path().join("session_copy.sesx");
+        let wav_out = dir.path().join("master.wav");
+
+        let job_spec = CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "daw_job".into(),
+            client_info: ClientInfo { app_name: "soundcraft".into(), app_version: "1.0".into(), pid: 12, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: sesx_in, start_tick: None, duration_ticks: None, timebase: None },
+            targets: vec![
+                OutputTarget {
+                    target_id: "t_sc".into(),
+                    container: ContainerType::ArtcraftSoundcraft,
+                    output_path: soundcraft_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_sesx".into(),
+                    container: ContainerType::AdobeAuditionSesx,
+                    output_path: sesx_out.clone(),
+                    ..Default::default()
+                },
+                OutputTarget {
+                    target_id: "t_wav".into(),
+                    container: ContainerType::Wave,
+                    output_path: wav_out.clone(),
+                    target_lufs: Some(-23.0),
+                    audio_stems: Some(encodercraft_core::AudioStemMode::DiscreteMono),
+                    ..Default::default()
+                },
+            ],
+        };
+
+        TranscodePipeline::new(job_spec).execute().unwrap();
+
+        // 1. Check .soundcraft binary
+        assert!(soundcraft_out.exists());
+        let sc_bytes = std::fs::read(&soundcraft_out).unwrap();
+        assert!(sc_bytes.starts_with(b"\x89CRAFT\x00\x01S"));
+        let parsed_sc = encodercraft_audio_dsp::DawSession::from_soundcraft_binary(&sc_bytes).unwrap();
+        assert_eq!(parsed_sc.name, "Album Mix");
+        assert_eq!(parsed_sc.tracks.len(), 2);
+
+        // 2. Check .sesx XML
+        assert!(sesx_out.exists());
+        let sesx_str = std::fs::read_to_string(&sesx_out).unwrap();
+        assert!(sesx_str.contains("<sesx"));
+        assert!(sesx_str.contains("name=\"Vocal\""));
+        assert!(sesx_str.contains("name=\"Guitar\""));
+
+        // 3. Check WAV master & stems with iXML metadata
+        assert!(wav_out.exists());
+        let wav_bytes = std::fs::read(&wav_out).unwrap();
+        assert!(wav_bytes.starts_with(b"RIFF"));
+        assert!(wav_bytes.windows(4).any(|w| w == b"iXML"));
+        assert!(wav_bytes.windows(4).any(|w| w == b"bext"));
+
+        let master = encodercraft_audio_dsp::decode_audio(&wav_bytes).unwrap();
+        assert_eq!(master.sample_rate, 48_000);
+        assert_eq!(master.samples_per_channel(), 96_000);
+        let stats = encodercraft_audio_dsp::measure_loudness(&master).unwrap();
+        assert!((stats.integrated_lufs + 23.0).abs() < 0.5, "integrated {}", stats.integrated_lufs);
+        assert!(stats.true_peak_dbtp <= -0.9);
+
+        // DiscreteMono: stereo "Vocal" splits to L/R mono files, mono-source "Guitar" is panned into both
+        for name in ["01_Vocal_L", "01_Vocal_R", "02_Guitar_L", "02_Guitar_R"] {
+            let path = dir.path().join(format!("master_Stem_{name}.wav"));
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("missing stem {name}: {e}"));
+            assert!(bytes.windows(4).any(|w| w == b"iXML"), "{name} lacks iXML");
+            let stem = encodercraft_audio_dsp::decode_audio(&bytes).unwrap();
+            assert_eq!(stem.channel_count(), 1);
+            assert_eq!(stem.samples_per_channel(), 96_000);
+            let plane = stem.channel(0).unwrap();
+            assert!(plane.iter().any(|v| v.abs() > 0.05), "{name} is silent");
+            assert!(plane.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+        }
+        let vocal_ixml = String::from_utf8_lossy(&std::fs::read(dir.path().join("master_Stem_01_Vocal_L.wav")).unwrap()).into_owned();
+        assert!(vocal_ixml.contains("<NAME>Vocal</NAME>"));
+        assert!(!vocal_ixml.contains("<NAME>Guitar</NAME>"));
+    }
+
+    #[test]
+    fn test_daw_pipeline_missing_clip_audio_is_an_error_and_stereo_pairs_and_flac_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let src =
+            AudioSampleBuffer::from_planar_channels(48_000, encodercraft_core::ChannelLayout::Stereo, 0, vec![vec![0.2; 48_000], vec![0.2; 48_000]])
+                .unwrap();
+        std::fs::write(dir.path().join("bed.aiff"), encodercraft_audio_dsp::encode_audio_aiff(&src).unwrap()).unwrap();
+
+        let make = |clip_file: &str| {
+            let mut session = encodercraft_audio_dsp::DawSession::new("S", 48_000, 16);
+            let mut t = encodercraft_audio_dsp::DawTrack::new(1, "Bed", encodercraft_audio_dsp::DawTrackType::Audio);
+            t.clips.push(encodercraft_audio_dsp::DawClip {
+                id: 1,
+                name: "bed".into(),
+                start_samples: 0,
+                length_samples: 48_000,
+                source_in_samples: 0,
+                source_path: Some(clip_file.into()),
+                gain_db: 0.0,
+            });
+            session.tracks.push(t);
+            let sc_path = dir.path().join(format!("{clip_file}.soundcraft"));
+            std::fs::write(&sc_path, session.to_soundcraft_binary().unwrap()).unwrap();
+            sc_path
+        };
+        let job = |source: PathBuf, targets: Vec<OutputTarget>| CraftJobSpec {
+            version: "1.0".into(),
+            job_id: "daw_job2".into(),
+            client_info: ClientInfo { app_name: "t".into(), app_version: "1".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File { path: source, start_tick: None, duration_ticks: None, timebase: None },
+            targets,
+        };
+
+        let flac_out = dir.path().join("out.flac");
+        let wav_out = dir.path().join("pairs.wav");
+        TranscodePipeline::new(job(
+            make("bed.aiff"),
+            vec![
+                OutputTarget { target_id: "f".into(), container: ContainerType::Flac, output_path: flac_out.clone(), ..Default::default() },
+                OutputTarget {
+                    target_id: "w".into(),
+                    container: ContainerType::Wave,
+                    output_path: wav_out.clone(),
+                    audio_stems: Some(encodercraft_core::AudioStemMode::StereoPairs),
+                    ..Default::default()
+                },
+            ],
+        ))
+        .execute()
+        .unwrap();
+
+        let flac = encodercraft_audio_dsp::decode_audio(&std::fs::read(&flac_out).unwrap()).unwrap();
+        assert!((flac.channel(0).unwrap()[24_000] - 0.2).abs() < 1e-3);
+        let pair = encodercraft_audio_dsp::decode_audio(&std::fs::read(dir.path().join("pairs_Stem_01_Bed.wav")).unwrap()).unwrap();
+        assert_eq!(pair.channel_count(), 2);
+        // 16-bit session depth is honoured for the master
+        let wav = std::fs::read(&wav_out).unwrap();
+        let mut pos = 12;
+        let mut bits = None;
+        while let Some(header) = wav.get(pos..pos + 8) {
+            let size = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+            if &header[..4] == b"fmt " {
+                bits = wav.get(pos + 22..pos + 24).map(|b| u16::from_le_bytes([b[0], b[1]]));
+                break;
+            }
+            pos += 8 + size + (size & 1);
+        }
+        assert_eq!(bits, Some(16));
+
+        let err = TranscodePipeline::new(job(
+            make("absent.aiff"),
+            vec![OutputTarget { target_id: "w".into(), container: ContainerType::Wave, output_path: dir.path().join("x.wav"), ..Default::default() }],
+        ))
+        .execute();
+        assert!(err.is_err());
+        assert!(!dir.path().join("x.wav").exists(), "a failed render must not leave a partial output file");
+    }
+}
+
+fn pdf_page_output_path(path: &Path, page_number: usize, selected_page_count: usize) -> Result<PathBuf, EncoderError> {
+    if let Some(naming) = FrameNaming::parse(path) {
+        let frame_number =
+            u64::try_from(page_number).map_err(|_| EncoderError::InvalidJobSpec("PDF page number exceeds the frame path range".into()))?;
+        return Ok(naming.path(frame_number));
+    }
+    if selected_page_count == 1 {
+        return Ok(path.to_path_buf());
+    }
+    let stem =
+        path.file_stem().and_then(|stem| stem.to_str()).ok_or_else(|| EncoderError::InvalidJobSpec("PDF PNG output path has no file name".into()))?;
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    Ok(parent.join(format!("{stem}_{page_number:04}.png")))
+}
+
+/// An output path with a printf-style frame number field, e.g. `out/shot_%04d.png`.
+struct FrameNaming {
+    prefix: PathBuf,
+    suffix: String,
+    width: usize,
+}
+
+impl FrameNaming {
+    fn parse(path: &Path) -> Option<Self> {
+        let name = path.file_name()?.to_str()?;
+        let at = name.find('%')?;
+        let rest = name.get(at + 1..)?;
+        let digits_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let digits = rest.get(..digits_len)?;
+        let suffix = rest.get(digits_len..)?.strip_prefix('d')?;
+        let width = if digits.is_empty() { 0 } else { digits.parse::<usize>().ok()?.min(12) };
+        let dir = path.parent().unwrap_or_else(|| Path::new(""));
+        Some(Self { prefix: dir.join(name.get(..at)?), suffix: suffix.to_string(), width })
+    }
+
+    fn path(&self, number: u64) -> PathBuf {
+        let mut name = self.prefix.clone().into_os_string();
+        name.push(format!("{number:0width$}{}", self.suffix, width = self.width));
+        PathBuf::from(name)
+    }
+}
+
+#[cfg(test)]
+mod frame_naming_tests {
+    use super::FrameNaming;
+    use std::path::Path;
+
+    #[test]
+    fn numbers_frames_with_padding() {
+        let n = FrameNaming::parse(Path::new("out/shot_%04d.png")).unwrap();
+        assert_eq!(n.path(7), Path::new("out/shot_0007.png"));
+        assert_eq!(FrameNaming::parse(Path::new("a_%d.jpg")).unwrap().path(12), Path::new("a_12.jpg"));
+        assert!(FrameNaming::parse(Path::new("plain.png")).is_none());
+        assert!(FrameNaming::parse(Path::new("bad_%s.png")).is_none());
     }
 }

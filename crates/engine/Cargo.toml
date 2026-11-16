@@ -15,7 +15,11 @@ encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
 encodercraft-demux = { workspace = true }
 encodercraft-pipeline = { workspace = true }
+encodercraft-source = { workspace = true }
 encodercraft-presets = { workspace = true }
+encodercraft-video-codecs = { workspace = true }
+encodercraft-muxers = { workspace = true }
+encodercraft-watch = { workspace = true }
 encodercraft-ipc = { workspace = true }
 encodercraft-dispatch = { workspace = true }
 serde = { workspace = true }
@@ -23,5 +27,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+encodercraft-audio-dsp = { workspace = true }
+encodercraft-image-codecs = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }

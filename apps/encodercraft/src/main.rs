@@ -5,6 +5,8 @@
 // Release builds on Windows are GUI programs: no console window behind the app.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
+mod window;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +17,8 @@ use encodercraft_ui_egui::EncoderCraftApp;
 
 struct DesktopApp {
     inner: EncoderCraftApp,
+    window: window::Tracker,
+    config_dir: PathBuf,
     _ipc_tcp: Option<IpcServer>,
     #[cfg(unix)]
     _ipc_unix: Option<IpcServer>,
@@ -22,24 +26,44 @@ struct DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.window.update(ui.ctx(), Some(&self.config_dir));
         self.inner.render(ui);
+    }
+
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.inner.raw_input_hook(raw_input);
+    }
+
+    fn on_exit(&mut self) {
+        self.inner.on_exit();
     }
 }
 
 fn main() -> Result<(), eframe::Error> {
-    if std::env::args().skip(1).any(|a| a == "--version" || a == "-V") {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("encodercraft {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!(
+            "encodercraft {}\n\nUSAGE: encodercraft [--version] [--help] [--in-window-menus]\n\n  --in-window-menus  keep the menus in the window on macOS instead of the system menu bar\n\nFor headless use see encodercraft-cli.",
+            env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
     env_logger::init();
+    let in_window_menus = args.iter().any(|a| a == "--in-window-menus");
 
     let app_dir = get_app_data_dir();
     let _ = std::fs::create_dir_all(&app_dir);
     let journal_file = app_dir.join("queue-state.json");
-    let prefs_file = app_dir.join("preferences.json");
+    let config_dir = encodercraft_engine::default_config_dir().unwrap_or_else(|| app_dir.clone());
+    let prefs_file = config_dir.join("preferences.json");
 
     let queue_mgr = Arc::new(QueueManager::new_persisted(journal_file).unwrap_or_else(|_| QueueManager::new_in_memory()));
-    let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
+    queue_mgr.set_conversion_preferences_path(prefs_file.clone());
+    let preset_registry = Arc::new(Mutex::new(PresetRegistry::new(Some(config_dir.join("presets")))));
     let prefs = encodercraft_engine::load_preferences(&prefs_file).unwrap_or_default();
 
     let handler = Arc::new(EngineIpcHandler::new(queue_mgr.clone(), preset_registry.clone()));
@@ -50,40 +74,47 @@ fn main() -> Result<(), eframe::Error> {
     // Bind Unix domain socket on Unix platforms
     #[cfg(unix)]
     let ipc_unix = {
-        let sock_path = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-        let sock_file = PathBuf::from(sock_path).join("encodercraft.sock");
+        let sock_file = encodercraft_dispatch::default_socket_path();
         let _ = std::fs::remove_file(&sock_file);
         IpcServer::bind_unix(&sock_file, handler).ok()
     };
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("encoderCraft")
-            .with_inner_size([1120.0, 720.0])
-            .with_min_inner_size([720.0, 480.0])
-            .with_drag_and_drop(true),
-        ..Default::default()
-    };
+    let title_bar = window::title_bar_style(prefs.system_title_bar);
+    let options = window::native_options(window::load(&config_dir), title_bar);
+    let saved_window = window::load(&config_dir);
+    let window_config_dir = config_dir.clone();
 
-    eframe::run_native(
-        "encoderCraft",
-        options,
-        Box::new(|_cc| {
-            let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
-            if prefs.theme == "High Contrast" {
-                app.brightness = encodercraft_ui_egui::Brightness::HighContrast;
-                app.tokens = encodercraft_ui_egui::Tokens::for_brightness(app.brightness);
-            }
-            app.prefs_state.prefs = prefs;
+    // A panic in platform or GPU code ends the window with an error instead of aborting the process.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eframe::run_native(
+            "encoderCraft",
+            options,
+            Box::new(|cc| {
+                let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
+                app = app.with_config_dir(config_dir).with_title_bar(title_bar);
+                app.prefs_state.prefs = prefs;
+                #[cfg(target_os = "macos")]
+                if !in_window_menus {
+                    app.install_native_menu(&cc.egui_ctx);
+                }
+                #[cfg(not(target_os = "macos"))]
+                let _ = (&cc, in_window_menus);
 
-            Ok(Box::new(DesktopApp {
-                inner: app,
-                _ipc_tcp: ipc_tcp,
-                #[cfg(unix)]
-                _ipc_unix: ipc_unix,
-            }))
-        }),
-    )
+                Ok(Box::new(DesktopApp {
+                    inner: app,
+                    window: window::Tracker::new(saved_window),
+                    config_dir: window_config_dir,
+                    _ipc_tcp: ipc_tcp,
+                    #[cfg(unix)]
+                    _ipc_unix: ipc_unix,
+                }))
+            }),
+        )
+    }));
+    outcome.unwrap_or_else(|_| {
+        log::error!("the window stopped after an internal error");
+        Err(eframe::Error::AppCreation("internal error in the window system".into()))
+    })
 }
 
 fn get_app_data_dir() -> PathBuf {

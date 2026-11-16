@@ -12,6 +12,18 @@ pub struct XmpMetadata {
     /// Primary author or creator (dc:creator).
     #[serde(default)]
     pub creator: Option<String>,
+    /// Album or collection name (xmpDM:album).
+    #[serde(default)]
+    pub album: Option<String>,
+    /// Track number within the album (xmpDM:trackNumber).
+    #[serde(default)]
+    pub track_number: Option<u32>,
+    /// Release year or date (xmpDM:releaseDate).
+    #[serde(default)]
+    pub year: Option<u32>,
+    /// Musical or media genre (xmpDM:genre).
+    #[serde(default)]
+    pub genre: Option<String>,
     /// Summary or description (dc:description).
     #[serde(default)]
     pub description: Option<String>,
@@ -27,6 +39,12 @@ pub struct XmpMetadata {
     /// Starting timecode string e.g. "01:00:00:00" (xmpDM:startTimecode).
     #[serde(default)]
     pub start_timecode: Option<String>,
+    /// Composer or songwriter (xmpDM:composer).
+    #[serde(default)]
+    pub composer: Option<String>,
+    /// International Standard Recording Code (ISRC) for music track identification.
+    #[serde(default)]
+    pub isrc: Option<String>,
     /// Whether to generate an external sidecar `.xmp` file alongside the output.
     #[serde(default)]
     pub export_sidecar_xmp: bool,
@@ -78,6 +96,28 @@ impl XmpMetadata {
             let escaped = escape_xml(tc);
             dm_elements.push_str(&format!("      <xmpDM:startTimecode>{escaped}</xmpDM:startTimecode>\n"));
         }
+        if let Some(ref album) = self.album {
+            let escaped = escape_xml(album);
+            dm_elements.push_str(&format!("      <xmpDM:album>{escaped}</xmpDM:album>\n"));
+        }
+        if let Some(track) = self.track_number {
+            dm_elements.push_str(&format!("      <xmpDM:trackNumber>{track}</xmpDM:trackNumber>\n"));
+        }
+        if let Some(year) = self.year {
+            dm_elements.push_str(&format!("      <xmpDM:releaseDate>{year}</xmpDM:releaseDate>\n"));
+        }
+        if let Some(ref genre) = self.genre {
+            let escaped = escape_xml(genre);
+            dm_elements.push_str(&format!("      <xmpDM:genre>{escaped}</xmpDM:genre>\n"));
+        }
+        if let Some(ref composer) = self.composer {
+            let escaped = escape_xml(composer);
+            dm_elements.push_str(&format!("      <xmpDM:composer>{escaped}</xmpDM:composer>\n"));
+        }
+        if let Some(ref isrc) = self.isrc {
+            let escaped = escape_xml(isrc);
+            dm_elements.push_str(&format!("      <xmpDM:ISRC>{escaped}</xmpDM:ISRC>\n"));
+        }
 
         format!(
             "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
@@ -122,11 +162,17 @@ mod tests {
         let meta = XmpMetadata {
             title: Some("Cinematic Master 4K".into()),
             creator: Some("ArtCraft Team".into()),
+            album: Some("ArtCraft OST".into()),
+            track_number: Some(3),
+            year: Some(2026),
+            genre: Some("Soundtrack".into()),
             description: Some("Trailer cut & audio mix".into()),
             copyright: Some("© 2026 Storytold Organization".into()),
             project_name: Some("FilmCraft Sequence 1".into()),
             create_date: Some("2026-11-02T12:00:00Z".into()),
             start_timecode: Some("01:00:00:00".into()),
+            composer: Some("ArtCraft Audio Lab".into()),
+            isrc: Some("US-S1Z-26-00001".into()),
             export_sidecar_xmp: true,
         };
 
@@ -134,6 +180,12 @@ mod tests {
         assert!(packet.contains("<?xpacket begin="));
         assert!(packet.contains("Cinematic Master 4K"));
         assert!(packet.contains("ArtCraft Team"));
+        assert!(packet.contains("<xmpDM:composer>ArtCraft Audio Lab</xmpDM:composer>"));
+        assert!(packet.contains("<xmpDM:ISRC>US-S1Z-26-00001</xmpDM:ISRC>"));
+        assert!(packet.contains("ArtCraft OST"));
+        assert!(packet.contains("<xmpDM:trackNumber>3</xmpDM:trackNumber>"));
+        assert!(packet.contains("<xmpDM:releaseDate>2026</xmpDM:releaseDate>"));
+        assert!(packet.contains("Soundtrack"));
         assert!(packet.contains("&copy; 2026 Storytold Organization") || packet.contains("© 2026 Storytold Organization"));
         assert!(packet.contains("FilmCraft Sequence 1"));
         assert!(packet.contains("01:00:00:00"));

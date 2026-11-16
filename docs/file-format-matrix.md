@@ -38,6 +38,8 @@
 | **WebM** | `.webm` | VP9 (Profile 0, 2), AV1, VP8; Audio: Opus, Vorbis | Rec.709, Rec.2020; 8-bit, 10-bit | **Yes** (VP9 alpha block) | `Native` | Full (D, E, M, T). Matroska EBML engine from `craft-media`, codecs from `effectcraft`. |
 | **Matroska Video** | `.mkv` | Any video stream (AV1, HEVC, H.264, VP9, ProRes, DNxHD, FFV1) | Any standard or wide color space; 8, 10, 12, 16-bit | **Yes** | `Native` | Full (D, E, M, T). Native EBML parser/muxer in `craft-media`. |
 | **MXF (SMPTE 377M)** | `.mxf` | OP-1a & OP-Atom; Codecs: Avid DNxHD/HR, Apple ProRes, MPEG-2 Broadcast, Uncompressed 10-bit | Rec.709, Rec.2020; 8, 10, 12-bit | No | `Native` | Full (D, E, M). Native MXF partition engine in `filmcraft-mxf`. Broadcast grade. |
+| **MPEG-TS Broadcast** | `.ts`, `.m2ts`, `.mts` | ATSC / DVB / CableLabs 188-byte Transport Stream; H.264/HEVC Annex B + ADTS AAC, PAT/PMT/PCR | Rec.709, Rec.2020; 8-bit, 10-bit | No | `Native` | Full (D, E, M). Clean-room 188-byte packetizer in `crates/muxers/src/ts.rs`. |
+| **Apple Spatial Video** | `.mov`, `.mp4` | Stereoscopic Multi-View HEVC (MV-HEVC Main 10) with `svhd`, `st3d`, and `lhvC` boxes | Rec.709, Display P3, HDR10; 10-bit | No | `Native` | Full (E, M). Native Vision Pro spatial metadata signaling in `crates/muxers/src/mp4.rs`. |
 | **Animated GIF** | `.gif` | Palette-based LZW frames; 256 colors per frame with local or global adaptive palettes | sRGB 8-bit quantized | **Yes** (1-bit binary transparency) | `Native` | Full (D, E). Adaptive NeuQuant palette quantization from `filmcraft-export`. |
 | **Motion JPEG (M-JPEG)** | `.mov`, `.avi` | Intra-frame DCT JPEG slices | Rec.601, Rec.709 YUV 4:2:2; 8-bit | No | `Native` | Full (D, E, M). Native from `filmcraft-export`. |
 | **APV Video** | `.apv`, `.mov` | Advanced Professional Video (Profiles 422-10, 444-12) | Wide gamut Rec.2020; 10-bit, 12-bit | **Yes** | `Native` | Full (D, E). Next-gen intra-only video from `filmcraft-apv`. |
@@ -76,6 +78,8 @@
 | **DPX (SMPTE 268M)** | `.dpx` | Cinema RGB / YUV; 10-bit, 12-bit, 16-bit packed | Uncompressed planar / interleaved | **Yes** | Film industry standard, SMPTE timecode, keycode, transfer functions. | Full (D, E). `photocraft-codecs`. |
 | **HEIF / AVIF** | `.heic`, `.avif` | RGB, YUV 4:2:0, 4:2:2, 4:4:4; 8, 10, 12-bit | HEVC and AV1 intra compression | **Yes** | Next-generation mobile photography standard with depth maps. | Full (D, E). `photocraft-codecs`. |
 | **Photoshop PSD / PSB** | `.psd`, `.psb` | RGB, CMYK, Grayscale, Lab; 8, 16, 32-bit float | RLE (PackBits), Raw, Zip | **Yes** | Full layer hierarchy, blend modes, adjustment layers, text data. | Full (D, E). `photocraft-psd`. PSB supports >2 GB files. |
+| **Medical DICOM** | `.dcm`, `.dicom` | Monochrome2, RGB; 8-bit, 16-bit integer | Explicit VR Little Endian | No | NEMA PS3.10 medical imaging with patient/modality tags. | Full (D, E). `crates/image-codecs/src/scientific.rs`. |
+| **Astronomical FITS** | `.fits`, `.fit` | Multi-plane 2D/3D array; 8, 16, 32-bit int & float | 2880-byte FITS header + big-endian raster | No | NASA/IAU astronomical observation data. | Full (D, E). `crates/image-codecs/src/scientific.rs`. |
 | **Camera RAW** | `.cr2`, `.cr3`, `.nef`, `.arw`, `.dng`, `.raf` | Sensor Bayer Raw, Linear DNG; 12, 14, 16-bit | Lossless JPEG, Deflate, Uncompressed | No | Sensor debayering (AHD, VNG), white balance, camera color calibration. | Full (D via `craft-crw`, `lightcraft-raw`, E to DNG). |
 
 ---
@@ -105,6 +109,20 @@
 | **Collada** | `.dae` | ISO/PAS 17506 XML schema | Geometry meshes, visual scenes | Common profile materials | Scene hierarchies, node transforms | Full (D, E). `texturecraft-formats`. Digital asset exchange. |
 | **Stereolithography** | `.stl` | 3D Printing standard (ASCII & Binary) | Triangular facets with normal vectors | No color or material | Static geometry only | Full (D, E). `texturecraft-formats`. Additive manufacturing standard. |
 | **Stanford Polygon** | `.ply` | 3D scanner format (ASCII & Binary) | Vertices, polygons, arbitrary properties | Per-vertex RGB color, confidence values | Static geometry only | Full (D, E). `texturecraft-formats`. Point cloud & scan data. |
+| **3D Gaussian Splats** | `.splat` | 32-byte packed radiance field primitives | 3D position + anisotropic scale + quaternion rotation | Spherical harmonics (SH0) RGB + opacity | Real-time neural radiance splatting | Full (D, E). `crates/spatial-io/src/splat.rs`. |
+
+---
+
+## 6b. Color Science (3D LUTs) & Broadcast Subtitles / Closed Captions
+
+| Format | Extensions | Domain | Capabilities & Specifications | Engine / Source |
+|---|---|---|---|---|
+| **Adobe / Iridas 3D LUT** | `.cube` | Color Grading | 1D & 3D LUT lattice (`17³`, `33³`, `65³`), domain min/max, tetrahedral interpolation & frame baking. | `crates/color/src/lut.rs` |
+| **Autodesk / Lustre 3D LUT** | `.3dl` | Color Grading | Integer code-value shaper & 3D lattice (`10-bit` / `12-bit`), bidirectional conversion with `.cube` and `.look`. | `crates/color/src/lut.rs` |
+| **Adobe Lumetri Look** | `.look` | Color Grading | XML-wrapped 3D LUT lattice + tone metadata, bidirectional conversion & direct video baking. | `crates/color/src/lut.rs` |
+| **SubRip / WebVTT** | `.srt`, `.vtt` | Subtitles | Millisecond cue timing, styling tags, framerate retiming, sidecar & burn-in compositing. | `crates/pipeline/src/captions.rs` |
+| **CEA-608 / CEA-708 Broadcast** | `.scc`, `.mcc` | Closed Captions | Scenarist CEA-608 hex word pairs & MacCaption CEA-708 ANC packets with drop-frame / non-drop-frame timecode. | `crates/pipeline/src/captions.rs` |
+| **SMPTE-TT / IMSC1 & EBU-STL** | `.ttml`, `.stl`, `.ass` | Broadcast & Anime | W3C Timed Text XML, EBU Tech 3264 binary GSI/TTI blocks, and SubStation Alpha v4+ styled dialogues. | `crates/pipeline/src/captions.rs` |
 
 ---
 
@@ -131,3 +149,63 @@ Because `encoderCraft` bridges all six dimensions, users can execute transcode o
 2. **Video Sequence to Multi-Screen Delivery:** Ingest a 4K ProRes master → output an MXF OP-1a broadcast master (EBU R128 -23 LUFS), a YouTube 4K MP4 (-14 LUFS), a TikTok 9:16 vertical MP4 (-14 LUFS), and a 1080p animated GIF teaser.
 3. **Print Publication to Multi-Channel:** Ingest a DesignCraft book → produce a print-ready PDF/X-4 with bleed, a reflowable EPUB 3, an optimized web PDF, and 300 DPI high-resolution CMYK TIFF proofs.
 4. **Game Texture Baking:** Ingest high-res 32-bit floating point EXR textures → generate packed BC7 DDS textures for Unreal/DirectX, compressed WebP previews for web asset stores, and 16-bit PNG heightmaps.
+
+## 9. Video Codec Capability Table (generated)
+
+Generated from `crates/video-codecs/src/capabilities.rs`; `encodercraft-cli --formats` prints the same data. "Decode verified" means a conformance test decodes a stream made by an independent encoder (`crates/source/tests/decoders.rs`) and checks size, frame count and PSNR. AV1 has a pure-Rust decoder (`filmcraft-av1`).
+
+| Codec | Decode | Encode | Decode verified | Notes |
+|---|---|---|---|---|
+| H.264 | yes | yes | yes | 8-bit 4:2:0 progressive decode (filmcraft-h264) |
+| HEVC | yes | yes | yes | Main / Main 10 decode (filmcraft-hevc) |
+| VP8 | yes | no | yes | decode only (filmcraft-vp8) |
+| VP9 | yes | yes | yes | filmcraft-vp9 |
+| AV1 | yes | yes | yes | pure-Rust decoder (filmcraft-av1) |
+| MPEG-2 | yes | no | yes | MPEG-1/2 in PS and TS, decode only (filmcraft-mpeg2v) |
+| ProRes | yes | yes | yes | filmcraft-prores |
+| DNxHD/DNxHR | yes | yes | no | filmcraft-dnx; round-trips in video-codecs tests only |
+| Motion JPEG | no | yes | - | encode only |
+| GIF | no | yes | - | animated GIF89a encode only |
+
+## 10. Container x Codec Matrix and Encoder Parameters
+
+Generated by `encodercraft-cli --containers`. The pipeline rejects any other pairing with `UnsupportedCodec` before writing a file, and the UI only offers presets whose codec the container accepts. Every pairing is proven by an encode-decode test in `crates/pipeline/tests/presets_conformance.rs`.
+
+| Container | H.264 | HEVC | AV1 | VP9 | ProRes | DNxHR | GIF |
+|---|---|---|---|---|---|---|---|
+| MP4 | yes | yes | yes | yes | - | - | - |
+| MOV | yes | yes | - | - | yes | yes | - |
+| MKV | yes | yes | yes | yes | - | - | - |
+| WebM | - | - | yes | yes | - | - | - |
+| MXF OP1a | yes | - | - | - | yes | yes | - |
+| MXF OP-Atom | yes | - | - | - | yes | yes | - |
+| MPEG-TS | yes | yes | - | - | - | - | - |
+| GIF | - | - | - | - | - | - | yes |
+
+Preset parameters (`VideoEncodeSettings`: codec, keyframe interval, profile, B-frames, rate mode, colour tag) are applied, or rejected with an error, never silently ignored:
+
+| Codec | Rate mode | Keyframe interval | Profile | B-frames | HDR colour tags |
+|---|---|---|---|---|---|
+| H.264 | CBR, VBR, constant quality | yes | baseline, main, high | 0-3 | BT.709, PQ, HLG (VUI) |
+| HEVC | bitrate, constant quality | yes | no | no | no |
+| AV1 | bitrate, constant quality | yes | no | no | no |
+| VP9 | bitrate, quality | yes | no | no | no |
+| ProRes | intra | n/a | proxy, lt, 422, hq (4:2:2 only) | n/a | no |
+| DNxHR | intra | n/a | lb, sq, hq, hqx | n/a | no |
+
+Known upstream gaps: HEVC, AV1 and VP9 encoders expose no B-frames, profiles or HDR signalling; H.264 rate control is single-pass; ProRes 4444 is not encodable. MP4 output is written faststart (`moov` before `mdat`); MOV is not. MXF stores H.264 as Annex B.
+
+## 11. Streaming, memory limits & measurements
+
+Video encoding uses bounded decode and convert queues, a reusable output-frame buffer, and an ordered encode/mux stage. The default frame-queue budget is 256 MiB, with at most eight queued frames per boundary. The budget accounts for stage-local buffers, the recycled output frame, and the temporary linear-float conversion buffer used for high-bit-depth source frames; a source whose minimum working set exceeds the configured budget is rejected before streaming. Cancellation and stage failures discard the staged output and preserve any existing destination.
+
+Source audio is decoded and encoded in 10-second windows. Loudness normalization still requires a whole-track pass; its default 1 GiB limit includes the source-channel and normalized stereo buffers. The CLI exposes both limits as `--frame-memory-mib` and `--normalization-memory-mib`. These settings bound pipeline-managed buffers, not the source decoder's cache: the upstream FilmCraft GOP cache currently uses a process-wide 1 GiB frame budget that encoderCraft cannot configure.
+
+Release-mode measurements on the same 1920x1080 H.264/AAC source family using `YouTube 1080p Full HD`:
+
+| Input duration | Input size | Wall time | Peak RSS |
+|---:|---:|---:|---:|
+| 20.07 s | 76 MiB | 14.70 s | 876 MB |
+| 60.00 s | 217 MiB | 47.69 s | 940 MB |
+
+Measured with `/usr/bin/time -l target/release/encodercraft-cli encode ...` on macOS. The non-linear RSS increase reflects the decoder's GOP cache and fixed stage working set; the complete source is not accumulated in memory. These numbers are measurements, not resource guarantees, and decoder-cache behavior remains upstream-controlled.

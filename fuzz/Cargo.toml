@@ -1,0 +1,87 @@
+[package]
+name = "encodercraft-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+todo = "deny"
+unreachable = "deny"
+
+[lints]
+workspace = true
+
+[dependencies]
+encodercraft-audio-dsp = { path = "../crates/audio-dsp" }
+encodercraft-core = { path = "../crates/core" }
+encodercraft-demux = { path = "../crates/demux" }
+encodercraft-dispatch = { path = "../crates/dispatch" }
+encodercraft-engine = { path = "../crates/engine" }
+encodercraft-ipc = { path = "../crates/ipc" }
+encodercraft-image-codecs = { path = "../crates/image-codecs" }
+encodercraft-presets = { path = "../crates/presets" }
+encodercraft-source = { path = "../crates/source" }
+libfuzzer-sys = "0.4"
+serde_json = "1"
+tempfile = "3"
+
+[[bin]]
+name = "demux_probe"
+path = "fuzz_targets/demux_probe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_decode"
+path = "fuzz_targets/media_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_decode"
+path = "fuzz_targets/image_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audio_decode"
+path = "fuzz_targets/audio_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "preset_json"
+path = "fuzz_targets/preset_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "queue_journal"
+path = "fuzz_targets/queue_journal.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ipc_message"
+path = "fuzz_targets/ipc_message.rs"
+test = false
+doc = false
+bench = false

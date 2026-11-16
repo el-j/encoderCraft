@@ -9,14 +9,21 @@ pub mod error;
 pub mod frame;
 pub mod job;
 pub mod metadata;
+pub mod provider;
 pub mod timecode;
 
-pub use audio::{AudioSampleBuffer, ChannelLayout};
+pub use audio::{AudioChannelMapping, AudioSampleBuffer, AudioTrackLayout, ChannelLayout};
 pub use error::EncoderError;
 pub use frame::{MAX_FRAME_BUFFER_BYTES, PlaneDescriptor, VideoFrame};
 pub use job::{
-    AudioStemMode, CaptionExportFormat, ClientInfo, ContainerType, CraftJobSpec, JobPriority, JobStatus, MediaStreamKind, OutputTarget,
-    SourceDescriptor, StartPolicy, StitchedClipSource,
+    AudioEncodeSettings, AudioStemMode, CaptionExportFormat, ClientInfo, ColorTag, ContainerType, CraftJobSpec, CropConfig, DeinterlaceMode,
+    FlipMode, FrameRateMode, JobPriority, JobStatus, MediaStreamKind, NameOverlayConfig, OutputTarget, OverlayAnchor, PixelAspectRatioConform,
+    RateMode, Rotation, ScalingFilter, SdrConformConfig, SourceDescriptor, SourceSelection, StartPolicy, StitchedClipSource, TimecodeOverlayConfig,
+    VideoEncodeSettings, VideoLimiterClipLevel, VideoLimiterConfig, VideoTransform, WatermarkOverlayConfig,
 };
 pub use metadata::XmpMetadata;
+pub use provider::{
+    CURRENT_PROTOCOL_VERSION, DiscoveredProvider, MAX_MANIFEST_BYTES, ProviderManifest, ProviderOperation, ProviderOperationKind, ProviderParamType,
+    ProviderParameterSpec, ProviderValidationError, default_provider_directories, discover_providers_in,
+};
 pub use timecode::{MediaTimecode, Rational64};
