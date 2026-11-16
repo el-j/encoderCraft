@@ -2,7 +2,7 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** M0–M49 implementation complete; v0.1.0 first stable release ready  
+> **Status:** M0–M49 implementation complete; v0.1.0-beta.1 release ready  
 > **Verification:** 100% CI compliance via `cargo xtask ci` (>300 unit, fuzz, layout, and integration tests passed; strict L0–L7 layers enforced)
 
 ---

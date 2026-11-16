@@ -1,6 +1,6 @@
 # encoderCraft Roadmap
 
-> **Stage: First Stable Release (v0.1.0)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
+> **Stage: Beta Release (v0.1.0-beta.1)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
 > **Last reviewed:** 2026-11-15 · **Last updated:** 2026-11-15 · **Change:** Completed Milestone 49 (v0.1.0 First Stable Release Readiness & Final Gap Closure)  
 
