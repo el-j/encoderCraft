@@ -451,6 +451,43 @@ pub const VIDEO_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
     (ContainerType::AnimatedGif, "GIF Animation", "gif"),
 ];
 
+pub const DOCUMENT_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::Pdf, "PDF (Print Document)", "pdf"),
+    (ContainerType::Docx, "Microsoft Word (.docx)", "docx"),
+    (ContainerType::Png, "PNG (Still/Sequence)", "png"),
+    (ContainerType::Jpeg, "JPEG (Still/Sequence)", "jpg"),
+    (ContainerType::Tiff, "TIFF (Still/Sequence)", "tif"),
+    (ContainerType::WebP, "WebP (Still/Sequence)", "webp"),
+    (ContainerType::Markdown, "Markdown (.md)", "md"),
+    (ContainerType::Html, "HTML (.html)", "html"),
+    (ContainerType::Epub, "EPUB (.epub)", "epub"),
+    (ContainerType::IsoBmffMp4, "H.264 (MP4)", "mp4"),
+];
+
+pub const CAD_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::AutocadDxf, "AutoCAD DXF (.dxf)", "dxf"),
+    (ContainerType::AutocadDwg, "AutoCAD DWG (.dwg)", "dwg"),
+    (ContainerType::Pdf, "PDF Blueprint (.pdf)", "pdf"),
+    (ContainerType::Svg, "SVG Vector (.svg)", "svg"),
+    (ContainerType::Png, "PNG Raster (.png)", "png"),
+];
+
+pub const VECTOR_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::Svg, "SVG Vector (.svg)", "svg"),
+    (ContainerType::PostScriptEps, "PostScript EPS (.eps)", "eps"),
+    (ContainerType::AdobeIllustratorAi, "Adobe Illustrator (.ai)", "ai"),
+    (ContainerType::Pdf, "PDF Document (.pdf)", "pdf"),
+    (ContainerType::Png, "PNG Image (.png)", "png"),
+];
+
+pub const LAYERED_INLINE_CONTAINERS: &[(ContainerType, &str, &str)] = &[
+    (ContainerType::AdobePhotoshopPsd, "Photoshop PSD (.psd)", "psd"),
+    (ContainerType::AdobePhotoshopPsb, "Photoshop PSB (.psb)", "psb"),
+    (ContainerType::Tiff, "TIFF Image (.tif)", "tif"),
+    (ContainerType::Png, "PNG Image (.png)", "png"),
+    (ContainerType::OpenExr, "OpenEXR (.exr)", "exr"),
+];
+
 /// Returns context-aware candidate containers appropriate for the source stream type.
 pub fn candidate_containers_for_job(job: &QueuedJob) -> &'static [(ContainerType, &'static str, &'static str)] {
     let stream_kind = match &job.spec.source {
@@ -461,6 +498,14 @@ pub fn candidate_containers_for_job(job: &QueuedJob) -> &'static [(ContainerType
         AUDIO_INLINE_CONTAINERS
     } else if stream_kind.is_image() {
         IMAGE_INLINE_CONTAINERS
+    } else if stream_kind.is_document() {
+        DOCUMENT_INLINE_CONTAINERS
+    } else if stream_kind.is_cad() {
+        CAD_INLINE_CONTAINERS
+    } else if stream_kind.is_vector() {
+        VECTOR_INLINE_CONTAINERS
+    } else if stream_kind.is_layered_composite() {
+        LAYERED_INLINE_CONTAINERS
     } else {
         VIDEO_INLINE_CONTAINERS
     }
@@ -577,6 +622,11 @@ fn candidate_presets_for_container(c: ContainerType) -> Vec<&'static str> {
             "Social Media Vertical 9:16 (1080x1920)",
         ],
         ContainerType::QuickTimeMov => vec!["Apple ProRes 422 HQ", "Apple ProRes 422", "Apple ProRes 4444", "Avid DNxHR HQ 1080p"],
+        ContainerType::MatroskaMkv => {
+            vec!["Match Source - High Bitrate", "Matroska MKV - High Bitrate (H.264 / AAC)", "Matroska MKV - AV1 Ultra HD (AV1 / Opus)"]
+        }
+        ContainerType::WebM => vec!["YouTube 1080p Full HD", "WebM VP9 Full HD (VP9 / Opus)", "WebM AV1 Full HD (AV1 / Opus)"],
+        ContainerType::AnimatedGif => vec!["Animated GIF 1080p (Smooth 24fps)", "Animated GIF 720p (Web Optimized)"],
         ContainerType::MxfOp1a | ContainerType::MxfOpAtom => vec!["Broadcast MXF OP1a (DNxHD / PCM)"],
         ContainerType::Wave
         | ContainerType::Aiff
@@ -1028,6 +1078,14 @@ pub fn render_queue_panel(ui: &mut Ui, state: &mut QueuePanelState, ctx: QueuePa
             // Table Header
             render_table_header(ui, state, tokens, cols, visible_columns);
 
+            // Recompute dynamic columns so rows immediately reflect header resizing during active drag
+            let cols = QueueColumnWidths::calculate_for_columns_and_settings(
+                ui.available_width(),
+                ui.spacing().item_spacing.x,
+                visible_columns,
+                &state.column_settings,
+            );
+
             ui.separator();
 
             // Table Rows Scroll Area
@@ -1114,7 +1172,7 @@ fn column_picker_contents(ui: &mut Ui, visible_columns: &mut Vec<String>) {
     }
 }
 
-fn render_resizable_column_header<R>(ui: &mut Ui, width: &mut f32, tokens: &Tokens, add_contents: impl FnOnce(&mut Ui, f32) -> R) -> R {
+fn render_resizable_column_header<R>(ui: &mut Ui, col_id: &str, width: &mut f32, tokens: &Tokens, add_contents: impl FnOnce(&mut Ui, f32) -> R) -> R {
     let w = *width;
     if w <= 0.0 {
         let (rect, _) = ui.allocate_exact_size(egui::Vec2::ZERO, egui::Sense::hover());
@@ -1126,15 +1184,17 @@ fn render_resizable_column_header<R>(ui: &mut Ui, width: &mut f32, tokens: &Toke
     cell_ui.set_clip_rect(rect);
     let result = add_contents(&mut cell_ui, w);
 
-    // Draggable resize divider handle on right edge
-    let handle_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 3.0, rect.min.y), egui::pos2(rect.max.x + 3.0, rect.max.y));
-    let handle_resp = ui.allocate_rect(handle_rect, egui::Sense::drag());
+    // Draggable resize divider handle on right edge (interact without layout advance)
+    let handle_rect = egui::Rect::from_min_max(egui::pos2(rect.max.x - 4.0, rect.min.y - 2.0), egui::pos2(rect.max.x + 4.0, rect.max.y + 2.0));
+    let handle_id = ui.scope_id().with("queue_col_divider").with(col_id);
+    let handle_resp = ui.interact(handle_rect, handle_id, egui::Sense::click_and_drag());
     if handle_resp.dragged() {
         *width = (*width + handle_resp.drag_delta().x).clamp(40.0, 800.0);
+        ui.ctx().request_repaint();
     }
     if handle_resp.hovered() || handle_resp.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
-        ui.painter().vline(rect.max.x, rect.min.y..=rect.max.y, egui::Stroke::new(1.0, tokens.accent_primary));
+        ui.painter().vline(rect.max.x, rect.min.y..=rect.max.y, egui::Stroke::new(1.5, tokens.accent_primary));
     } else {
         ui.painter().vline(rect.max.x, rect.min.y + 2.0..=rect.max.y - 2.0, egui::Stroke::new(1.0, tokens.border_subtle));
     }
@@ -1148,7 +1208,7 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
             // Source Column (expands or user-resized)
             let mut src_w = cols.src;
             let src_label = format!("Source Name{}", sort_indicator(state, QueueSortColumn::Source));
-            let src_clicked = render_resizable_column_header(ui, &mut src_w, tokens, |ui, w| {
+            let src_clicked = render_resizable_column_header(ui, "source", &mut src_w, tokens, |ui, w| {
                 ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&src_label).strong().small()).frame(false)).clicked()
             });
             if src_clicked {
@@ -1158,16 +1218,16 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
                 state.column_settings.source = Some(src_w);
             }
 
-            render_resizable_column_header(ui, &mut state.column_settings.in_out, tokens, |ui, _| {
+            render_resizable_column_header(ui, "in_out", &mut state.column_settings.in_out, tokens, |ui, _| {
                 ui.label(RichText::new("In/Out Range").strong().small());
             });
-            render_resizable_column_header(ui, &mut state.column_settings.trimmed_length, tokens, |ui, _| {
+            render_resizable_column_header(ui, "trimmed_length", &mut state.column_settings.trimmed_length, tokens, |ui, _| {
                 ui.label(RichText::new("Trimmed Length").strong().small());
             });
 
             // Format Column
             let fmt_label = format!("Format{}", sort_indicator(state, QueueSortColumn::Format));
-            let fmt_clicked = render_resizable_column_header(ui, &mut state.column_settings.format, tokens, |ui, w| {
+            let fmt_clicked = render_resizable_column_header(ui, "format", &mut state.column_settings.format, tokens, |ui, w| {
                 ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&fmt_label).strong().small()).frame(false)).clicked()
             });
             if fmt_clicked {
@@ -1176,7 +1236,7 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
 
             // Preset Column
             let pre_label = format!("Preset{}", sort_indicator(state, QueueSortColumn::Preset));
-            let pre_clicked = render_resizable_column_header(ui, &mut state.column_settings.preset, tokens, |ui, w| {
+            let pre_clicked = render_resizable_column_header(ui, "preset", &mut state.column_settings.preset, tokens, |ui, w| {
                 ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&pre_label).strong().small()).frame(false)).clicked()
             });
             if pre_clicked {
@@ -1185,7 +1245,7 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
 
             // Output File Column
             let out_label = format!("Output File{}", sort_indicator(state, QueueSortColumn::Output));
-            let out_clicked = render_resizable_column_header(ui, &mut state.column_settings.output, tokens, |ui, w| {
+            let out_clicked = render_resizable_column_header(ui, "output", &mut state.column_settings.output, tokens, |ui, w| {
                 ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&out_label).strong().small()).frame(false)).clicked()
             });
             if out_clicked {
@@ -1194,23 +1254,23 @@ fn render_table_header(ui: &mut Ui, state: &mut QueuePanelState, tokens: &Tokens
 
             // Status Column
             let st_label = format!("Status{}", sort_indicator(state, QueueSortColumn::Status));
-            let st_clicked = render_resizable_column_header(ui, &mut state.column_settings.status, tokens, |ui, w| {
+            let st_clicked = render_resizable_column_header(ui, "status", &mut state.column_settings.status, tokens, |ui, w| {
                 ui.add_sized([(w - 6.0).max(10.0), 18.0], egui::Button::new(RichText::new(&st_label).strong().small()).frame(false)).clicked()
             });
             if st_clicked {
                 sort_toggle = Some(QueueSortColumn::Status);
             }
 
-            render_resizable_column_header(ui, &mut state.column_settings.eta, tokens, |ui, _| {
+            render_resizable_column_header(ui, "eta", &mut state.column_settings.eta, tokens, |ui, _| {
                 ui.label(RichText::new("ETA").strong().small());
             });
-            render_resizable_column_header(ui, &mut state.column_settings.video_codec, tokens, |ui, _| {
+            render_resizable_column_header(ui, "video_codec", &mut state.column_settings.video_codec, tokens, |ui, _| {
                 ui.label(RichText::new("Video Codec").strong().small());
             });
-            render_resizable_column_header(ui, &mut state.column_settings.audio_channels, tokens, |ui, _| {
+            render_resizable_column_header(ui, "audio_channels", &mut state.column_settings.audio_channels, tokens, |ui, _| {
                 ui.label(RichText::new("Audio Channels").strong().small());
             });
-            render_resizable_column_header(ui, &mut state.column_settings.bitrate, tokens, |ui, _| {
+            render_resizable_column_header(ui, "bitrate", &mut state.column_settings.bitrate, tokens, |ui, _| {
                 ui.label(RichText::new("Target Bitrate").strong().small());
             });
 

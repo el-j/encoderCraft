@@ -39,7 +39,12 @@ pub(crate) fn open_reader(source: &SourceDescriptor) -> Result<MediaReader, Enco
 /// Like [`open_reader`]; `sequence_rate` is the frame rate numbered image sequences play at.
 pub(crate) fn open_reader_at(source: &SourceDescriptor, sequence_rate: Option<Rational64>) -> Result<MediaReader, EncoderError> {
     match source {
-        SourceDescriptor::File { path, .. } => MediaReader::open_with_rate(path, sequence_rate),
+        SourceDescriptor::File { path, .. } => {
+            if let Ok(reader) = crate::universal_reader::open_universal_media_reader(path) {
+                return Ok(reader);
+            }
+            MediaReader::open_with_rate(path, sequence_rate)
+        }
         SourceDescriptor::StitchedClips { .. } => Err(EncoderError::UnsupportedCodec("stitched sources are processed by the clip stitcher".into())),
         SourceDescriptor::Pipe { endpoint, width, height, frame_rate, sample_rate, channels } => {
             MediaReader::open_pipe(&encodercraft_source::pipe::PipeFormat {

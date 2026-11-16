@@ -21,6 +21,7 @@ pub mod scale;
 pub mod stitch;
 pub mod stream;
 pub mod transform;
+pub mod universal_reader;
 
 pub use captions::{CaptionBurner, CaptionTrack, NativeCaptionFormat};
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
@@ -38,3 +39,4 @@ pub use scale::FrameScaler;
 pub use stitch::{ClipStitcher, StitchOptions, stitch_audio_buffers};
 pub use stream::{PipelineLimits, StreamStats};
 pub use transform::{deinterlace, flip, rotate};
+pub use universal_reader::{init_universal_media_openers, open_universal_media_reader};

@@ -293,7 +293,42 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
             }
         }
         _ => {
-            // For other formats (glTF, USD, etc.), record the detected container
+            let is_visual = matches!(
+                container,
+                ContainerKind::Pdf
+                    | ContainerKind::Docx
+                    | ContainerKind::Pptx
+                    | ContainerKind::Xlsx
+                    | ContainerKind::Idml
+                    | ContainerKind::Indd
+                    | ContainerKind::Epub
+                    | ContainerKind::ArtcraftDesigncraft
+                    | ContainerKind::AutocadDxf
+                    | ContainerKind::AutocadDwg
+                    | ContainerKind::HpglPlotter
+                    | ContainerKind::ArtcraftCadcraft
+                    | ContainerKind::Psd
+                    | ContainerKind::Psb
+                    | ContainerKind::ArtcraftPhotocraft
+                    | ContainerKind::Svg
+                    | ContainerKind::IllustratorAi
+                    | ContainerKind::Eps
+                    | ContainerKind::ArtcraftVectorcraft
+            );
+            if is_visual {
+                let (w, h) = if container.is_document() { (612, 792) } else { (1920, 1080) };
+                video_streams.push(VideoStreamInfo {
+                    stream_index: 0,
+                    codec_name: container.display_name().into(),
+                    dimensions: Dimensions { width: w, height: h },
+                    pixel_format: PixelFormat::Rgba8,
+                    color_space: ColorSpaceTag::SRGB,
+                    frame_rate: Rational64 { num: 1, den: 1 },
+                    bit_depth: 8,
+                    bitrate: None,
+                    duration_seconds: None,
+                });
+            }
             metadata.insert("container".into(), container.display_name().into());
         }
     }

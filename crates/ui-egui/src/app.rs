@@ -80,6 +80,7 @@ struct PendingConversionApproval {
 impl EncoderCraftApp {
     /// Creates a new encoderCraft application instance.
     pub fn new(queue_mgr: Arc<QueueManager>, preset_registry: Arc<Mutex<PresetRegistry>>) -> Self {
+        encodercraft_pipeline::init_universal_media_openers();
         let brightness = Brightness::Dark;
         let tokens = Tokens::for_brightness(brightness);
 
