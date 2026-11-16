@@ -4,6 +4,49 @@
 use encodercraft_core::EncoderError;
 use serde::{Deserialize, Serialize};
 
+/// Returns the number of pages in a PDF document.
+pub fn pdf_page_count(bytes: &[u8]) -> Result<usize, EncoderError> {
+    if !bytes.starts_with(b"%PDF-") {
+        return Err(EncoderError::InvalidContainer("not a PDF file".into()));
+    }
+    let pdf =
+        hayro::hayro_syntax::Pdf::new(bytes.to_vec()).map_err(|error| EncoderError::InvalidContainer(format!("failed to open PDF: {error:?}")))?;
+    Ok(pdf.pages().len())
+}
+
+/// Renders a single page of a PDF file into straight-alpha RGBA8 pixels at a resolution scaled to `max_dim`.
+pub fn render_pdf_page_to_rgba(bytes: &[u8], page_index: usize, max_dim: f32) -> Result<(u32, u32, Vec<u8>), EncoderError> {
+    const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
+    if bytes.len() > MAX_PDF_BYTES {
+        return Err(EncoderError::InvalidContainer(format!("PDF exceeds the {MAX_PDF_BYTES}-byte raster limit")));
+    }
+    if !bytes.starts_with(b"%PDF-") {
+        return Err(EncoderError::InvalidContainer("not a PDF file".into()));
+    }
+    let pdf = hayro::hayro_syntax::Pdf::new(bytes.to_vec())
+        .map_err(|error| EncoderError::InvalidContainer(format!("failed to open PDF for rasterization: {error:?}")))?;
+    let pages = pdf.pages();
+    let page = pages.get(page_index).ok_or_else(|| EncoderError::InvalidContainer(format!("PDF page {page_index} is unavailable")))?;
+    let (page_width, page_height) = page.render_dimensions();
+    if !page_width.is_finite() || !page_height.is_finite() || page_width <= 0.0 || page_height <= 0.0 {
+        return Err(EncoderError::InvalidContainer(format!("invalid PDF page dimensions: {page_width}x{page_height}")));
+    }
+    let scale = (max_dim / page_width.max(page_height)).clamp(0.25, 300.0 / 72.0);
+    let cache = hayro::RenderCache::new();
+    let rendered = hayro::render(
+        page,
+        &cache,
+        &hayro::hayro_interpret::InterpreterSettings::default(),
+        &hayro::RenderSettings { x_scale: scale, y_scale: scale, ..hayro::RenderSettings::default() },
+    );
+    let width = u32::from(rendered.width());
+    let height = u32::from(rendered.height());
+    if width == 0 || height == 0 {
+        return Err(EncoderError::InvalidContainer("PDF page produced an empty raster".into()));
+    }
+    Ok((width, height, rendered.data_as_u8_slice().to_vec()))
+}
+
 /// Document layout item placed on a page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DocumentItem {
