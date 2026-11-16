@@ -37,7 +37,8 @@ pub fn render_pdf_page_to_rgba(bytes: &[u8], page_index: usize, max_dim: f32) ->
         page,
         &cache,
         &hayro::hayro_interpret::InterpreterSettings::default(),
-        &hayro::RenderSettings { x_scale: scale, y_scale: scale, ..hayro::RenderSettings::default() },
+        &hayro::RenderSettings::default(),
+        &hayro::PixmapSettings { x_scale: scale, y_scale: scale, ..hayro::PixmapSettings::default() },
     );
     let width = u32::from(rendered.width());
     let height = u32::from(rendered.height());
