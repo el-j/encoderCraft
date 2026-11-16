@@ -974,6 +974,23 @@ Guarantee rock-solid media transcoding and desktop ergonomics by delivering resi
 
 ---
 
+### Milestone 51: Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity
+Tracked under Milestone [M51 - Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity](https://github.com/el-j/encoderCraft/milestone/29) addressing issues [#307](https://github.com/el-j/encoderCraft/issues/307)–[#311](https://github.com/el-j/encoderCraft/issues/311).
+
+#### Objective & Context
+Achieve 100% conversion and preview completeness for all 62 `ContainerType` formats supported by EncoderCraft. Implement default factory presets in the Preset Browser for all remaining container formats (MKV, WebM, GIF, CAF, Opus, DPX, JXL, DDS, DICOM, FITS, EPS, AI, Lottie, USDC, FBX, Alembic, Collada, Splat, PPTX, DOCX, HTML, IDML, PSD, PSB, DXF, DWG, HPGL, and ArtCraft native formats); implement universal visual previews in the monitor for CAD technical blueprints, layered graphics, and multi-page documents; and verify all conversions through end-to-end blackbox matrix tests.
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **M51.1: Universal Preset Expansion across all 62 container formats and media domains ([#307](https://github.com/el-j/encoderCraft/issues/307))** — Add factory presets for all 24 missing container formats across video, audio, textures, vector, 3D spatial, prepress, layered graphics, CAD, and ArtCraft native containers.
+2. [ ] **M51.2: Universal CAD & Technical Blueprint Preview Engine in Preview Monitor ([#308](https://github.com/el-j/encoderCraft/issues/308))** — Implement `UniversalMediaState::Cad` rendering 2D vector CAD entities (DXF, DWG, HPGL, CadCraft) with interactive pan/zoom viewport.
+3. [ ] **M51.3: Layered Graphics (PSD/PSB/PhotoCraft) & Motion Project Preview in Monitor ([#309](https://github.com/el-j/encoderCraft/issues/309))** — Render composite RGBA image textures and layer hierarchy inspection for PSD, PSB, and PhotoCraft, plus project inspection for AEP, PRPROJ, FilmCraft, EffectCraft, and SoundCraft.
+4. [ ] **M51.4: High-Fidelity Multi-Page Document Page Previews (DOCX, PPTX, EPUB, Markdown) ([#310](https://github.com/el-j/encoderCraft/issues/310))** — Implement styled page rendering and GPU texture caching with interactive page scrubbing for DOCX, PPTX, EPUB, and Markdown.
+5. [ ] **M51.5: End-to-End Blackbox Codec Matrix Conformance for all newly added Presets ([#311](https://github.com/el-j/encoderCraft/issues/311))** — Expand the blackbox test matrix in `tests/test_blackbox_codec_matrix.rs` verifying valid output files for every new conversion target.
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

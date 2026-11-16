@@ -421,6 +421,16 @@ Tracked under Milestone [M50 - Production Blackbox Codec Matrix, Column Drag Erg
 - [x] **M50.4: Preset selection container & file extension synchronization with PDF multi-format rasterization ([#303](https://github.com/el-j/encoderCraft/issues/303))** – Synchronized preset dropdowns with target container, export flags, codec settings, and output file extension (`.jpg`, `.tif`, etc.), routing all still image formats through the universal PDF renderer.
 - [x] **M50.5: Comprehensive blackbox codec-to-codec conversion matrix test suite ([#304](https://github.com/el-j/encoderCraft/issues/304))** – Comprehensive end-to-end blackbox test suite covering video-to-video, audio-to-audio, PDF-to-images/markdown, vector graphics, still image conversion, and 3D spatial mesh conversion with synthetic verification.
 
+## Milestone 51: Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity
+
+Tracked under Milestone [M51 - Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity](https://github.com/el-j/encoderCraft/milestone/29) addressing issues [#307](https://github.com/el-j/encoderCraft/issues/307)–[#311](https://github.com/el-j/encoderCraft/issues/311).
+
+- [ ] **M51.1: Universal Preset Expansion across all 62 container formats and media domains ([#307](https://github.com/el-j/encoderCraft/issues/307))** – Factory presets for all 24 missing container formats (MKV, WebM, GIF, CAF, Opus, DPX, JXL, DDS, DICOM, FITS, EPS, AI, Lottie, USDC, FBX, Alembic, Collada, Splat, PPTX, DOCX, HTML, IDML, PSD, PSB, DXF, DWG, HPGL, and ArtCraft native containers).
+- [ ] **M51.2: Universal CAD & Technical Blueprint Preview Engine in Preview Monitor ([#308](https://github.com/el-j/encoderCraft/issues/308))** – 2D vector CAD viewport for DXF, DWG, HPGL, and CadCraft with interactive pan/zoom.
+- [ ] **M51.3: Layered Graphics (PSD/PSB/PhotoCraft) & Motion Project Preview in Monitor ([#309](https://github.com/el-j/encoderCraft/issues/309))** – Composite RGBA previews, layer hierarchy inspection, and project reference inspection.
+- [ ] **M51.4: High-Fidelity Multi-Page Document Page Previews (DOCX, PPTX, EPUB, Markdown) ([#310](https://github.com/el-j/encoderCraft/issues/310))** – Styled page rasterization and GPU texture caching with interactive scrubbing.
+- [ ] **M51.5: End-to-End Blackbox Codec Matrix Conformance for all newly added Presets ([#311](https://github.com/el-j/encoderCraft/issues/311))** – Blackbox synthetic test verification covering every new preset format.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).
