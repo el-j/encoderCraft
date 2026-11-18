@@ -660,6 +660,187 @@ impl TimelineProject {
 
         serde_json::to_string_pretty(&otio).map_err(|e| EncoderError::InvalidJobSpec(format!("failed to serialize OTIO JSON: {e}")))
     }
+
+    /// Exports timeline to CMX 3600 EDL string.
+    pub fn to_edl(&self) -> Result<String, EncoderError> {
+        let seq = self.sequences.first().ok_or_else(|| EncoderError::InvalidJobSpec("no sequences in timeline for EDL export".into()))?;
+        let rate = craft_timeline::time::FrameRate::new(seq.fps.round().max(1.0) as i64, 1);
+        let header = craft_timeline::edl::OutHeader { title: seq.name.clone(), rate, drop_frame: false, reel_len: 8 };
+        let mut events = Vec::new();
+        let mut rec_in = 0i64;
+        for trk in &seq.tracks {
+            for itm in &trk.items {
+                let dur_frames = ((itm.out_tick.saturating_sub(itm.in_tick) as f64 / 1000.0) * seq.fps).round() as i64;
+                let src_in = ((itm.in_tick as f64 / 1000.0) * seq.fps).round() as i64;
+                let src_out = src_in + dur_frames;
+                let rec_out = rec_in + dur_frames;
+                let chan = match trk.kind {
+                    TrackKind::Video => "V",
+                    TrackKind::Audio => "A",
+                };
+                let line = craft_timeline::edl::OutLine {
+                    reel: "AX".into(),
+                    chan: chan.into(),
+                    trans: "C".into(),
+                    dur: None,
+                    src: (src_in, src_out),
+                    rec: (rec_in, rec_out),
+                };
+                rec_in = rec_out;
+                events.push(craft_timeline::edl::OutEvent {
+                    lines: vec![line],
+                    m2: None,
+                    comments: vec![format!("FROM CLIP NAME: {}", itm.name)],
+                    locators: Vec::new(),
+                });
+            }
+        }
+        Ok(craft_timeline::edl::write(&header, &events))
+    }
+
+    /// Exports timeline to Advanced Authoring Format (AAF) binary container.
+    pub fn to_aaf(&self) -> Result<Vec<u8>, EncoderError> {
+        let seq = self.sequences.first().ok_or_else(|| EncoderError::InvalidJobSpec("no sequences in timeline for AAF export".into()))?;
+        let rate = craft_timeline::time::FrameRate::new(seq.fps.round().max(1.0) as i64, 1);
+        let mut doc = craft_aaf::model::Document::default();
+        let mut comp = craft_aaf::model::Composition {
+            name: seq.name.clone(),
+            aaf_mob_id: None,
+            rate,
+            sample_rate: 48000,
+            width: 1920,
+            height: 1080,
+            start_tc: 0,
+            drop: false,
+            tracks: Vec::new(),
+            markers: Vec::new(),
+        };
+
+        for (t_idx, trk) in seq.tracks.iter().enumerate() {
+            let kind = match trk.kind {
+                TrackKind::Video => craft_aaf::model::CKind::Picture,
+                TrackKind::Audio => craft_aaf::model::CKind::Sound,
+            };
+            let mut items = Vec::new();
+            for itm in &trk.items {
+                let start_tick = craft_timeline::time::Tick::from_seconds_f64(itm.start_tick as f64 / 1000.0);
+                let dur_tick = craft_timeline::time::Tick::from_seconds_f64(itm.end_tick.saturating_sub(itm.start_tick) as f64 / 1000.0);
+                let source_idx = doc.sources.len();
+                doc.sources.push(craft_aaf::model::Source {
+                    key: format!("src_{t_idx}_{}", itm.name),
+                    name: itm.name.clone(),
+                    kind,
+                    path: itm.source_path.clone(),
+                    channel: None,
+                    channels: if kind == craft_aaf::model::CKind::Sound { 2 } else { 0 },
+                    file_channels: if kind == craft_aaf::model::CKind::Sound { 2 } else { 0 },
+                    width: 1920,
+                    height: 1080,
+                    frame_rate: rate,
+                    sample_rate: 48000,
+                    bits: 16,
+                    length: dur_tick,
+                    offset: craft_timeline::time::Tick::ZERO,
+                    start_tc: Some(0),
+                    tc_rate: rate,
+                    embedded: None,
+                    markers: Vec::new(),
+                    nested: None,
+                });
+                let clip = craft_aaf::model::CClip { len: dur_tick, source: source_idx, start: start_tick, gain: None, name: itm.name.clone() };
+                items.push(craft_aaf::model::CItem::Clip(clip));
+            }
+            comp.tracks.push(craft_aaf::model::CTrack {
+                kind,
+                name: trk.name.clone(),
+                number: (t_idx + 1) as u32,
+                channels: if kind == craft_aaf::model::CKind::Sound { 2 } else { 0 },
+                items,
+            });
+        }
+        doc.compositions.push(comp);
+        let mut report = craft_timeline::report::Report::default();
+        let identity = craft_aaf::Identity {
+            company: "Storytold",
+            product: "encoderCraft",
+            version: env!("CARGO_PKG_VERSION"),
+            platform: "Cross-platform",
+            product_id: [0x45, 0x6e, 0x63, 0x6f, 0x64, 0x65, 0x72, 0x43, 0x72, 0x61, 0x66, 0x74, 0x00, 0x00, 0x00, 0x01],
+        };
+        let opts = craft_aaf::aaf::WriteOptions { identity, small_sectors: false };
+        craft_aaf::aaf::write(&doc, &opts, &mut report).map_err(|e| EncoderError::Internal(format!("AAF export failed: {e:?}")))
+    }
+
+    /// Exports timeline sound to Open Media Framework (OMF) binary container.
+    pub fn to_omf(&self) -> Result<Vec<u8>, EncoderError> {
+        let seq = self.sequences.first().ok_or_else(|| EncoderError::InvalidJobSpec("no sequences in timeline for OMF export".into()))?;
+        let rate = craft_timeline::time::FrameRate::new(seq.fps.round().max(1.0) as i64, 1);
+        let mut doc = craft_aaf::model::Document::default();
+        let mut comp = craft_aaf::model::Composition {
+            name: seq.name.clone(),
+            aaf_mob_id: None,
+            rate,
+            sample_rate: 48000,
+            width: 0,
+            height: 0,
+            start_tc: 0,
+            drop: false,
+            tracks: Vec::new(),
+            markers: Vec::new(),
+        };
+
+        for (t_idx, trk) in seq.tracks.iter().enumerate() {
+            if trk.kind != TrackKind::Audio {
+                continue;
+            }
+            let mut items = Vec::new();
+            for itm in &trk.items {
+                let start_tick = craft_timeline::time::Tick::from_seconds_f64(itm.start_tick as f64 / 1000.0);
+                let dur_tick = craft_timeline::time::Tick::from_seconds_f64(itm.end_tick.saturating_sub(itm.start_tick) as f64 / 1000.0);
+                let source_idx = doc.sources.len();
+                doc.sources.push(craft_aaf::model::Source {
+                    key: format!("omf_src_{t_idx}_{}", itm.name),
+                    name: itm.name.clone(),
+                    kind: craft_aaf::model::CKind::Sound,
+                    path: itm.source_path.clone(),
+                    channel: None,
+                    channels: 2,
+                    file_channels: 2,
+                    width: 0,
+                    height: 0,
+                    frame_rate: rate,
+                    sample_rate: 48000,
+                    bits: 16,
+                    length: dur_tick,
+                    offset: craft_timeline::time::Tick::ZERO,
+                    start_tc: Some(0),
+                    tc_rate: rate,
+                    embedded: None,
+                    markers: Vec::new(),
+                    nested: None,
+                });
+                let clip = craft_aaf::model::CClip { len: dur_tick, source: source_idx, start: start_tick, gain: None, name: itm.name.clone() };
+                items.push(craft_aaf::model::CItem::Clip(clip));
+            }
+            comp.tracks.push(craft_aaf::model::CTrack {
+                kind: craft_aaf::model::CKind::Sound,
+                name: trk.name.clone(),
+                number: (t_idx + 1) as u32,
+                channels: 2,
+                items,
+            });
+        }
+        doc.compositions.push(comp);
+        let mut report = craft_timeline::report::Report::default();
+        let identity = craft_aaf::Identity {
+            company: "Storytold",
+            product: "encoderCraft",
+            version: env!("CARGO_PKG_VERSION"),
+            platform: "Cross-platform",
+            product_id: [0x45, 0x6e, 0x63, 0x6f, 0x64, 0x65, 0x72, 0x43, 0x72, 0x61, 0x66, 0x74, 0x00, 0x00, 0x00, 0x01],
+        };
+        craft_aaf::omf::write(&doc, &identity, &mut report).map_err(|e| EncoderError::Internal(format!("OMF export failed: {e:?}")))
+    }
 }
 
 /// Resolves `key` as an exact item name first, then as a zero-based index.

@@ -62,7 +62,7 @@ authors = ["el-j", "ArtCraft Contributors"]
 [workspace.dependencies]
 # Upstream shared ArtCraft libraries (official storytold/craft-libs repository)
 craft-atomic = { git = "https://github.com/storytold/craft-libs" }
-craft-media = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["isobmff", "matroska", "bitstream"] }
+craft-media = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["isobmff", "matroska", "bitstream", "avi", "mxf", "mpegts", "ogg"] }
 craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", features = ["serde", "native-windows"] }
 craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", features = ["egui"] }
 craft-menu = { version = "0.1.0", git = "https://github.com/storytold/craft-libs" }
@@ -75,26 +75,24 @@ craft-html = { git = "https://github.com/storytold/craft-libs" }
 craft-idml = { git = "https://github.com/storytold/craft-libs" }
 craft-epub = { git = "https://github.com/storytold/craft-libs" }
 craft-eps = { git = "https://github.com/storytold/craft-libs" }
-craft-audio = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["decode", "peaks", "encode", "flac-encode", "pcm-encode"] }
+craft-audio = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["decode", "peaks", "encode", "flac-decode", "flac-encode", "pcm-encode", "ac3-encode", "eac3-encode", "alac-encode", "alac-decode", "aac-encode", "mp3-encode", "opus-encode", "vorbis-encode", "qoa"] }
+craft-video = { git = "https://github.com/storytold/craft-libs", default-features = false, features = ["h264", "hevc", "prores", "dnx", "av1", "vp9", "vp8", "apv", "mpeg2", "mpeg4", "ffv1", "hap"] }
+craft-captions = { git = "https://github.com/storytold/craft-libs" }
+craft-cms = { git = "https://github.com/storytold/craft-libs" }
+craft-gainmap = { git = "https://github.com/storytold/craft-libs" }
+craft-timeline = { git = "https://github.com/storytold/craft-libs", features = ["xml", "otio", "serde"] }
+craft-aaf = { git = "https://github.com/storytold/craft-libs" }
+craft-time = { git = "https://github.com/storytold/craft-libs" }
 
-# Official ArtCraft repositories (mapped to canonical `craft-*` crate names; transitions to craft-libs once #504 & #439-#448 merge)
-craft-h264enc = { package = "filmcraft-h264enc", git = "https://github.com/storytold/filmcraft" }
-craft-prores = { package = "filmcraft-prores", git = "https://github.com/storytold/filmcraft" }
-craft-dnx = { package = "filmcraft-dnx", git = "https://github.com/storytold/filmcraft" }
-craft-vp8 = { package = "filmcraft-vp8", git = "https://github.com/storytold/filmcraft" }
-craft-hevcenc = { package = "effectcraft-hevcenc", git = "https://github.com/storytold/effectcraft" }
-craft-av1enc = { package = "effectcraft-av1enc", git = "https://github.com/storytold/effectcraft" }
-craft-vp9enc = { package = "effectcraft-vp9enc", git = "https://github.com/storytold/effectcraft" }
+# Official ArtCraft repositories remaining prior to upstream consolidation
 effectcraft-opusenc = { git = "https://github.com/storytold/effectcraft", rev = "7870b5916ae0749d497d880989683bf2946d6c8b" }
 filmcraft-scopes = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-captions = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-time = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-media = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-color = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft" }
 photocraft-codecs = { git = "https://github.com/storytold/photocraft" }
-filmcraft-mxf = { git = "https://github.com/storytold/filmcraft" }
 craft-aac = { package = "filmcraft-aac", git = "https://github.com/storytold/filmcraft" }
 craft-opus = { package = "filmcraft-opus", git = "https://github.com/storytold/filmcraft" }
 craft-audio-io = { package = "soundcraft-audio-io", git = "https://github.com/storytold/soundcraft" }

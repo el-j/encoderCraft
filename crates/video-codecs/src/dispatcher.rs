@@ -4,13 +4,17 @@
 
 use encodercraft_core::{EncoderError, Rational64};
 
+use crate::apv::ApvEncoderWrapper;
 use crate::av1::Av1EncoderWrapper;
 use crate::dnx::DnxEncoderWrapper;
 use crate::encoder::VideoEncoder;
+use crate::ffv1::Ffv1EncoderWrapper;
 use crate::gif::GifEncoder;
 use crate::h264::H264EncoderWrapper;
 use crate::hevc::HevcEncoderWrapper;
 use crate::mjpeg::MjpegEncoder;
+use crate::mpeg2::Mpeg2EncoderWrapper;
+use crate::mpeg4::Mpeg4EncoderWrapper;
 use crate::params::EncodeParams;
 use crate::prores::ProResEncoderWrapper;
 use crate::vp9::Vp9EncoderWrapper;
@@ -24,6 +28,10 @@ pub enum VideoCodecKind {
     DnxHd,
     Av1,
     Vp9,
+    Apv,
+    Mpeg2,
+    Mpeg4Sp,
+    Ffv1,
     Mjpeg,
     Gif,
 }
@@ -39,6 +47,10 @@ impl VideoCodecKind {
             "dnxhd" | "dnxhr" | "avdn" | "avdh" => Some(Self::DnxHd),
             "av1" | "av01" => Some(Self::Av1),
             "vp9" | "vp09" => Some(Self::Vp9),
+            "apv" | "apv1" | "ap422" => Some(Self::Apv),
+            "mpeg2" | "mpeg2video" | "mp2v" | "mpg2" | "h262" | "xdcam" | "imx" => Some(Self::Mpeg2),
+            "mpeg4" | "mp4v" | "xvid" | "divx" | "mpeg4sp" => Some(Self::Mpeg4Sp),
+            "ffv1" => Some(Self::Ffv1),
             "mjpeg" | "jpeg" | "mjpb" => Some(Self::Mjpeg),
             "gif" => Some(Self::Gif),
             _ => None,
@@ -54,6 +66,10 @@ impl VideoCodecKind {
             Self::DnxHd => *b"AVdn",
             Self::Av1 => *b"av01",
             Self::Vp9 => *b"vp09",
+            Self::Apv => *b"apv1",
+            Self::Mpeg2 => *b"mp2v",
+            Self::Mpeg4Sp => *b"mp4v",
+            Self::Ffv1 => *b"ffv1",
             Self::Mjpeg => *b"mjpa",
             Self::Gif => *b"GIF8",
         }
@@ -100,6 +116,22 @@ pub fn create_video_encoder_with(
             let enc = Vp9EncoderWrapper::with_params(width, height, fps, params)?;
             Ok(Box::new(enc))
         }
+        VideoCodecKind::Apv => {
+            let enc = ApvEncoderWrapper::with_params(width, height, fps, params)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::Mpeg2 => {
+            let enc = Mpeg2EncoderWrapper::with_params(width, height, fps, params)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::Mpeg4Sp => {
+            let enc = Mpeg4EncoderWrapper::with_params(width, height, fps, params)?;
+            Ok(Box::new(enc))
+        }
+        VideoCodecKind::Ffv1 => {
+            let enc = Ffv1EncoderWrapper::new(width, height, fps)?;
+            Ok(Box::new(enc))
+        }
         VideoCodecKind::Gif => {
             let fps_val = if fps.num > 0 && fps.den > 0 { (fps.num / fps.den) as u32 } else { 10 };
             let enc = GifEncoder::new(width as u16, height as u16, fps_val)?;
@@ -127,6 +159,10 @@ mod tests {
         assert_eq!(VideoCodecKind::parse("prores"), Some(VideoCodecKind::ProRes));
         assert_eq!(VideoCodecKind::parse("gif"), Some(VideoCodecKind::Gif));
         assert_eq!(VideoCodecKind::parse("mjpeg"), Some(VideoCodecKind::Mjpeg));
+        assert_eq!(VideoCodecKind::parse("apv"), Some(VideoCodecKind::Apv));
+        assert_eq!(VideoCodecKind::parse("mpeg2"), Some(VideoCodecKind::Mpeg2));
+        assert_eq!(VideoCodecKind::parse("mpeg4"), Some(VideoCodecKind::Mpeg4Sp));
+        assert_eq!(VideoCodecKind::parse("ffv1"), Some(VideoCodecKind::Ffv1));
         assert_eq!(VideoCodecKind::parse("unknown_codec"), None);
     }
 
@@ -152,5 +188,17 @@ mod tests {
 
         let enc_dnx = create_video_encoder(VideoCodecKind::DnxHd, 1920, 1080, Rational64::FPS_24, None);
         assert!(enc_dnx.is_ok());
+
+        let enc_apv = create_video_encoder(VideoCodecKind::Apv, 320, 180, Rational64::FPS_24, None);
+        assert!(enc_apv.is_ok());
+
+        let enc_mpeg2 = create_video_encoder(VideoCodecKind::Mpeg2, 320, 180, Rational64::FPS_24, Some(4000));
+        assert!(enc_mpeg2.is_ok());
+
+        let enc_mpeg4 = create_video_encoder(VideoCodecKind::Mpeg4Sp, 320, 180, Rational64::FPS_24, Some(2000));
+        assert!(enc_mpeg4.is_ok());
+
+        let enc_ffv1 = create_video_encoder(VideoCodecKind::Ffv1, 320, 180, Rational64::FPS_24, None);
+        assert!(enc_ffv1.is_ok());
     }
 }

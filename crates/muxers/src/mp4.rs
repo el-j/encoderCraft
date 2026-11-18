@@ -51,6 +51,24 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
             b"apch" | b"apcn" | b"apcs" | b"apco" | b"ap4h" | b"ap4x" => CodecConfig::ProRes { fourcc },
             b"AVdn" | b"AVdh" => CodecConfig::Dnx { fourcc },
             b"jpeg" | b"mjpa" | b"mjpb" => CodecConfig::Jpeg { fourcc },
+            b"apv1" => {
+                let apv = if !cfg.codec_private.is_empty() {
+                    craft_media::isobmff::ApvConfig::from_record(cfg.codec_private.clone())
+                        .map_err(|e| EncoderError::InvalidContainer(format!("invalid apvC decoder configuration: {e}")))?
+                } else {
+                    craft_media::isobmff::ApvConfig {
+                        profile_idc: 0x11,
+                        level_idc: 0x33,
+                        band_idc: 0,
+                        frame_width: cfg.dimensions.width,
+                        frame_height: cfg.dimensions.height,
+                        chroma_format_idc: 2,
+                        bit_depth_minus8: (cfg.bit_depth.max(8) - 8),
+                        ..Default::default()
+                    }
+                };
+                CodecConfig::Apv(apv)
+            }
             _ => CodecConfig::Unknown { fourcc, raw: cfg.codec_private.clone() },
         };
 
@@ -96,6 +114,9 @@ impl<W: Read + Write + Seek> Mp4Muxer<W> {
         let fourcc = FourCc::new(&cfg.codec_fourcc);
         let codec_config = match &cfg.codec_fourcc {
             b"mp4a" => CodecConfig::Aac(AacConfig::from_asc(cfg.codec_private.clone())),
+            b"alac" => CodecConfig::Alac { cookie: cfg.codec_private.clone() },
+            b"ac-3" | b"dac3" => CodecConfig::Ac3 { dac3: cfg.codec_private.clone() },
+            b"ec-3" | b"dec3" => CodecConfig::Eac3 { dec3: cfg.codec_private.clone() },
             _ => CodecConfig::Unknown { fourcc, raw: cfg.codec_private.clone() },
         };
 
@@ -216,7 +237,7 @@ mod tests {
     fn test_mp4_muxer_video_and_audio() {
         let cursor = Cursor::new(Vec::new());
         let mut muxer = Mp4Muxer::new(cursor, false).unwrap();
-        let avcc = craft_h264enc::Encoder::new(craft_h264enc::EncoderConfig::new(64, 64, 24, 1)).unwrap().avcc();
+        let avcc = craft_video::h264::Encoder::new(craft_video::h264::EncoderConfig::new(64, 64, 24, 1)).unwrap().avcc();
 
         let v_cfg = VideoStreamConfig {
             codec_fourcc: *b"avc1",

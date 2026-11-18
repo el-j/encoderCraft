@@ -29,8 +29,9 @@ hayro = { workspace = true }
 lopdf = { workspace = true }
 image = { workspace = true }
 craft-media = { workspace = true }
-filmcraft-mxf = { workspace = true }
-filmcraft-captions = { workspace = true }
+craft-captions = { workspace = true }
+craft-timeline = { workspace = true }
+craft-aaf = { workspace = true }
 filmcraft-time = { workspace = true }
 filmcraft-color = { workspace = true }
 effectcraft-opusenc = { workspace = true }
