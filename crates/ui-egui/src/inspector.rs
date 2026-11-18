@@ -194,6 +194,10 @@ pub fn default_audio_codec_for_container(c: ContainerType) -> &'static str {
         ContainerType::OggAudio => "vorbis",
         ContainerType::Opus | ContainerType::WebM => "opus",
         ContainerType::Caf => "lpcm",
+        ContainerType::Ac3 => "ac3",
+        ContainerType::Eac3 => "eac3",
+        ContainerType::Alac => "alac",
+        ContainerType::Qoa => "qoa",
         _ => "aac",
     }
 }
@@ -201,20 +205,31 @@ pub fn default_audio_codec_for_container(c: ContainerType) -> &'static str {
 /// Available audio codecs for an output container format (AME Parity).
 pub fn audio_codecs_for_container(container: ContainerType) -> &'static [(&'static str, &'static str)] {
     match container {
-        ContainerType::IsoBmffMp4 => &[("aac", "AAC-LC (Advanced Audio Coding)")],
+        ContainerType::IsoBmffMp4 => &[
+            ("aac", "AAC-LC (Advanced Audio Coding)"),
+            ("ac3", "Dolby Digital (AC-3)"),
+            ("eac3", "Enhanced AC-3 / Dolby Digital Plus"),
+            ("alac", "Apple Lossless Audio (ALAC)"),
+        ],
         ContainerType::QuickTimeMov => &[
             ("aac", "AAC-LC (Advanced Audio Coding)"),
             ("pcm_s24le", "Uncompressed Linear PCM (24-bit)"),
             ("pcm_s16le", "Uncompressed Linear PCM (16-bit)"),
             ("alac", "Apple Lossless Audio (ALAC)"),
+            ("ac3", "Dolby Digital (AC-3)"),
+            ("eac3", "Enhanced AC-3 / Dolby Digital Plus"),
         ],
         ContainerType::MatroskaMkv => &[
             ("opus", "Ogg Opus (RFC 7845)"),
             ("aac", "AAC-LC (Advanced Audio Coding)"),
             ("flac", "Free Lossless Audio Codec (FLAC)"),
             ("pcm_s24le", "Linear PCM (24-bit)"),
+            ("ac3", "Dolby Digital (AC-3)"),
+            ("eac3", "Enhanced AC-3 / Dolby Digital Plus"),
+            ("alac", "Apple Lossless Audio (ALAC)"),
         ],
         ContainerType::WebM => &[("opus", "Ogg Opus (RFC 7845)"), ("vorbis", "Ogg Vorbis")],
+        ContainerType::Avi => &[("pcm_s16le", "Uncompressed PCM (16-bit)"), ("mp3", "MPEG Audio Layer 3 (MP3)"), ("ac3", "Dolby Digital (AC-3)")],
         ContainerType::Wave => &[
             ("pcm_s24le", "Uncompressed PCM (24-bit Broadcast Wave)"),
             ("pcm_s16le", "Uncompressed PCM (16-bit CD Standard)"),
@@ -230,6 +245,10 @@ pub fn audio_codecs_for_container(container: ContainerType) -> &'static [(&'stat
         ContainerType::OggAudio => &[("vorbis", "Ogg Vorbis Audio"), ("opus", "Ogg Opus Audio"), ("flac", "Ogg FLAC Lossless")],
         ContainerType::Opus => &[("opus", "Ogg Opus Interactive Audio")],
         ContainerType::Caf => &[("lpcm", "Apple Core Audio Linear PCM"), ("alac", "Apple Lossless (ALAC)"), ("aac", "AAC-LC")],
+        ContainerType::Ac3 => &[("ac3", "Dolby Digital (AC-3)")],
+        ContainerType::Eac3 => &[("eac3", "Enhanced AC-3 / Dolby Digital Plus")],
+        ContainerType::Alac => &[("alac", "Apple Lossless Audio (ALAC)")],
+        ContainerType::Qoa => &[("qoa", "Quite OK Audio (QOA)")],
         _ => &[("aac", "AAC-LC (Advanced Audio Coding)"), ("pcm_s24le", "Linear PCM 24-bit")],
     }
 }
@@ -1994,6 +2013,43 @@ fn render_effects_tab(ui: &mut Ui, target: &mut OutputTarget) {
             target.lut_path = Some(file);
         }
     });
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    // 7. ICC Color Profile (craft-cms)
+    let mut icc_str = target.icc_profile_path.as_ref().and_then(|p| p.to_str()).unwrap_or("").to_string();
+    ui.horizontal(|ui| {
+        ui.label("ICC Profile (.icc, .icm):");
+        if ui.text_edit_singleline(&mut icc_str).changed() {
+            target.icc_profile_path = if icc_str.trim().is_empty() { None } else { Some(PathBuf::from(icc_str.trim())) };
+        }
+        if ui.button("Browse...").clicked()
+            && let Some(file) = rfd::FileDialog::new().add_filter("ICC Profile", &["icc", "icm"]).pick_file()
+        {
+            target.icc_profile_path = Some(file);
+        }
+    });
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    // 8. HDR Gain Map (craft-gainmap / ISO 21496-1)
+    let mut gainmap_enabled = target.apply_gainmap;
+    if ui.checkbox(&mut gainmap_enabled, "ISO 21496-1 HDR Gain Map Tone Mapping").changed() {
+        target.apply_gainmap = gainmap_enabled;
+    }
+    if gainmap_enabled {
+        ui.indent("gainmap_indent", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Target Display Headroom:");
+                let mut headroom = target.gainmap_headroom.unwrap_or(2.0);
+                if ui.add(egui::Slider::new(&mut headroom, 0.0..=5.0).text("stops")).changed() {
+                    target.gainmap_headroom = Some(headroom);
+                }
+            });
+        });
+    }
 }
 
 fn render_captions_tab(ui: &mut Ui, target: &mut OutputTarget) {
@@ -2007,8 +2063,9 @@ fn render_captions_tab(ui: &mut Ui, target: &mut OutputTarget) {
             target.caption_path = if cap_str.trim().is_empty() { None } else { Some(PathBuf::from(cap_str.trim())) };
         }
         if ui.button("Browse...").clicked()
-            && let Some(file) =
-                rfd::FileDialog::new().add_filter("Captions", &["srt", "vtt", "scc", "mcc", "ttml", "dfxp", "ass", "ssa", "stl"]).pick_file()
+            && let Some(file) = rfd::FileDialog::new()
+                .add_filter("Captions", &["srt", "vtt", "scc", "mcc", "ttml", "dfxp", "ass", "ssa", "stl", "pjs", "rt", "js"])
+                .pick_file()
         {
             target.caption_path = Some(file);
         }

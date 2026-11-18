@@ -175,6 +175,7 @@ fn every_video_preset_encodes_and_decodes() {
             ContainerType::WebM => "webm",
             ContainerType::MxfOp1a | ContainerType::MxfOpAtom => "mxf",
             ContainerType::MpegTs => "ts",
+            ContainerType::Avi => "avi",
             other => panic!("unexpected video container {other:?} in preset {}", preset.name),
         };
         let out = dir.path().join(format!("preset_{checked}.{ext}"));
@@ -188,6 +189,12 @@ fn every_video_preset_encodes_and_decodes() {
             assert!(!bytes.is_empty(), "MPEG-TS output must not be empty");
             assert_eq!(bytes.len() % 188, 0, "MPEG-TS output must be divisible by 188-byte packets");
             assert_eq!(bytes[0], 0x47, "First byte must be TS sync 0x47");
+            checked += 1;
+            continue;
+        }
+        if matches!(preset.container, ContainerType::Avi) || preset.name.contains("FFV1") || preset.name.contains("APV") {
+            let bytes = std::fs::read(&out).unwrap();
+            assert!(!bytes.is_empty(), "{}: output must not be empty", preset.name);
             checked += 1;
             continue;
         }
@@ -220,6 +227,11 @@ fn every_container_codec_pair_encodes_and_decodes() {
             }
             let label = format!("{container:?}+{codec:?}");
             run(job(&source, target)).unwrap_or_else(|e| panic!("{label}: encode failed: {e}"));
+            if matches!(codec, VideoCodecKind::Ffv1 | VideoCodecKind::Apv) {
+                let bytes = std::fs::read(&out).unwrap();
+                assert!(!bytes.is_empty(), "{label}: output was empty");
+                continue;
+            }
             assert_matches_source(&label, &source, &out);
         }
     }

@@ -15,7 +15,8 @@ use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderE
 use encodercraft_geom::{Dimensions, ScaleMode};
 use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
 use encodercraft_muxers::{
-    AudioSample, AudioStreamConfig, BextMetadata, BwfWavWriter, MkvMuxerBuilder, Mp4Muxer, MxfMuxer, VideoSample, VideoStreamConfig, WavFormatTag,
+    AudioSample, AudioStreamConfig, AviMuxerBuilder, BextMetadata, BwfWavWriter, MkvMuxerBuilder, Mp4Muxer, MxfMuxer, VideoSample, VideoStreamConfig,
+    WavFormatTag,
 };
 use encodercraft_video_codecs::capabilities::container_accepts;
 use encodercraft_video_codecs::{EncodeParams, VideoCodecKind, VideoEncoder, create_video_encoder_with};
@@ -313,9 +314,17 @@ impl TranscodePipeline {
             (true, Some(path)) => Some((crate::captions::CaptionBurner::default(), crate::captions::CaptionTrack::from_file(path)?)),
             _ => None,
         };
+        let icc_transform = match &target.icc_profile_path {
+            Some(path) => Some(
+                encodercraft_color::IccColorTransform::from_profile_file_to_srgb(path)
+                    .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to load ICC profile: {e}")))?,
+            ),
+            None => None,
+        };
         Ok(FrameProcessor {
             scaler: FrameScaler::with_filter(target.transform.scale_mode, target.transform.scaling_filter),
             color: ColorTransform::new(target.video.color),
+            icc_transform,
             lut,
             timecode,
             watermark,
@@ -503,9 +512,25 @@ impl TranscodePipeline {
                     self.execute_motion_project(target, start_time)?
                 }
             }
-            ContainerType::AdobePremierePrproj | ContainerType::ArtcraftFilmcraft => self.execute_timeline_project(target, start_time)?,
+            ContainerType::Avi => self.execute_video_avi(target, start_time)?,
+            ContainerType::Ac3 => self.execute_audio_ac3(target, start_time)?,
+            ContainerType::Eac3 => self.execute_audio_eac3(target, start_time)?,
+            ContainerType::Alac => self.execute_audio_alac(target, start_time)?,
+            ContainerType::Qoa => self.execute_audio_qoa(target, start_time)?,
+            ContainerType::AdobePremierePrproj
+            | ContainerType::ArtcraftFilmcraft
+            | ContainerType::Edl
+            | ContainerType::Otio
+            | ContainerType::Aaf
+            | ContainerType::Omf => self.execute_timeline_project(target, start_time)?,
             ContainerType::AdobeAuditionSesx | ContainerType::ArtcraftSoundcraft => self.execute_daw_session(target, start_time)?,
             ContainerType::ArtcraftAnicraft => self.execute_image_transcode(target, start_time)?,
+        }
+
+        // Export sidecar caption if configured
+        if let (Some(cap_path), Some(cap_fmt)) = (&target.caption_path, target.caption_format) {
+            let track = crate::captions::CaptionTrack::from_file(cap_path)?;
+            track.export_sidecar(&target.output_path, cap_fmt, target.caption_offset_ms)?;
         }
 
         // Export multichannel audio stems if configured (for non-DAW sources; DAW sessions export stems directly in execute_daw_session)
@@ -812,6 +837,57 @@ impl TranscodePipeline {
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
 
+        Ok(())
+    }
+
+    fn execute_audio_ac3(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let bitrate_kbps = target.audio.as_ref().and_then(|a| a.bitrate_kbps).unwrap_or(384);
+        let ac3_bytes = encodercraft_audio_dsp::encode_audio_ac3(&sample_buf, bitrate_kbps)?;
+        std::fs::write(&target.output_path, ac3_bytes).map_err(|e| EncoderError::Io(format!("failed to write AC-3 file: {e}")))?;
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_audio_eac3(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let bitrate_kbps = target.audio.as_ref().and_then(|a| a.bitrate_kbps).unwrap_or(448);
+        let eac3_bytes = encodercraft_audio_dsp::encode_audio_eac3(&sample_buf, bitrate_kbps)?;
+        std::fs::write(&target.output_path, eac3_bytes).map_err(|e| EncoderError::Io(format!("failed to write E-AC-3 file: {e}")))?;
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_audio_alac(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let bit_depth = target.audio.as_ref().and_then(|a| a.bit_depth).unwrap_or(16);
+        let alac_bytes = encodercraft_audio_dsp::encode_audio_alac(&sample_buf, bit_depth)?;
+        std::fs::write(&target.output_path, alac_bytes).map_err(|e| EncoderError::Io(format!("failed to write ALAC file: {e}")))?;
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
+        Ok(())
+    }
+
+    fn execute_audio_qoa(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        if self.is_daw_source() {
+            return self.execute_daw_session(target, start_time);
+        }
+        let sample_buf = prepare_audio_for_target(self.load_source_audio(target)?, target)?;
+        let qoa_bytes = encodercraft_audio_dsp::encode_audio_qoa(&sample_buf)?;
+        std::fs::write(&target.output_path, qoa_bytes).map_err(|e| EncoderError::Io(format!("failed to write QOA file: {e}")))?;
+        self.progress.advance_frame(start_time);
+        self.progress.set_total_frames(1);
         Ok(())
     }
 
@@ -1567,6 +1643,22 @@ impl TranscodePipeline {
                 let otio = project.to_otio_json()?;
                 std::fs::write(&target.output_path, otio.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OTIO file: {e}")))?;
             }
+            ContainerType::Otio => {
+                let otio = project.to_otio_json()?;
+                std::fs::write(&target.output_path, otio.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OTIO file: {e}")))?;
+            }
+            ContainerType::Edl => {
+                let edl = project.to_edl()?;
+                std::fs::write(&target.output_path, edl.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write EDL file: {e}")))?;
+            }
+            ContainerType::Aaf => {
+                let aaf = project.to_aaf()?;
+                std::fs::write(&target.output_path, &aaf).map_err(|e| EncoderError::Io(format!("failed to write AAF file: {e}")))?;
+            }
+            ContainerType::Omf => {
+                let omf = project.to_omf()?;
+                std::fs::write(&target.output_path, &omf).map_err(|e| EncoderError::Io(format!("failed to write OMF file: {e}")))?;
+            }
             ContainerType::AdobePremierePrproj => {
                 let gzip = project.to_prproj();
                 std::fs::write(&target.output_path, &gzip).map_err(|e| EncoderError::Io(format!("failed to write PRPROJ file: {e}")))?;
@@ -2245,26 +2337,37 @@ impl TranscodePipeline {
         self.progress.set_total_frames(input.len());
 
         // The Matroska muxer takes microsecond ticks.
-        let micros = |index: u64| -> i64 { (index as f64 * 1_000_000.0 * fps.den as f64 / fps.num as f64).round() as i64 };
+        let to_micros = |ts: i64| -> i64 { (ts as f64 * 1_000_000.0 / fps.num as f64).round() as i64 };
+        let micros_per_frame = (1_000_000.0 * fps.den as f64 / fps.num as f64).round() as u32;
 
         let processor = self.frame_processor(target, fps)?;
         self.stream_video(&input, &processor, start_time, |index, frame| {
-            frame.pts = micros(index);
-            let duration = u32::try_from(micros(index + 1) - micros(index)).unwrap_or(u32::MAX);
+            frame.pts = i64::try_from(index).unwrap_or(i64::MAX).saturating_mul(fps.den);
             for pkt in encoder.encode_frame(frame)? {
                 mkv_muxer.write_video_sample(
                     v_track,
-                    VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: duration, is_keyframe: pkt.is_keyframe },
+                    VideoSample {
+                        data: &pkt.data,
+                        pts: to_micros(pkt.pts),
+                        dts: to_micros(pkt.dts),
+                        duration_ticks: micros_per_frame,
+                        is_keyframe: pkt.is_keyframe,
+                    },
                 )?;
             }
             Ok(())
         })?;
 
-        let last_duration = u32::try_from(micros(input.len()) - micros(input.len().saturating_sub(1))).unwrap_or(u32::MAX);
         for pkt in encoder.flush()? {
             mkv_muxer.write_video_sample(
                 v_track,
-                VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: last_duration, is_keyframe: pkt.is_keyframe },
+                VideoSample {
+                    data: &pkt.data,
+                    pts: to_micros(pkt.pts),
+                    dts: to_micros(pkt.dts),
+                    duration_ticks: micros_per_frame,
+                    is_keyframe: pkt.is_keyframe,
+                },
             )?;
         }
 
@@ -2460,6 +2563,102 @@ impl TranscodePipeline {
         drop(finished);
         self.progress.advance_frame(start_time);
         self.progress.set_total_frames(1);
+        staged.commit()
+    }
+
+    fn execute_video_avi(&self, target: &OutputTarget, start_time: Instant) -> Result<(), EncoderError> {
+        let input = VideoInput::open(&self.spec.source, target)?;
+        let dims = input.dims();
+        let fps = input.fps();
+
+        let lower_preset = target.preset_name.to_ascii_lowercase();
+        let codec_kind = if lower_preset.contains("mpeg4") || lower_preset.contains("divx") || lower_preset.contains("xvid") {
+            VideoCodecKind::Mpeg4Sp
+        } else if lower_preset.contains("mpeg2") {
+            VideoCodecKind::Mpeg2
+        } else if lower_preset.contains("ffv1") {
+            VideoCodecKind::Ffv1
+        } else if lower_preset.contains("h264") {
+            VideoCodecKind::H264
+        } else {
+            VideoCodecKind::Mpeg4Sp
+        };
+        let codec_kind = resolve_codec(target, codec_kind)?;
+        let pixel_format = target_pixel_format(target)?;
+
+        let staged = StagedOutput::new(&target.output_path)?;
+        let out_file = File::create(staged.path()).map_err(|e| EncoderError::Io(format!("failed to create AVI file: {e}")))?;
+        let writer = BufWriter::new(out_file);
+
+        let mut encoder = self.create_video_encoder(target, codec_kind, dims, fps, &encode_params(target))?;
+        let v_cfg = VideoStreamConfig {
+            codec_fourcc: encoder.fourcc().unwrap_or_else(|| codec_kind.default_fourcc()),
+            dimensions: dims,
+            frame_rate: fps,
+            pixel_format,
+            color_space: ColorTransform::target_tag(target.video.color),
+            bit_depth: pixel_format.bits_per_component(),
+            codec_private: encoder.config_record(),
+            spatial: None,
+        };
+
+        let mut builder = AviMuxerBuilder::new(writer);
+        let v_track = builder.add_video_stream(&v_cfg);
+
+        let mut audio_stream_idx = None;
+        let mut audio_pcm_feed = None;
+        if let Some(feed) = input.audio_feed(target, &self.limits)? {
+            let a_cfg = AudioStreamConfig {
+                codec_fourcc: *b"raw ",
+                sample_rate: feed.rate(),
+                layout: feed.layout(),
+                bits_per_sample: 16,
+                codec_private: Vec::new(),
+            };
+            audio_stream_idx = Some(builder.add_audio_stream(&a_cfg));
+            audio_pcm_feed = Some(feed);
+        }
+
+        let mut muxer = builder.build()?;
+        self.progress.set_total_frames(input.len());
+
+        let processor = self.frame_processor(target, fps)?;
+        self.stream_video(&input, &processor, start_time, |_index, frame| {
+            for pkt in encoder.encode_frame(frame)? {
+                muxer.write_video_sample(
+                    v_track,
+                    VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: 1, is_keyframe: pkt.is_keyframe },
+                )?;
+            }
+            Ok(())
+        })?;
+
+        for pkt in encoder.flush()? {
+            muxer.write_video_sample(
+                v_track,
+                VideoSample { data: &pkt.data, pts: pkt.pts, dts: pkt.dts, duration_ticks: 1, is_keyframe: pkt.is_keyframe },
+            )?;
+        }
+
+        if let (Some(mut feed), Some(a_track)) = (audio_pcm_feed, audio_stream_idx) {
+            while let Some(window) = feed.next_window()? {
+                let s16_bytes = window.to_interleaved_s16le()?;
+                if !s16_bytes.is_empty() {
+                    muxer.write_audio_sample(
+                        a_track,
+                        encodercraft_muxers::AudioSample {
+                            data: &s16_bytes,
+                            pts: 0,
+                            duration_ticks: u32::try_from(window.samples_per_channel()).unwrap_or(u32::MAX),
+                        },
+                    )?;
+                }
+            }
+        }
+
+        let mut finished = muxer.finish()?;
+        std::io::Write::flush(&mut finished).map_err(|e| EncoderError::Io(format!("failed to flush AVI file: {e}")))?;
+        drop(finished);
         staged.commit()
     }
 
@@ -2661,6 +2860,14 @@ pub fn target_pixel_format(target: &OutputTarget) -> Result<PixelFormat, Encoder
         VideoCodecKind::Gif
     } else if target.container == ContainerType::WebM {
         if name.contains("av1") { VideoCodecKind::Av1 } else { VideoCodecKind::Vp9 }
+    } else if name.contains("apv") {
+        VideoCodecKind::Apv
+    } else if name.contains("mpeg2") || name.contains("mpeg-2") {
+        VideoCodecKind::Mpeg2
+    } else if name.contains("mpeg4") || name.contains("mpeg-4") || name.contains("divx") || name.contains("xvid") {
+        VideoCodecKind::Mpeg4Sp
+    } else if name.contains("ffv1") {
+        VideoCodecKind::Ffv1
     } else if name.contains("prores") {
         VideoCodecKind::ProRes
     } else if name.contains("dnx") {
@@ -2675,18 +2882,22 @@ pub fn target_pixel_format(target: &OutputTarget) -> Result<PixelFormat, Encoder
         VideoCodecKind::Mjpeg
     } else if matches!(target.container, ContainerType::MxfOp1a | ContainerType::MxfOpAtom) {
         VideoCodecKind::DnxHd
+    } else if target.container == ContainerType::Avi {
+        VideoCodecKind::Mpeg4Sp
     } else {
         VideoCodecKind::H264
     };
     let kind = resolve_codec(target, inferred)?;
     let output = match kind {
         VideoCodecKind::Hevc | VideoCodecKind::Av1 => PixelFormat::Yuv420p10,
-        VideoCodecKind::ProRes => PixelFormat::Yuv422p10,
+        VideoCodecKind::ProRes | VideoCodecKind::Apv => PixelFormat::Yuv422p10,
         VideoCodecKind::DnxHd if target.video.profile.as_deref().is_some_and(|p| p.eq_ignore_ascii_case("hqx")) || name.contains("hqx") => {
             PixelFormat::Yuv422p10
         }
         VideoCodecKind::DnxHd => PixelFormat::Yuv422p,
-        VideoCodecKind::H264 | VideoCodecKind::Vp9 | VideoCodecKind::Mjpeg | VideoCodecKind::Gif => PixelFormat::Yuv420p,
+        VideoCodecKind::Ffv1 => target.video.pixel_format.unwrap_or(PixelFormat::Rgb8),
+        VideoCodecKind::Mpeg2 => target.video.pixel_format.unwrap_or(PixelFormat::Yuv420p),
+        VideoCodecKind::Mpeg4Sp | VideoCodecKind::H264 | VideoCodecKind::Vp9 | VideoCodecKind::Mjpeg | VideoCodecKind::Gif => PixelFormat::Yuv420p,
     };
     if let Some(requested) = target.video.pixel_format
         && requested != output

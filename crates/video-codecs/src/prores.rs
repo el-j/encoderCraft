@@ -1,6 +1,6 @@
-//! Apple ProRes video encoder wrapper backed by `craft-prores`.
+//! Apple ProRes video encoder wrapper backed by `craft-video`.
 
-use craft_prores::{ChromaFormat, ColorInfo, Encoder, EncoderConfig, Frame, Interlace, Profile};
+use craft_video::prores::{ChromaFormat, ColorInfo, Encoder, EncoderConfig, Frame, Interlace, Profile};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};

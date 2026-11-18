@@ -1,6 +1,6 @@
-//! H.264 / AVC video encoder wrapper backed by `craft-h264enc`.
+//! H.264 / AVC video encoder wrapper backed by `craft-video`.
 
-use craft_h264enc::{ColorConfig, Encoder, EncoderConfig, PacketFormat, Profile, RateControl, YuvFrame};
+use craft_video::h264::{ColorConfig, Encoder, EncoderConfig, PacketFormat, Profile, RateControl, YuvFrame};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};

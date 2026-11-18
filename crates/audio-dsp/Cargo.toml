@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 encodercraft-core = { workspace = true }
+craft-audio = { workspace = true }
 craft-aac = { workspace = true }
 craft-audio-io = { workspace = true }
 craft-dsp = { workspace = true }

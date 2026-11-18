@@ -8,20 +8,37 @@ use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError};
 
 /// Decodes any supported audio container and format into a planar `AudioSampleBuffer`.
 pub fn decode_audio(bytes: &[u8]) -> Result<AudioSampleBuffer, EncoderError> {
-    // The third-party demuxers can panic on hostile headers; that must be an error, never a crash.
-    let decoded = std::panic::catch_unwind(|| craft_audio_io::decode(bytes, None))
-        .map_err(|_| EncoderError::InvalidContainer("audio decoding failed: the file is malformed".into()))?;
-    let (_info, buf) = decoded.map_err(|e| EncoderError::Internal(format!("audio decoding failed: {e}")))?;
+    if bytes.starts_with(b"qoaf") {
+        return decode_audio_qoa(bytes);
+    }
 
-    let layout = match buf.channels.len() {
-        1 => ChannelLayout::Mono,
-        2 => ChannelLayout::Stereo,
-        6 => ChannelLayout::Surround51,
-        8 => ChannelLayout::Surround71,
-        _ => ChannelLayout::Stereo,
-    };
+    // First try craft_audio_io
+    let decoded_io = std::panic::catch_unwind(|| craft_audio_io::decode(bytes, None));
+    if let Ok(Ok((_info, buf))) = decoded_io {
+        let layout = match buf.channels.len() {
+            1 => ChannelLayout::Mono,
+            2 => ChannelLayout::Stereo,
+            6 => ChannelLayout::Surround51,
+            8 => ChannelLayout::Surround71,
+            _ => ChannelLayout::Stereo,
+        };
+        return AudioSampleBuffer::from_planar_channels(buf.sample_rate, layout, 0, buf.channels);
+    }
 
-    AudioSampleBuffer::from_planar_channels(buf.sample_rate, layout, 0, buf.channels)
+    // Fallback to craft_audio::decode
+    let decoded_craft = std::panic::catch_unwind(|| craft_audio::decode(bytes, None));
+    if let Ok(Ok((_info, buf))) = decoded_craft {
+        let layout = match buf.channels.len() {
+            1 => ChannelLayout::Mono,
+            2 => ChannelLayout::Stereo,
+            6 => ChannelLayout::Surround51,
+            8 => ChannelLayout::Surround71,
+            _ => ChannelLayout::Stereo,
+        };
+        return AudioSampleBuffer::from_planar_channels(buf.sample_rate, layout, 0, buf.channels);
+    }
+
+    Err(EncoderError::InvalidContainer("audio decoding failed: unsupported or malformed audio data".into()))
 }
 
 /// Encodes an `AudioSampleBuffer` to lossless FLAC format.
@@ -251,6 +268,88 @@ pub fn encode_audio_opus(
     Ok(out)
 }
 
+/// Encodes an `AudioSampleBuffer` to Dolby Digital AC-3 stream format.
+pub fn encode_audio_ac3(buffer: &AudioSampleBuffer, bitrate_kbps: u32) -> Result<Vec<u8>, EncoderError> {
+    if buffer.channel_count() == 0 || buffer.samples_per_channel() == 0 {
+        return Err(EncoderError::InvalidJobSpec("cannot encode empty audio buffer to AC-3".into()));
+    }
+    let resampled = if buffer.sample_rate != 32_000 && buffer.sample_rate != 44_100 && buffer.sample_rate != 48_000 {
+        crate::resample::SincResampler::new(32).resample(buffer, 48_000)?
+    } else {
+        buffer.clone()
+    };
+    let bitrate_bps = bitrate_kbps.clamp(32, 640).saturating_mul(1000);
+    let sample_rate = resampled.sample_rate;
+    let channels = resampled.into_planar_channels();
+    let audio_buf = craft_audio::AudioBuffer { sample_rate, channels };
+    let opts = craft_audio::EncodeOptions::new(craft_audio::EncodeFormat::Ac3).with_bitrate(bitrate_bps);
+    craft_audio::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("AC-3 encoding failed: {e}")))
+}
+
+/// Encodes an `AudioSampleBuffer` to Enhanced AC-3 (E-AC-3 / Dolby Digital Plus) stream format.
+pub fn encode_audio_eac3(buffer: &AudioSampleBuffer, bitrate_kbps: u32) -> Result<Vec<u8>, EncoderError> {
+    if buffer.channel_count() == 0 || buffer.samples_per_channel() == 0 {
+        return Err(EncoderError::InvalidJobSpec("cannot encode empty audio buffer to E-AC-3".into()));
+    }
+    let resampled = if buffer.sample_rate != 32_000 && buffer.sample_rate != 44_100 && buffer.sample_rate != 48_000 {
+        crate::resample::SincResampler::new(32).resample(buffer, 48_000)?
+    } else {
+        buffer.clone()
+    };
+    let bitrate_bps = bitrate_kbps.clamp(32, 1024).saturating_mul(1000);
+    let sample_rate = resampled.sample_rate;
+    let channels = resampled.into_planar_channels();
+    let audio_buf = craft_audio::AudioBuffer { sample_rate, channels };
+    let opts = craft_audio::EncodeOptions::new(craft_audio::EncodeFormat::Eac3).with_bitrate(bitrate_bps);
+    craft_audio::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("E-AC-3 encoding failed: {e}")))
+}
+
+/// Encodes an `AudioSampleBuffer` to Apple Lossless Audio Codec (ALAC) format.
+pub fn encode_audio_alac(buffer: &AudioSampleBuffer, bit_depth: u8) -> Result<Vec<u8>, EncoderError> {
+    if buffer.channel_count() == 0 || buffer.samples_per_channel() == 0 {
+        return Err(EncoderError::InvalidJobSpec("cannot encode empty audio buffer to ALAC".into()));
+    }
+    let bd = if bit_depth == 24 { craft_audio::BitDepth::Int24 } else { craft_audio::BitDepth::Int16 };
+    let channels = buffer.clone().into_planar_channels();
+    let audio_buf = craft_audio::AudioBuffer { sample_rate: buffer.sample_rate, channels };
+    let opts = craft_audio::EncodeOptions::new(craft_audio::EncodeFormat::Alac).with_bit_depth(bd);
+    craft_audio::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("ALAC encoding failed: {e}")))
+}
+
+/// Encodes an `AudioSampleBuffer` to Quite OK Audio (QOA) format.
+pub fn encode_audio_qoa(buffer: &AudioSampleBuffer) -> Result<Vec<u8>, EncoderError> {
+    if buffer.channel_count() == 0 || buffer.samples_per_channel() == 0 {
+        return Err(EncoderError::InvalidJobSpec("cannot encode empty audio buffer to QOA".into()));
+    }
+    let channels = buffer.channel_count().min(craft_audio::qoa::MAX_CHANNELS);
+    let len = buffer.samples_per_channel();
+    let mut qoa_channels: Vec<Vec<i16>> = Vec::with_capacity(channels);
+    for ch in 0..channels {
+        let ch_data = buffer.channel(ch).map_err(|e| EncoderError::Internal(e.to_string()))?;
+        let mut i16_samples = Vec::with_capacity(len);
+        for &s in ch_data {
+            let clamped = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+            i16_samples.push(clamped);
+        }
+        qoa_channels.push(i16_samples);
+    }
+    craft_audio::qoa::encode(buffer.sample_rate, &qoa_channels).map_err(|e| EncoderError::Internal(format!("QOA encoding failed: {e:?}")))
+}
+
+/// Decodes Quite OK Audio (QOA) bytes to an `AudioSampleBuffer`.
+pub fn decode_audio_qoa(bytes: &[u8]) -> Result<AudioSampleBuffer, EncoderError> {
+    let decoded = craft_audio::qoa::decode(bytes).map_err(|e| EncoderError::InvalidContainer(format!("QOA decoding failed: {e:?}")))?;
+    let layout = match decoded.channels.len() {
+        1 => ChannelLayout::Mono,
+        2 => ChannelLayout::Stereo,
+        6 => ChannelLayout::Surround51,
+        8 => ChannelLayout::Surround71,
+        _ => ChannelLayout::Stereo,
+    };
+    let planar: Vec<Vec<f32>> = decoded.channels.into_iter().map(|ch| ch.into_iter().map(|s| s as f32 / 32768.0).collect()).collect();
+    AudioSampleBuffer::from_planar_channels(decoded.sample_rate, layout, 0, planar)
+}
+
 fn ogg_crc(data: &[u8]) -> u32 {
     let mut crc = 0u32;
     for &b in data {
@@ -414,5 +513,44 @@ mod tests {
         assert_eq!(&opus_bytes[0..4], b"OggS");
         assert!(opus_bytes.windows(8).any(|w| w == b"OpusHead"));
         assert!(opus_bytes.windows(8).any(|w| w == b"OpusTags"));
+    }
+
+    #[test]
+    fn test_ac3_and_eac3_encode_and_decode() {
+        let buf = AudioSampleBuffer::new_silent(48000, ChannelLayout::Stereo, 3072, 0).unwrap();
+        let ac3_bytes = encode_audio_ac3(&buf, 192).unwrap();
+        assert!(!ac3_bytes.is_empty());
+        let decoded_ac3 = decode_audio(&ac3_bytes).unwrap();
+        assert_eq!(decoded_ac3.sample_rate, 48000);
+        assert_eq!(decoded_ac3.channel_count(), 2);
+
+        let eac3_bytes = encode_audio_eac3(&buf, 224).unwrap();
+        assert!(!eac3_bytes.is_empty());
+        let decoded_eac3 = decode_audio(&eac3_bytes).unwrap();
+        assert_eq!(decoded_eac3.sample_rate, 48000);
+        assert_eq!(decoded_eac3.channel_count(), 2);
+    }
+
+    #[test]
+    fn test_alac_encode_and_decode() {
+        let buf = AudioSampleBuffer::new_silent(44100, ChannelLayout::Stereo, 2048, 0).unwrap();
+        let alac_bytes = encode_audio_alac(&buf, 16).unwrap();
+        assert!(!alac_bytes.is_empty());
+        let decoded = decode_audio(&alac_bytes).unwrap();
+        assert_eq!(decoded.sample_rate, 44100);
+        assert_eq!(decoded.channel_count(), 2);
+    }
+
+    #[test]
+    fn test_qoa_encode_and_decode() {
+        let buf = AudioSampleBuffer::new_silent(48000, ChannelLayout::Stereo, 1024, 0).unwrap();
+        let qoa_bytes = encode_audio_qoa(&buf).unwrap();
+        assert!(!qoa_bytes.is_empty());
+        assert_eq!(&qoa_bytes[0..4], b"qoaf");
+
+        let decoded = decode_audio(&qoa_bytes).unwrap();
+        assert_eq!(decoded.sample_rate, 48000);
+        assert_eq!(decoded.channel_count(), 2);
+        assert_eq!(decoded.samples_per_channel(), 1024);
     }
 }
