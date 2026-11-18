@@ -2,7 +2,7 @@
 
 > **Stage: Beta Release (v0.1.0-beta.1)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-16 · **Last updated:** 2026-11-16 · **Change:** Completed Milestone 51 (Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity)  
+> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** Active Milestone 52 (Upstream craft-libs Codec Consolidation & Advanced AME Parity)  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
@@ -430,6 +430,18 @@ Tracked under Milestone [M51 - Universal Format Presets, Complete Preview Monito
 - [x] **M51.3: Layered Graphics (PSD/PSB/PhotoCraft) & Motion Project Preview in Monitor ([#309](https://github.com/el-j/encoderCraft/issues/309))** – Added composite RGBA raster decoding for layered images (PSD, PSB, PhotoCraft) and motion/timeline project inspection.
 - [x] **M51.4: High-Fidelity Multi-Page Document Page Previews (DOCX, PPTX, EPUB, Markdown) ([#310](https://github.com/el-j/encoderCraft/issues/310))** – Implemented document page extraction and raster generation for PDF, DOCX, PPTX, EPUB, and Markdown, allowing multi-format still exports (JPEG, PNG, WebP, TIFF).
 - [x] **M51.5: End-to-End Blackbox Codec Matrix Conformance for all newly added Presets ([#311](https://github.com/el-j/encoderCraft/issues/311))** – Blackbox synthetic test suite (`test_universal_conversions_e2e.rs`) and user interaction suite (`test_user_interaction_suite.rs`) verifying all presets, column resizing, left-aligned preset tables, and UI controls.
+
+## Milestone 52: Upstream craft-libs Codec Consolidation & Advanced AME Parity
+
+Tracked under Milestone [M52 - Upstream craft-libs Codec Consolidation & Advanced AME Parity](https://github.com/el-j/encoderCraft/milestone/30) addressing issues [#330](https://github.com/el-j/encoderCraft/issues/330)–[#336](https://github.com/el-j/encoderCraft/issues/336).
+
+- [ ] **M52.1: Unified craft-video Migration & New Video Codecs (APV, MPEG-2, MPEG-4 Part 2, FFV1) ([#330](https://github.com/el-j/encoderCraft/issues/330))** – Replace fragmented video codec crates with canonical `craft-video`, adding clean-room APV (RFC 9924), MPEG-2 (H.262), MPEG-4 Part 2, and FFV1 (RFC 9043) decoders and encoders with presets and UI inspector options.
+- [ ] **M52.2: Broadcast Audio Codec Expansion (Dolby Digital AC-3 / E-AC-3, Apple Lossless ALAC, QOA) ([#331](https://github.com/el-j/encoderCraft/issues/331))** – Ingest `craft-audio` features `ac3-encode`, `eac3-encode`, `alac-encode`, and `qoa`, exposing multi-channel AC-3 (5.1 surround), E-AC-3, and ALAC in inspector audio settings.
+- [ ] **M52.3: Native AVI & MXF Muxer Consolidation via craft-media ([#332](https://github.com/el-j/encoderCraft/issues/332))** – Replace local AVI and MXF bridges with canonical `craft-media` pure-Rust AVI demuxer/muxer (`craft_media::avi`), MXF partition writer (`craft_media::mxf`), and MPEG Systems demuxer (`craft_media::mpegts`).
+- [ ] **M52.4: Comprehensive Captions & Subtitles Engine via craft-captions ([#333](https://github.com/el-j/encoderCraft/issues/333))** – Implement sidecar caption file exports (SRT, VTT, SCC, MCC, STL, TTML), embedded CEA-608 / CEA-708 closed captions, and burn-in subtitle overlays synchronized with the Inspector Captions tab.
+- [ ] **M52.5: Color Management & HDR Gain Map Pipeline via craft-cms & craft-gainmap ([#334](https://github.com/el-j/encoderCraft/issues/334))** – Add ICC v2/v4 color profile parsing and evaluation (with black-point compensation) via `craft-cms` and ISO 21496-1 HDR gain map tone mapping via `craft-gainmap`.
+- [ ] **M52.6: Editorial Timeline & Project Interchange via craft-timeline & craft-aaf ([#335](https://github.com/el-j/encoderCraft/issues/335))** – Integrate CMX 3600 EDL, Final Cut Pro 7 XML, and OpenTimelineIO (OTIO) JSON via `craft-timeline`, and AAF (Edit Protocol) & OMF 2.0 with embedded PCM audio essence via `craft-aaf`.
+- [ ] **M52.7: End-to-End Blackbox Codec Matrix & Conformance Test Suite for Upstream Codecs ([#336](https://github.com/el-j/encoderCraft/issues/336))** – Synthetic test suite validating roundtrip transcode integrity, format bitstreams, metadata preservation, and GUI parameter sync across all newly added upstream codecs.
 
 ## Known Issues (alpha.1, tracked above)
 
