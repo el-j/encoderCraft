@@ -991,6 +991,25 @@ Achieve 100% conversion and preview completeness for all 62 `ContainerType` form
 
 ---
 
+### Milestone 52: Upstream craft-libs Codec Consolidation & Advanced AME Parity
+Tracked under Milestone [M52 - Upstream craft-libs Codec Consolidation & Advanced AME Parity](https://github.com/el-j/encoderCraft/milestone/30) addressing issues [#330](https://github.com/el-j/encoderCraft/issues/330)–[#336](https://github.com/el-j/encoderCraft/issues/336).
+
+#### Objective & Context
+Ingest newly unified and added codecs from upstream `storytold/craft-libs`: migrate fragmented video crates to canonical `craft-video` (introducing pure-Rust APV, MPEG-2/1, MPEG-4 Part 2, and FFV1), integrate professional broadcast audio codecs from `craft-audio` (Dolby Digital AC-3, E-AC-3, Apple Lossless ALAC, QOA), consolidate native AVI and MXF muxing via `craft-media`, deliver comprehensive subtitles and closed captions via `craft-captions`, integrate ICC color management and HDR gain maps via `craft-cms` and `craft-gainmap`, and support editorial timeline and project interchange (AAF, OMF, EDL, OTIO) via `craft-timeline` and `craft-aaf`.
+
+#### Deliverables & Sub-Tasks:
+1. [ ] **M52.1: Unified craft-video Migration & New Video Codecs (APV, MPEG-2, MPEG-4 Part 2, FFV1) ([#330](https://github.com/el-j/encoderCraft/issues/330))** — Replace fragmented video codec crates with canonical `craft-video`, and wire up APV (RFC 9924), MPEG-2 (H.262) & MPEG-1, MPEG-4 Part 2, and FFV1 (RFC 9043) decoders and encoders with presets and inspector options.
+2. [ ] **M52.2: Broadcast Audio Codec Expansion (Dolby Digital AC-3 / E-AC-3, Apple Lossless ALAC, QOA) ([#331](https://github.com/el-j/encoderCraft/issues/331))** — Integrate `craft-audio` features `ac3-encode`, `eac3-encode`, `alac-encode`, and `qoa`, exposing multi-channel AC-3 (5.1 surround), E-AC-3, and ALAC in inspector audio settings.
+3. [ ] **M52.3: Native AVI & MXF Muxer Consolidation via craft-media ([#332](https://github.com/el-j/encoderCraft/issues/332))** — Replace local AVI and MXF bridges with canonical `craft-media` pure-Rust AVI demuxer/muxer (`craft_media::avi`), MXF partition writer (`craft_media::mxf`), and MPEG Systems demuxer (`craft_media::mpegts`).
+4. [ ] **M52.4: Comprehensive Captions & Subtitles Engine via craft-captions ([#333](https://github.com/el-j/encoderCraft/issues/333))** — Implement sidecar caption file exports (SRT, VTT, SCC, MCC, STL, TTML), embedded CEA-608 / CEA-708 closed captions, and burn-in subtitle overlays synchronized with the Inspector Captions tab.
+5. [ ] **M52.5: Color Management & HDR Gain Map Pipeline via craft-cms & craft-gainmap ([#334](https://github.com/el-j/encoderCraft/issues/334))** — Add ICC v2/v4 color profile parsing and evaluation (with black-point compensation) via `craft-cms` and ISO 21496-1 HDR gain map tone mapping via `craft-gainmap`.
+6. [ ] **M52.6: Editorial Timeline & Project Interchange via craft-timeline & craft-aaf ([#335](https://github.com/el-j/encoderCraft/issues/335))** — Integrate CMX 3600 EDL, Final Cut Pro 7 XML, and OpenTimelineIO (OTIO) JSON via `craft-timeline`, and AAF (Edit Protocol) & OMF 2.0 with embedded PCM audio essence via `craft-aaf`.
+7. [ ] **M52.7: End-to-End Blackbox Codec Matrix & Conformance Test Suite for Upstream Codecs ([#336](https://github.com/el-j/encoderCraft/issues/336))** — Synthetic test suite validating roundtrip transcode integrity, format bitstreams, metadata preservation, and GUI parameter sync across all newly added upstream codecs.
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |
