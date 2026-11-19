@@ -199,3 +199,192 @@ fn test_all_inspector_tabs_cycle_without_panic() {
         });
     }
 }
+
+fn write_bmp(path: &std::path::Path, shade: u8) {
+    let (w, h) = (16u32, 16u32);
+    let row = (w * 3).div_ceil(4) * 4;
+    let data = row * h;
+    let size = 54 + data;
+    let mut b = Vec::with_capacity(size as usize);
+    b.extend_from_slice(b"BM");
+    b.extend_from_slice(&size.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&54u32.to_le_bytes());
+    b.extend_from_slice(&40u32.to_le_bytes());
+    b.extend_from_slice(&(w as i32).to_le_bytes());
+    b.extend_from_slice(&(h as i32).to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&24u16.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&data.to_le_bytes());
+    b.extend_from_slice(&2835u32.to_le_bytes());
+    b.extend_from_slice(&2835u32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    let pad = vec![0u8; (row - w * 3) as usize];
+    for _ in 0..h {
+        for _ in 0..w {
+            b.extend_from_slice(&[shade, shade, shade]);
+        }
+        b.extend_from_slice(&pad);
+    }
+    std::fs::write(path, b).unwrap();
+}
+
+fn write_test_wav(path: &std::path::Path) {
+    let samples: Vec<i16> = (0..48_000_i32).map(|n| ((n % 100) as i16 - 50) * 200).collect();
+    let data_len = (samples.len() * 2) as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000_u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000_u32.to_le_bytes());
+    bytes.extend_from_slice(&2_u16.to_le_bytes());
+    bytes.extend_from_slice(&16_u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn test_full_ui_e2e_blackbox_workflow() {
+    let dir = tempdir().unwrap();
+    let queue_mgr = Arc::new(QueueManager::new_in_memory());
+    let preset_reg = Arc::new(Mutex::new(PresetRegistry::default()));
+    let mut app = EncoderCraftApp::new(queue_mgr.clone(), preset_reg).with_config_dir(dir.path().to_path_buf());
+
+    // 1. Ingest multiple jobs across diverse domains
+    let img_path = dir.path().join("source.bmp");
+    write_bmp(&img_path, 128);
+
+    let aud_path = dir.path().join("source.wav");
+    write_test_wav(&aud_path);
+
+    let doc_path = dir.path().join("source.pdf");
+    let mut doc = encodercraft_pipeline::document::DocumentCanvas::new("E2E UI Test");
+    doc.pages[0].add_text(54.0, 720.0, 500.0, 24.0, "Blackbox Page Text", 14.0);
+    std::fs::write(&doc_path, doc.to_pdf_x4_bytes().unwrap()).unwrap();
+
+    let cad_path = dir.path().join("source.dxf");
+    std::fs::write(&cad_path, "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nLAYER1\n10\n0.0\n20\n0.0\n11\n100.0\n21\n100.0\n0\nENDSEC\n0\nEOF\n").unwrap();
+
+    let img_spec = CraftJobSpec {
+        version: "1.0".into(),
+        job_id: "img-job-1".into(),
+        client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1, user_notes: None },
+        priority: JobPriority::Normal,
+        start_policy: StartPolicy::Paused,
+        source: encodercraft_core::SourceDescriptor::File { path: img_path, start_tick: None, duration_ticks: None, timebase: None },
+        targets: vec![
+            OutputTarget {
+                target_id: "t-png".into(),
+                output_path: dir.path().join("img_out.png"),
+                preset_name: "Still Image PNG (Lossless)".into(),
+                container: ContainerType::Png,
+                ..Default::default()
+            },
+            OutputTarget {
+                target_id: "t-jpg".into(),
+                output_path: dir.path().join("img_out.jpg"),
+                preset_name: "Still Image JPEG".into(),
+                container: ContainerType::Jpeg,
+                ..Default::default()
+            },
+        ],
+    };
+
+    let aud_spec = CraftJobSpec {
+        version: "1.0".into(),
+        job_id: "aud-job-1".into(),
+        client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1, user_notes: None },
+        priority: JobPriority::Normal,
+        start_policy: StartPolicy::Paused,
+        source: encodercraft_core::SourceDescriptor::File { path: aud_path, start_tick: None, duration_ticks: None, timebase: None },
+        targets: vec![OutputTarget {
+            target_id: "t-wav".into(),
+            output_path: dir.path().join("aud_out.wav"),
+            preset_name: "Broadcast Wave BWF (-23 LUFS)".into(),
+            container: ContainerType::Wave,
+            ..Default::default()
+        }],
+    };
+
+    let doc_spec = CraftJobSpec {
+        version: "1.0".into(),
+        job_id: "doc-job-1".into(),
+        client_info: ClientInfo { app_name: "test".into(), app_version: "1.0".into(), pid: 1, user_notes: None },
+        priority: JobPriority::Normal,
+        start_policy: StartPolicy::Paused,
+        source: encodercraft_core::SourceDescriptor::File { path: doc_path, start_tick: None, duration_ticks: None, timebase: None },
+        targets: vec![OutputTarget {
+            target_id: "t-jpg".into(),
+            output_path: dir.path().join("doc_page.jpg"),
+            preset_name: "Still Image JPEG".into(),
+            container: ContainerType::Jpeg,
+            ..Default::default()
+        }],
+    };
+
+    queue_mgr.submit_job(img_spec).unwrap();
+    queue_mgr.submit_job(aud_spec).unwrap();
+    queue_mgr.submit_job(doc_spec).unwrap();
+
+    // Verify queue loaded
+    let jobs = queue_mgr.list_jobs();
+    assert_eq!(jobs.len(), 3);
+
+    // 2. Select different jobs and render UI
+    app.queue_state.selected_job_ids.insert("img-job-1".into());
+    egui::__run_test_ui(|ui| {
+        app.render(ui);
+    });
+
+    app.queue_state.selected_job_ids.clear();
+    app.queue_state.selected_job_ids.insert("aud-job-1".into());
+    egui::__run_test_ui(|ui| {
+        app.render(ui);
+    });
+
+    app.queue_state.selected_job_ids.clear();
+    app.queue_state.selected_job_ids.insert("doc-job-1".into());
+    egui::__run_test_ui(|ui| {
+        app.render(ui);
+    });
+
+    // 3. Test transport and preview controls
+    app.preview_state.transport.set_media(30.0, 100);
+    app.preview_state.transport.set_volume(0.85);
+    app.preview_state.transport.toggle_mute();
+    app.preview_state.transport.in_point = Some(10);
+    app.preview_state.transport.out_point = Some(90);
+    egui::__run_test_ui(|ui| {
+        app.render(ui);
+    });
+
+    // 4. Test preset browser category filter and search
+    app.preset_state.search_query = "YouTube".into();
+    egui::__run_test_ui(|ui| {
+        app.render(ui);
+    });
+    app.preset_state.search_query.clear();
+
+    // 5. Test queue management actions
+    app.run_command(AppCommand::SelectAll);
+    assert_eq!(app.queue_state.selected_job_ids.len(), 3);
+
+    app.run_command(AppCommand::StartQueue);
+    app.run_command(AppCommand::PauseQueue);
+    app.run_command(AppCommand::StopQueue);
+    app.run_command(AppCommand::ResetSelected);
+
+    egui::__run_test_ui(|ui| {
+        app.render(ui);
+    });
+}
