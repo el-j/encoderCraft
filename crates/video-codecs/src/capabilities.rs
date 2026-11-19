@@ -80,6 +80,10 @@ pub fn render_container_matrix_markdown() -> String {
         ("VP9", VideoCodecKind::Vp9),
         ("ProRes", VideoCodecKind::ProRes),
         ("DNxHR", VideoCodecKind::DnxHd),
+        ("APV", VideoCodecKind::Apv),
+        ("MPEG-2", VideoCodecKind::Mpeg2),
+        ("MPEG-4", VideoCodecKind::Mpeg4Sp),
+        ("FFV1", VideoCodecKind::Ffv1),
         ("GIF", VideoCodecKind::Gif),
     ];
     let mut out = String::from("| Container |");
