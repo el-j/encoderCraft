@@ -286,14 +286,56 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<MediaInfo, EncoderError> {
             }
         }
         ContainerKind::Mxf => {
-            if let Ok(mxf) = filmcraft_mxf::open(bytes) {
+            if let Ok(mxf) = craft_media::mxf::open(bytes) {
                 populate_mxf_streams(&mxf, &mut duration_seconds, &mut video_streams, &mut audio_streams, &mut metadata);
             } else {
                 metadata.insert("container".into(), container.display_name().into());
             }
         }
+        ContainerKind::Avi => {
+            if let Ok(avi) = craft_media::avi::open(bytes) {
+                populate_avi_streams(&avi, &mut duration_seconds, &mut video_streams, &mut audio_streams);
+            } else {
+                metadata.insert("container".into(), container.display_name().into());
+            }
+        }
         _ => {
-            // For other formats (glTF, USD, etc.), record the detected container
+            let is_visual = matches!(
+                container,
+                ContainerKind::Pdf
+                    | ContainerKind::Docx
+                    | ContainerKind::Pptx
+                    | ContainerKind::Xlsx
+                    | ContainerKind::Idml
+                    | ContainerKind::Indd
+                    | ContainerKind::Epub
+                    | ContainerKind::ArtcraftDesigncraft
+                    | ContainerKind::AutocadDxf
+                    | ContainerKind::AutocadDwg
+                    | ContainerKind::HpglPlotter
+                    | ContainerKind::ArtcraftCadcraft
+                    | ContainerKind::Psd
+                    | ContainerKind::Psb
+                    | ContainerKind::ArtcraftPhotocraft
+                    | ContainerKind::Svg
+                    | ContainerKind::IllustratorAi
+                    | ContainerKind::Eps
+                    | ContainerKind::ArtcraftVectorcraft
+            );
+            if is_visual {
+                let (w, h) = if container.is_document() { (612, 792) } else { (1920, 1080) };
+                video_streams.push(VideoStreamInfo {
+                    stream_index: 0,
+                    codec_name: container.display_name().into(),
+                    dimensions: Dimensions { width: w, height: h },
+                    pixel_format: PixelFormat::Rgba8,
+                    color_space: ColorSpaceTag::SRGB,
+                    frame_rate: Rational64 { num: 1, den: 1 },
+                    bit_depth: 8,
+                    bitrate: None,
+                    duration_seconds: None,
+                });
+            }
             metadata.insert("container".into(), container.display_name().into());
         }
     }
@@ -442,7 +484,7 @@ fn populate_matroska_streams(
 }
 
 fn populate_mxf_streams(
-    mxf: &filmcraft_mxf::MxfFile,
+    mxf: &craft_media::mxf::MxfFile,
     duration_seconds: &mut Option<f64>,
     video_streams: &mut Vec<VideoStreamInfo>,
     audio_streams: &mut Vec<AudioStreamInfo>,
@@ -465,7 +507,7 @@ fn populate_mxf_streams(
             *duration_seconds = dur;
         }
         match track.kind {
-            filmcraft_mxf::TrackKind::Picture => {
+            craft_media::mxf::TrackKind::Picture => {
                 if let Some(pic) = &track.picture
                     && let Ok(dims) = Dimensions::new(pic.frame_width(), pic.frame_height())
                 {
@@ -484,7 +526,7 @@ fn populate_mxf_streams(
                     });
                 }
             }
-            filmcraft_mxf::TrackKind::Sound => {
+            craft_media::mxf::TrackKind::Sound => {
                 if let Some(snd) = &track.sound {
                     let ch = u16::try_from(snd.channels).unwrap_or(2).max(1);
                     let layout = match ch {
@@ -510,7 +552,89 @@ fn populate_mxf_streams(
                     });
                 }
             }
-            filmcraft_mxf::TrackKind::Data => {}
+            craft_media::mxf::TrackKind::Data => {}
+        }
+    }
+}
+
+fn populate_avi_streams(
+    avi: &craft_media::avi::AviFile,
+    duration_seconds: &mut Option<f64>,
+    video_streams: &mut Vec<VideoStreamInfo>,
+    audio_streams: &mut Vec<AudioStreamInfo>,
+) {
+    for (idx, stream) in avi.streams.iter().enumerate() {
+        let fps = if stream.scale > 0 && stream.rate > 0 {
+            Rational64::new(i64::from(stream.rate), i64::from(stream.scale)).unwrap_or(Rational64::FPS_24)
+        } else {
+            Rational64::FPS_24
+        };
+        let dur = if stream.rate > 0 && stream.length > 0 {
+            Some(f64::from(stream.length) * f64::from(stream.scale) / f64::from(stream.rate))
+        } else {
+            None
+        };
+        if duration_seconds.is_none() {
+            *duration_seconds = dur;
+        }
+
+        match stream.kind {
+            craft_media::avi::StreamKind::Video => {
+                if let Some(ref vid) = stream.video
+                    && let Ok(dims) = Dimensions::new(vid.width.unsigned_abs(), vid.height.unsigned_abs())
+                {
+                    let codec_name = String::from_utf8_lossy(&stream.handler).trim().to_string();
+                    let bit_depth = vid.bit_count.max(8) as u8;
+                    let pix_fmt = if bit_depth >= 10 {
+                        PixelFormat::Yuv422p10
+                    } else if vid.is_rgb() {
+                        PixelFormat::Rgb8
+                    } else {
+                        PixelFormat::Yuv420p
+                    };
+                    video_streams.push(VideoStreamInfo {
+                        stream_index: idx,
+                        codec_name: if codec_name.is_empty() { "raw".into() } else { codec_name },
+                        dimensions: dims,
+                        pixel_format: pix_fmt,
+                        color_space: ColorSpaceTag::REC709,
+                        frame_rate: fps,
+                        bit_depth,
+                        bitrate: None,
+                        duration_seconds: dur,
+                    });
+                }
+            }
+            craft_media::avi::StreamKind::Audio => {
+                if let Some(ref aud) = stream.audio {
+                    let ch = aud.channels.max(1);
+                    let layout = match ch {
+                        1 => ChannelLayout::Mono,
+                        2 => ChannelLayout::Stereo,
+                        6 => ChannelLayout::Surround51,
+                        8 => ChannelLayout::Surround71,
+                        _ => ChannelLayout::Stereo,
+                    };
+                    let codec_name = match aud.format_tag {
+                        1 => "pcm_s16le".to_string(),
+                        3 => "pcm_f32le".to_string(),
+                        0x50 | 0x55 => "mp3".to_string(),
+                        0x2000 => "ac3".to_string(),
+                        0xFF => "aac".to_string(),
+                        _ => format!("audio_0x{:04x}", aud.format_tag),
+                    };
+                    audio_streams.push(AudioStreamInfo {
+                        stream_index: idx,
+                        codec_name,
+                        sample_rate: aud.sample_rate.max(8000),
+                        channels: ch,
+                        layout,
+                        bits_per_sample: aud.bits_per_sample.max(16),
+                        duration_seconds: dur,
+                    });
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -561,9 +685,14 @@ pub fn probe_file(path: &Path) -> Result<MediaInfo, EncoderError> {
             populate_matroska_streams(&mkv, &mut info.duration_seconds, &mut info.video_streams, &mut info.audio_streams);
         } else if info.container == ContainerKind::Mxf
             && let Ok(full_bytes) = std::fs::read(path)
-            && let Ok(mxf) = filmcraft_mxf::open(full_bytes.as_slice())
+            && let Ok(mxf) = craft_media::mxf::open(full_bytes.as_slice())
         {
             populate_mxf_streams(&mxf, &mut info.duration_seconds, &mut info.video_streams, &mut info.audio_streams, &mut info.metadata);
+        } else if info.container == ContainerKind::Avi
+            && let Ok(file_handle) = File::open(path)
+            && let Ok(avi) = craft_media::avi::open(&file_handle)
+        {
+            populate_avi_streams(&avi, &mut info.duration_seconds, &mut info.video_streams, &mut info.audio_streams);
         }
     }
 

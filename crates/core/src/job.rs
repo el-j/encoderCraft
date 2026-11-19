@@ -73,8 +73,12 @@ pub enum CaptionExportFormat {
     Scc,
     Mcc,
     Ttml,
+    Dfxp,
     Ass,
     Stl,
+    Pjs,
+    RealText,
+    JacoSub,
 }
 
 impl CaptionExportFormat {
@@ -85,8 +89,12 @@ impl CaptionExportFormat {
             Self::Scc => "scc",
             Self::Mcc => "mcc",
             Self::Ttml => "ttml",
+            Self::Dfxp => "dfxp",
             Self::Ass => "ass",
             Self::Stl => "stl",
+            Self::Pjs => "pjs",
+            Self::RealText => "rt",
+            Self::JacoSub => "jss",
         }
     }
 
@@ -96,9 +104,13 @@ impl CaptionExportFormat {
             "vtt" => Some(Self::WebVtt),
             "scc" => Some(Self::Scc),
             "mcc" => Some(Self::Mcc),
-            "ttml" | "dfxp" => Some(Self::Ttml),
+            "ttml" => Some(Self::Ttml),
+            "dfxp" => Some(Self::Dfxp),
             "ass" | "ssa" => Some(Self::Ass),
             "stl" => Some(Self::Stl),
+            "pjs" => Some(Self::Pjs),
+            "rt" => Some(Self::RealText),
+            "jss" | "js" => Some(Self::JacoSub),
             _ => None,
         }
     }
@@ -110,8 +122,12 @@ impl CaptionExportFormat {
             Self::Scc => "Scenarist SCC (.scc)",
             Self::Mcc => "MacCaption MCC (.mcc)",
             Self::Ttml => "TTML IMSC1 (.ttml)",
+            Self::Dfxp => "TTML / DFXP (.dfxp)",
             Self::Ass => "SubStation Alpha (.ass)",
             Self::Stl => "EBU STL (.stl)",
+            Self::Pjs => "Phoenix Subtitle (.pjs)",
+            Self::RealText => "RealText (.rt)",
+            Self::JacoSub => "JACOsub (.jss)",
         }
     }
 }
@@ -246,6 +262,7 @@ pub enum ContainerType {
     MpegTs,
     MxfOp1a,
     MxfOpAtom,
+    Avi,
     Wave,
     Aiff,
     Flac,
@@ -253,6 +270,14 @@ pub enum ContainerType {
     Mp3,
     Caf,
     Opus,
+    Ac3,
+    Eac3,
+    Alac,
+    Qoa,
+    Aaf,
+    Omf,
+    Edl,
+    Otio,
     StillSequence,
     AnimatedGif,
     Png,
@@ -322,6 +347,7 @@ impl ContainerType {
         Self::MpegTs,
         Self::MxfOp1a,
         Self::MxfOpAtom,
+        Self::Avi,
         Self::Wave,
         Self::Aiff,
         Self::Flac,
@@ -329,6 +355,14 @@ impl ContainerType {
         Self::Mp3,
         Self::Caf,
         Self::Opus,
+        Self::Ac3,
+        Self::Eac3,
+        Self::Alac,
+        Self::Qoa,
+        Self::Aaf,
+        Self::Omf,
+        Self::Edl,
+        Self::Otio,
         Self::StillSequence,
         Self::AnimatedGif,
         Self::Png,
@@ -394,6 +428,7 @@ impl ContainerType {
             Self::WebM => "webm",
             Self::MpegTs => "ts",
             Self::MxfOp1a | Self::MxfOpAtom => "mxf",
+            Self::Avi => "avi",
             Self::Wave => "wav",
             Self::Aiff => "aif",
             Self::Flac => "flac",
@@ -401,6 +436,14 @@ impl ContainerType {
             Self::Mp3 => "mp3",
             Self::Caf => "caf",
             Self::Opus => "opus",
+            Self::Ac3 => "ac3",
+            Self::Eac3 => "eac3",
+            Self::Alac => "m4a",
+            Self::Qoa => "qoa",
+            Self::Aaf => "aaf",
+            Self::Omf => "omf",
+            Self::Edl => "edl",
+            Self::Otio => "otio",
             Self::StillSequence => "png",
             Self::AnimatedGif => "gif",
             Self::Png => "png",
@@ -470,6 +513,8 @@ impl ContainerType {
             "gltf" => Some(Self::Gltf),
             "oga" | "ogg" => Some(Self::OggAudio),
             "opus" => Some(Self::Opus),
+            "ec3" => Some(Self::Eac3),
+            "m4a" | "alac" => Some(Self::Alac),
             "caf" => Some(Self::Caf),
             "bwf" => Some(Self::Wave),
             "aif" => Some(Self::Aiff),
@@ -516,8 +561,13 @@ impl ContainerType {
                 | Self::MpegTs
                 | Self::MxfOp1a
                 | Self::MxfOpAtom
+                | Self::Avi
                 | Self::AnimatedGif
                 | Self::StillSequence
+                | Self::Aaf
+                | Self::Omf
+                | Self::Edl
+                | Self::Otio
                 | Self::AdobePremierePrproj
                 | Self::AdobeAfterEffectsAep
                 | Self::ArtcraftFilmcraft
@@ -537,6 +587,7 @@ impl ContainerType {
                 | Self::MpegTs
                 | Self::MxfOp1a
                 | Self::MxfOpAtom
+                | Self::Avi
                 | Self::Wave
                 | Self::Aiff
                 | Self::Flac
@@ -544,6 +595,14 @@ impl ContainerType {
                 | Self::Mp3
                 | Self::Caf
                 | Self::Opus
+                | Self::Ac3
+                | Self::Eac3
+                | Self::Alac
+                | Self::Qoa
+                | Self::Aaf
+                | Self::Omf
+                | Self::Edl
+                | Self::Otio
                 | Self::AdobeAuditionSesx
                 | Self::AdobePremierePrproj
                 | Self::AdobeAfterEffectsAep
@@ -563,6 +622,7 @@ impl ContainerType {
             Self::MpegTs => "MPEG Transport Stream (TS)",
             Self::MxfOp1a => "MXF OP1a Broadcast",
             Self::MxfOpAtom => "MXF OP-Atom",
+            Self::Avi => "Audio Video Interleave (AVI)",
             Self::Wave => "Waveform Audio (WAV / BWF)",
             Self::Aiff => "Audio Interchange (AIFF)",
             Self::Flac => "Free Lossless Audio Codec (FLAC)",
@@ -570,6 +630,14 @@ impl ContainerType {
             Self::Mp3 => "MPEG Audio Layer 3 (MP3)",
             Self::Caf => "Apple Core Audio Format (CAF)",
             Self::Opus => "Ogg Opus Audio (OPUS)",
+            Self::Ac3 => "Dolby Digital Audio (AC-3)",
+            Self::Eac3 => "Dolby Digital Plus Audio (E-AC-3)",
+            Self::Alac => "Apple Lossless Audio (ALAC / M4A)",
+            Self::Qoa => "Quite OK Audio (QOA)",
+            Self::Aaf => "Advanced Authoring Format (AAF)",
+            Self::Omf => "Open Media Framework Interchange (OMF)",
+            Self::Edl => "CMX 3600 Edit Decision List (EDL)",
+            Self::Otio => "OpenTimelineIO Editorial Timeline (OTIO)",
             Self::StillSequence => "Numbered Image Sequence",
             Self::AnimatedGif => "Animated GIF",
             Self::Png => "Portable Network Graphics (PNG)",
@@ -637,6 +705,7 @@ impl ContainerType {
             | Self::MpegTs
             | Self::MxfOp1a
             | Self::MxfOpAtom
+            | Self::Avi
             | Self::AnimatedGif => MediaStreamKind::VideoWithAudio,
             Self::Wave
             | Self::Aiff
@@ -645,6 +714,10 @@ impl ContainerType {
             | Self::Mp3
             | Self::Caf
             | Self::Opus
+            | Self::Ac3
+            | Self::Eac3
+            | Self::Alac
+            | Self::Qoa
             | Self::AdobeAuditionSesx
             | Self::ArtcraftSoundcraft => MediaStreamKind::AudioOnly,
             Self::Png
@@ -686,7 +759,7 @@ impl ContainerType {
             Self::AutocadDxf | Self::AutocadDwg | Self::HpglPlotter | Self::ArtcraftCadcraft => MediaStreamKind::Cad2D,
             Self::AdobePhotoshopPsd | Self::AdobePhotoshopPsb | Self::ArtcraftPhotocraft => MediaStreamKind::LayeredComposite,
             Self::AdobeAfterEffectsAep | Self::ArtcraftEffectcraft | Self::LottieJson => MediaStreamKind::MotionGraph,
-            Self::AdobePremierePrproj | Self::ArtcraftFilmcraft => MediaStreamKind::ProjectTimeline,
+            Self::AdobePremierePrproj | Self::ArtcraftFilmcraft | Self::Aaf | Self::Omf | Self::Edl | Self::Otio => MediaStreamKind::ProjectTimeline,
         }
     }
 
@@ -694,11 +767,36 @@ impl ContainerType {
     pub fn valid_conversion_targets(&self) -> Vec<ContainerType> {
         match self.media_kind() {
             MediaStreamKind::AudioOnly if matches!(self, Self::AdobeAuditionSesx | Self::ArtcraftSoundcraft) => {
-                vec![Self::Wave, Self::Aiff, Self::Flac, Self::AdobeAuditionSesx, Self::ArtcraftSoundcraft]
+                vec![
+                    Self::Wave,
+                    Self::Aiff,
+                    Self::Flac,
+                    Self::Ac3,
+                    Self::Eac3,
+                    Self::Alac,
+                    Self::Qoa,
+                    Self::Aaf,
+                    Self::Omf,
+                    Self::AdobeAuditionSesx,
+                    Self::ArtcraftSoundcraft,
+                ]
             }
-            MediaStreamKind::AudioOnly => {
-                vec![Self::Wave, Self::Aiff, Self::Flac, Self::Mp3, Self::OggAudio, Self::Caf, Self::Opus, Self::ArtcraftSoundcraft]
-            }
+            MediaStreamKind::AudioOnly => vec![
+                Self::Wave,
+                Self::Aiff,
+                Self::Flac,
+                Self::Mp3,
+                Self::OggAudio,
+                Self::Caf,
+                Self::Opus,
+                Self::Ac3,
+                Self::Eac3,
+                Self::Alac,
+                Self::Qoa,
+                Self::Aaf,
+                Self::Omf,
+                Self::ArtcraftSoundcraft,
+            ],
             MediaStreamKind::VideoWithAudio | MediaStreamKind::VideoOnly => vec![
                 Self::IsoBmffMp4,
                 Self::QuickTimeMov,
@@ -707,6 +805,7 @@ impl ContainerType {
                 Self::MpegTs,
                 Self::MxfOp1a,
                 Self::MxfOpAtom,
+                Self::Avi,
                 Self::AnimatedGif,
                 Self::StillSequence,
                 Self::Wave,
@@ -715,6 +814,14 @@ impl ContainerType {
                 Self::Mp3,
                 Self::Caf,
                 Self::Opus,
+                Self::Ac3,
+                Self::Eac3,
+                Self::Alac,
+                Self::Qoa,
+                Self::Edl,
+                Self::Otio,
+                Self::Aaf,
+                Self::Omf,
             ],
             MediaStreamKind::StillImage => {
                 vec![
@@ -759,6 +866,10 @@ impl ContainerType {
                     Self::AutocadDxf,
                     Self::WindowsMetafile,
                     Self::Png,
+                    Self::Jpeg,
+                    Self::WebP,
+                    Self::Tiff,
+                    Self::Bmp,
                     Self::AdobeIllustratorAi,
                 ]
             }
@@ -773,7 +884,10 @@ impl ContainerType {
                     Self::Epub,
                     Self::Pptx,
                     Self::Png,
+                    Self::Jpeg,
+                    Self::WebP,
                     Self::Tiff,
+                    Self::Bmp,
                 ]
             }
             MediaStreamKind::Spatial3D => vec![
@@ -790,7 +904,19 @@ impl ContainerType {
                 Self::Step,
             ],
             MediaStreamKind::Cad2D => {
-                vec![Self::ArtcraftCadcraft, Self::AutocadDxf, Self::AutocadDwg, Self::Svg, Self::Pdf, Self::HpglPlotter, Self::Png]
+                vec![
+                    Self::ArtcraftCadcraft,
+                    Self::AutocadDxf,
+                    Self::AutocadDwg,
+                    Self::Svg,
+                    Self::Pdf,
+                    Self::HpglPlotter,
+                    Self::Png,
+                    Self::Jpeg,
+                    Self::WebP,
+                    Self::Tiff,
+                    Self::Bmp,
+                ]
             }
             MediaStreamKind::MotionGraph => vec![
                 Self::ArtcraftEffectcraft,
@@ -803,14 +929,27 @@ impl ContainerType {
                 Self::Svg,
                 Self::LottieJson,
             ],
-            MediaStreamKind::ProjectTimeline => {
-                vec![Self::ArtcraftFilmcraft, Self::IsoBmffMp4, Self::QuickTimeMov, Self::MxfOp1a, Self::MatroskaMkv, Self::Wave]
-            }
+            MediaStreamKind::ProjectTimeline => vec![
+                Self::ArtcraftFilmcraft,
+                Self::IsoBmffMp4,
+                Self::QuickTimeMov,
+                Self::MxfOp1a,
+                Self::MatroskaMkv,
+                Self::Avi,
+                Self::Wave,
+                Self::Aiff,
+                Self::Flac,
+                Self::Edl,
+                Self::Otio,
+                Self::Aaf,
+                Self::Omf,
+            ],
             MediaStreamKind::ImageSequence => vec![
                 Self::IsoBmffMp4,
                 Self::QuickTimeMov,
                 Self::WebM,
                 Self::MatroskaMkv,
+                Self::Avi,
                 Self::AnimatedGif,
                 Self::Png,
                 Self::Tiff,
@@ -1237,6 +1376,15 @@ pub struct OutputTarget {
     /// Multichannel matrix audio routing and track mapping.
     #[serde(default)]
     pub audio_mapping: Option<crate::audio::AudioChannelMapping>,
+    /// Optional ICC color profile path applied via `craft-cms` during pixel conversion.
+    #[serde(default)]
+    pub icc_profile_path: Option<PathBuf>,
+    /// Whether to apply ISO 21496-1 / HDR gain-map tone mapping.
+    #[serde(default)]
+    pub apply_gainmap: bool,
+    /// Target display HDR headroom (in stops, e.g. `0.0` = SDR, `1.0..=4.0` = HDR) when `apply_gainmap` is enabled.
+    #[serde(default)]
+    pub gainmap_headroom: Option<f32>,
 }
 
 impl OutputTarget {
@@ -1286,6 +1434,9 @@ impl Default for OutputTarget {
             sdr_conform: None,
             crop: None,
             audio_mapping: None,
+            icc_profile_path: None,
+            apply_gainmap: false,
+            gainmap_headroom: None,
         }
     }
 }

@@ -2,7 +2,7 @@
 
 > **Target:** `encoderCraft` (`el-j/encodercraft` → `storytold/encodercraft`)  
 > **Prepared for:** el-j / storytold  
-> **Status:** M0–M49 implementation complete; v0.1.0-beta.1 release ready  
+> **Status:** M0–M52 implementation complete; v0.1.0-beta.2 release ready  
 > **Verification:** 100% CI compliance via `cargo xtask ci` (>300 unit, fuzz, layout, and integration tests passed; strict L0–L7 layers enforced)
 
 ---
@@ -952,6 +952,59 @@ Achieve full completion of all remaining release blockers for the v0.1.0 First S
 3. [x] **M49.3: Workspace Version Bump to 0.1.0 Stable & Release Packaging Verification ([#284](https://github.com/el-j/encoderCraft/issues/284))** — Promoted entire workspace to official 0.1.0 stable release and verified package build metadata and smoke test harnesses.
 4. [x] **M49.4: Parity Documentation Refresh & Cross-Repository Project Linking ([#285](https://github.com/el-j/encoderCraft/issues/285))** — Complete refresh of README, ROADMAP, target app parity, and implementation milestones.
 5. [x] **M49.5: Multi-Platform Release Smoke & Zero-Panic Stress Verification Gate ([#286](https://github.com/el-j/encoderCraft/issues/286))** — Full clean-room audit, xtask CI validation (>300 tests passed, strict layering, clippy clean).
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
+### Milestone 50: Production Blackbox Codec Matrix, Column Drag Ergonomics & Ingestion Integrity
+Tracked under Milestone [M50 - Production Blackbox Codec Matrix, Column Drag Ergonomics & Ingestion Integrity](https://github.com/el-j/encoderCraft/milestone/28) addressing issues [#300](https://github.com/el-j/encoderCraft/issues/300)–[#304](https://github.com/el-j/encoderCraft/issues/304).
+
+#### Objective & Context
+Guarantee rock-solid media transcoding and desktop ergonomics by delivering resizable column divider handles across Queue and Preset panels, left-aligned preset names, visual monitor preview for still images and multi-page PDFs, synchronized container presets, and a comprehensive end-to-end blackbox codec-to-codec conversion matrix test suite covering video, audio, document, vector, still image, and 3D spatial domains.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **M50.1: Draggable resizable column divider handles in Queue Window ([#300](https://github.com/el-j/encoderCraft/issues/300))** — Implemented `QueueColumnSettings` in `queue_panel.rs` with interactive right-edge drag dividers, `egui::CursorIcon::ResizeColumn` cursor feedback, visual hover indicators, and custom width clamping.
+2. [x] **M50.2: Draggable column dividers and left-aligned preset names in Preset Browser ([#301](https://github.com/el-j/encoderCraft/issues/301))** — Added resizable column headers via `render_resizable_preset_header` in `preset_browser.rs` and converted centered buttons into left-to-right aligned layouts matching standard desktop design guidelines.
+3. [x] **M50.3: Robust visual preview rendering for still images and multi-page PDFs ([#302](https://github.com/el-j/encoderCraft/issues/302))** — Integrated `render_pdf_page_to_rgba` and `pdf_page_count` in `preview_panel.rs`, caching GPU textures per page with interactive scrubbing, egui repaint requests, and aspect-correct display.
+4. [x] **M50.4: Preset selection container & file extension synchronization with PDF multi-format rasterization ([#303](https://github.com/el-j/encoderCraft/issues/303))** — Added `apply_preset_to_output_target` to automatically synchronize target container, video/audio export toggles, bitrate, and output path extension upon preset selection; routed all still image containers (JPEG, PNG, TIFF, WebP, BMP, OpenEXR, etc.) through the universal PDF renderer when ingesting PDF documents.
+5. [x] **M50.5: Comprehensive blackbox codec-to-codec conversion matrix test suite ([#304](https://github.com/el-j/encoderCraft/issues/304))** — Created synthetic blackbox test suite in `tests/test_blackbox_codec_matrix.rs` verifying video-to-video (MP4 -> ProRes MOV, WebM VP9), audio-to-audio (WAV -> MP3, FLAC, AIFF, OGG, CAF, Opus), PDF-to-images/markdown, vector graphics (SVG -> EPS, VectorCraft), still image conversion (PNG -> JPEG, WebP, TIFF, BMP), and 3D spatial mesh conversion (STL -> GLB, OBJ, PLY).
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
+### Milestone 51: Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity
+Tracked under Milestone [M51 - Universal Format Presets, Complete Preview Monitor Coverage & Upstream Codec Parity](https://github.com/el-j/encoderCraft/milestone/29) addressing issues [#307](https://github.com/el-j/encoderCraft/issues/307)–[#311](https://github.com/el-j/encoderCraft/issues/311).
+
+#### Objective & Context
+Achieve 100% conversion and preview completeness for all 62 `ContainerType` formats supported by EncoderCraft. Implement default factory presets in the Preset Browser for all remaining container formats (MKV, WebM, GIF, CAF, Opus, DPX, JXL, DDS, DICOM, FITS, EPS, AI, Lottie, USDC, FBX, Alembic, Collada, Splat, PPTX, DOCX, HTML, IDML, PSD, PSB, DXF, DWG, HPGL, and ArtCraft native formats); implement universal visual previews in the monitor for CAD technical blueprints, layered graphics, and multi-page documents; and verify all conversions through end-to-end blackbox matrix tests.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **M51.1: Universal Preset Expansion across all 62 container formats and media domains ([#307](https://github.com/el-j/encoderCraft/issues/307))** — Added factory presets for all container formats across video, audio, textures, vector, 3D spatial, prepress, layered graphics, CAD, and ArtCraft native containers (expanding to 73 system presets).
+2. [x] **M51.2: Universal CAD & Technical Blueprint Preview Engine in Preview Monitor ([#308](https://github.com/el-j/encoderCraft/issues/308))** — Implemented universal media reader and stream synthesizer for CAD 2D blueprints (DXF, DWG, HPGL, CadCraft), rendering vector entities directly onto the preview monitor raster with pan/zoom.
+3. [x] **M51.3: Layered Graphics (PSD/PSB/PhotoCraft) & Motion Project Preview in Monitor ([#309](https://github.com/el-j/encoderCraft/issues/309))** — Implemented composite RGBA raster rendering for PSD, PSB, and PhotoCraft via `LayeredImage`, enabling instant preview and transcodes into web still images and publication formats.
+4. [x] **M51.4: High-Fidelity Multi-Page Document Page Previews (DOCX, PPTX, EPUB, Markdown) ([#310](https://github.com/el-j/encoderCraft/issues/310))** — Implemented multi-page document decoding and sequence extraction for PDF, DOCX, PPTX, EPUB, and Markdown, enabling page scrubbing and raster transcoding across all still formats (JPEG, PNG, TIFF, WebP).
+5. [x] **M51.5: End-to-End Blackbox Codec Matrix Conformance for all newly added Presets ([#311](https://github.com/el-j/encoderCraft/issues/311))** — Verified with `test_universal_conversions_e2e.rs` and `test_user_interaction_suite.rs`, verifying end-to-end PDF -> JPEG/DOCX/MD/HTML, CAD -> PDF/SVG, Audio -> MP3/FLAC/OGG, Layered PSD -> PhotoCraft/PSB, Queue and Preset column resizing, left-aligned preset names, and UI action/toolbar buttons.
+
+**Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
+
+---
+
+### Milestone 52: Upstream craft-libs Codec Consolidation & Advanced AME Parity
+Tracked under Milestone [M52 - Upstream craft-libs Codec Consolidation & Advanced AME Parity](https://github.com/el-j/encoderCraft/milestone/30) addressing issues [#330](https://github.com/el-j/encoderCraft/issues/330)–[#336](https://github.com/el-j/encoderCraft/issues/336).
+
+#### Objective & Context
+Ingest newly unified and added codecs from upstream `storytold/craft-libs`: migrate fragmented video crates to canonical `craft-video` (introducing pure-Rust APV, MPEG-2/1, MPEG-4 Part 2, and FFV1), integrate professional broadcast audio codecs from `craft-audio` (Dolby Digital AC-3, E-AC-3, Apple Lossless ALAC, QOA), consolidate native AVI and MXF muxing via `craft-media`, deliver comprehensive subtitles and closed captions via `craft-captions`, integrate ICC color management and HDR gain maps via `craft-cms` and `craft-gainmap`, and support editorial timeline and project interchange (AAF, OMF, EDL, OTIO) via `craft-timeline` and `craft-aaf`.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **M52.1: Unified craft-video Migration & New Video Codecs (APV, MPEG-2, MPEG-4 Part 2, FFV1) ([#330](https://github.com/el-j/encoderCraft/issues/330))** — Replace fragmented video codec crates with canonical `craft-video`, and wire up APV (RFC 9924), MPEG-2 (H.262) & MPEG-1, MPEG-4 Part 2, and FFV1 (RFC 9043) decoders and encoders with presets and inspector options.
+2. [x] **M52.2: Broadcast Audio Codec Expansion (Dolby Digital AC-3 / E-AC-3, Apple Lossless ALAC, QOA) ([#331](https://github.com/el-j/encoderCraft/issues/331))** — Integrate `craft-audio` features `ac3-encode`, `eac3-encode`, `alac-encode`, and `qoa`, exposing multi-channel AC-3 (5.1 surround), E-AC-3, and ALAC in inspector audio settings.
+3. [x] **M52.3: Native AVI & MXF Muxer Consolidation via craft-media ([#332](https://github.com/el-j/encoderCraft/issues/332))** — Replace local AVI and MXF bridges with canonical `craft-media` pure-Rust AVI demuxer/muxer (`craft_media::avi`), MXF partition writer (`craft_media::mxf`), and MPEG Systems demuxer (`craft_media::mpegts`).
+4. [x] **M52.4: Comprehensive Captions & Subtitles Engine via craft-captions ([#333](https://github.com/el-j/encoderCraft/issues/333))** — Implement sidecar caption file exports (SRT, VTT, SCC, MCC, STL, TTML), embedded CEA-608 / CEA-708 closed captions, and burn-in subtitle overlays synchronized with the Inspector Captions tab.
+5. [x] **M52.5: Color Management & HDR Gain Map Pipeline via craft-cms & craft-gainmap ([#334](https://github.com/el-j/encoderCraft/issues/334))** — Add ICC v2/v4 color profile parsing and evaluation (with black-point compensation) via `craft-cms` and ISO 21496-1 HDR gain map tone mapping via `craft-gainmap`.
+6. [x] **M52.6: Editorial Timeline & Project Interchange via craft-timeline & craft-aaf ([#335](https://github.com/el-j/encoderCraft/issues/335))** — Integrate CMX 3600 EDL, Final Cut Pro 7 XML, and OpenTimelineIO (OTIO) JSON via `craft-timeline`, and AAF (Edit Protocol) & OMF 2.0 with embedded PCM audio essence via `craft-aaf`.
+7. [x] **M52.7: End-to-End Blackbox Codec Matrix & Conformance Test Suite for Upstream Codecs ([#336](https://github.com/el-j/encoderCraft/issues/336))** — Synthetic test suite validating roundtrip transcode integrity, format bitstreams, metadata preservation, and GUI parameter sync across all newly added upstream codecs.
 
 **Verification Gate:** `cargo xtask ci` passes 100% across formatting, clippy `-D warnings`, all unit/integration/fuzz tests, and architectural layer validation.
 

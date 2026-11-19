@@ -13,3 +13,5 @@ workspace = true
 serde = { workspace = true }
 thiserror = { workspace = true }
 encodercraft-geom = { workspace = true }
+craft-cms = { workspace = true }
+craft-gainmap = { workspace = true }

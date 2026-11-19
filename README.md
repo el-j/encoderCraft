@@ -20,7 +20,7 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 `encoderCraft` has transitioned from initial workspace foundations into a battle-tested, production-ready universal media transcoding suite. Below is an executive overview of what has landed and what is actively in development.
 
-### ✅ What is Already Done (Milestones M0 – M49, v0.1.0-beta.1 Release)
+### ✅ What is Already Done (Milestones M0 – M52, v0.1.0-beta.2 Release)
 
 - **Universal Creative Suite Interoperability (Milestone 30 & 39):**
   - Clean-room ingestion, parsing, and conversion for standard Adobe project files: Premiere Pro (`.prproj` gzipped XML), After Effects (`.aep` RIFX chunks), InDesign (`.indd` / `.idml`), Illustrator (`.ai` dual-stream PDF/PGF), Photoshop (`.psd` / `.psb` layer trees), and Audition (`.sesx` multitrack XML).
@@ -74,7 +74,7 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 ---
 
-- **Universal Media Integrity & Sibling App Job Ingestion (Milestones 47 – 49, v0.1.0-beta.1 Release):**
+- **Universal Media Integrity & Sibling App Job Ingestion (Milestones 47 – 49, v0.1.0-beta.1):**
   - Production Unix Domain Socket (`/tmp/encodercraft-$UID.sock`) and TCP (`127.0.0.1:8998`) IPC listener for instant, zero-copy job submission and headless project rendering across FilmCraft, EffectCraft, SoundCraft, DesignCraft, and CadCraft.
   - Synchronized real-time preview audio playback controls with interactive volume slider and instant mute/unmute toggle.
   - Export settings parity: Master `[x] Export Video` and `[x] Export Audio` stream toggles, pre-scale source raster cropping, and interactive on-monitor crop tool with aspect constraint presets (1:1, 4:3, 16:9, 9:16, 2.39:1).
@@ -83,15 +83,27 @@ Originally developed under username **`el-j`** (`github.com/el-j/encoderCraft`),
 
 ---
 
+- **Upstream craft-libs Codec Consolidation, Universal Presets & Complete Preview Coverage (Milestones 50 – 52, v0.1.0-beta.2 Release):**
+  - Pure-Rust Video Codecs: Ingestion of canonical `craft-video` introducing Advanced Professional Video (APV / RFC 9924), MPEG-2/1 (H.262), MPEG-4 Part 2, and FFV1 (RFC 9043).
+  - Professional Broadcast Audio DSP: Dolby Digital AC-3 (5.1 surround), E-AC-3, Apple Lossless (ALAC), and Quite OK Audio (QOA).
+  - Native AVI & MXF Muxing: Canonical `craft-media` AviMuxer, MXF partition writer, and MPEG Systems demuxers.
+  - Comprehensive Subtitles & Closed Captions: Standardized 11 formats via `craft-captions` (SRT, VTT, SCC, MCC, STL, TTML, etc.) with CEA-608/708 support.
+  - Color Management & HDR: ICC v2/v4 profile evaluation with black-point compensation (`craft-cms`) and ISO 21496-1 HDR gain maps (`craft-gainmap`).
+  - Editorial Timeline Interchange: AAF, OMF 2.0 with embedded essence (`craft-aaf`), CMX 3600 EDL, FCP7 XML, and OTIO (`craft-timeline`).
+  - Ergonomics & UI Parity: Interactive draggable column dividers in Queue and Preset Browser, left-aligned preset typography, and dynamic format dropdowns.
+  - Universal Preview Engine: Full rendering and page scrubbing for PDF, DOCX, PPTX, EPUB, CAD (DXF), layered PSD/PSB, SVG, and RAW still images.
+  - Blackbox Conformance Suite: Comprehensive matrix tests covering all media domains, CLI capabilities, and full MCP agent tool calls.
+
+---
+
 ### 🛠️ What is Next (v0.2.0 Roadmap)
 
 ```mermaid
 flowchart LR
-    subgraph Completed ["✅ Completed (M0 - M49 · v0.1.0-beta.1)"]
+    subgraph Completed ["✅ Completed (M0 - M52 · v0.1.0-beta.2)"]
         M30_41["M30-M41: Formats, Codecs & Transforms"]
-        M42_46["M42-M46: Providers & Universal Preview"]
-        M47_48["M47-M48: Export Settings & Media Integrity"]
-        M49["M49: v0.1.0-beta.1 & Sibling Ingestion"]
+        M42_49["M42-M49: Providers, Media Integrity & Preview"]
+        M50_52["M50-M52: craft-libs Consolidation & Universal Parity"]
     end
 
     subgraph Next ["🛠️ v0.2.0"]

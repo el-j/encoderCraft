@@ -1158,7 +1158,8 @@ impl CommandRegistry {
                     let source_path = first_source_path(&spec.source)
                         .ok_or_else(|| EncoderError::InvalidJobSpec(format!("job '{job_id}' has no local source file")))?;
                     let source_info = encodercraft_source::probe_media_info(&source_path)?;
-                    if source_info.video_streams.is_empty() && preset.video.is_some() {
+                    let stream_kind = encodercraft_demux::classify_stream_kind(&source_path);
+                    if stream_kind.is_audio_only() && preset.video.is_some() {
                         return Err(EncoderError::InvalidJobSpec(format!(
                             "cannot apply video preset '{}' to audio-only job '{job_id}'",
                             preset.name

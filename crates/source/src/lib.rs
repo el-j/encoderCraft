@@ -13,7 +13,7 @@
 pub mod pipe;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use encodercraft_color::{ColorPrimaries, ColorRange, ColorSpaceTag, MatrixCoefficients, PixelFormat, TransferFunction};
 use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError, MAX_FRAME_BUFFER_BYTES, Rational64, VideoFrame};
@@ -140,17 +140,30 @@ struct StillPixels {
 
 /// Extensions decoded by the shared photocraft still-image codecs (EXIF orientation applied, 16-bit,
 /// float and CMYK sources converted to RGBA8).
-pub const STILL_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp", "tga", "exr", "hdr", "gif"];
+pub const STILL_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp", "tga", "exr", "hdr", "gif", "dpx", "jxl", "dcm", "fits"];
 
 /// Returns true when `ext` is a known still-image format extension.
 pub fn is_still_extension(ext: &str) -> bool {
     STILL_EXTENSIONS.contains(&ext)
 }
 
+/// Function signature for third-party or higher-layer media openers (e.g. documents, CAD, vector graphics).
+pub type MediaOpenerFn = Arc<dyn Fn(&Path) -> Result<MediaReader, EncoderError> + Send + Sync>;
+
+static MEDIA_OPENER: RwLock<Option<MediaOpenerFn>> = RwLock::new(None);
+
+/// Registers a global media opener for document and specialized technical graphics.
+pub fn register_media_opener(opener: MediaOpenerFn) {
+    if let Ok(mut lock) = MEDIA_OPENER.write() {
+        *lock = Some(opener);
+    }
+}
+
 /// An opened media file that can deliver video frames by index and audio by sample position.
 pub struct MediaReader {
     source: Option<SharedSource>,
     still: Option<StillPixels>,
+    sequence: Option<Vec<StillPixels>>,
     probe: MediaProbe,
 }
 
@@ -280,6 +293,12 @@ impl MediaReader {
         if let Some(reader) = Self::open_still(path)? {
             return Ok(reader);
         }
+        if let Ok(lock) = MEDIA_OPENER.read()
+            && let Some(opener) = lock.as_ref()
+            && let Ok(reader) = opener(path)
+        {
+            return Ok(reader);
+        }
         let context = path.display().to_string();
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| context.clone());
         let file = FileReader::open(path).map_err(|e| EncoderError::Io(format!("{context}: {e}")))?;
@@ -336,7 +355,62 @@ impl MediaReader {
             start_timecode_frames: None,
             file_size: Some(meta.len()),
         };
-        Ok(Some(Self { source: None, still: Some(StillPixels { width, height, rgba }), probe }))
+        Ok(Some(Self { source: None, still: Some(StillPixels { width, height, rgba }), sequence: None, probe }))
+    }
+
+    /// Creates a [`MediaReader`] from an in-memory single still image (RGBA8).
+    pub fn from_still_pixels(width: u32, height: u32, rgba: Vec<u8>, name: String, container: String) -> Self {
+        let probe = MediaProbe {
+            name,
+            container,
+            kind: SourceKind::Still,
+            duration_seconds: 0.0,
+            video: Some(VideoProbe {
+                width,
+                height,
+                frame_rate: Rational64 { num: 1, den: 1 },
+                codec: "RGBA8".into(),
+                pixel_format: "Rgba8".into(),
+                bit_depth: 8,
+                color_space: ColorSpaceTag::SRGB,
+                has_alpha: true,
+                bitrate: None,
+            }),
+            audio: Vec::new(),
+            start_timecode_frames: None,
+            file_size: None,
+        };
+        Self { source: None, still: Some(StillPixels { width, height, rgba }), sequence: None, probe }
+    }
+
+    /// Creates a [`MediaReader`] from a sequence of decoded RGBA8 frames (e.g. multi-page document pages or CAD layers).
+    pub fn from_frames(frames: Vec<(u32, u32, Vec<u8>)>, name: String, container: String) -> Result<Self, EncoderError> {
+        let first = frames.first().ok_or_else(|| EncoderError::InvalidContainer("no frames available".into()))?;
+        let width = first.0;
+        let height = first.1;
+        let count = frames.len() as u64;
+        let still_frames: Vec<StillPixels> = frames.into_iter().map(|(w, h, rgba)| StillPixels { width: w, height: h, rgba }).collect();
+        let probe = MediaProbe {
+            name,
+            container,
+            kind: if count == 1 { SourceKind::Still } else { SourceKind::ImageSequence },
+            duration_seconds: count as f64,
+            video: Some(VideoProbe {
+                width,
+                height,
+                frame_rate: Rational64 { num: 1, den: 1 },
+                codec: "RGBA8".into(),
+                pixel_format: "Rgba8".into(),
+                bit_depth: 8,
+                color_space: ColorSpaceTag::SRGB,
+                has_alpha: true,
+                bitrate: None,
+            }),
+            audio: Vec::new(),
+            start_timecode_frames: None,
+            file_size: None,
+        };
+        Ok(Self { source: None, still: None, sequence: Some(still_frames), probe })
     }
 
     /// Opens the media streamed by a sibling application over shared memory, receiving it on first
@@ -374,7 +448,7 @@ impl MediaReader {
             start_timecode_frames: info.start_timecode,
             file_size: info.file_size,
         };
-        Self { source: Some(source), still: None, probe }
+        Self { source: Some(source), still: None, sequence: None, probe }
     }
 
     /// Probed stream and container facts.
@@ -384,6 +458,9 @@ impl MediaReader {
 
     /// Number of video frames; stills have exactly one and audio-only sources have zero.
     pub fn frame_count(&self) -> u64 {
+        if let Some(seq) = &self.sequence {
+            return seq.len() as u64;
+        }
         let Some(video) = &self.probe.video else {
             return 0;
         };
@@ -408,6 +485,19 @@ impl MediaReader {
             return Err(EncoderError::InvalidJobSpec(format!("frame index {index} is outside the {count} frames of {}", self.probe.name)));
         }
         let idx = i64::try_from(index).map_err(|_| EncoderError::Internal("frame index overflow".into()))?;
+        if let Some(seq) = &self.sequence {
+            let still = seq.get(index as usize).ok_or_else(|| EncoderError::InvalidJobSpec(format!("frame index {index} out of range")))?;
+            let dims = Dimensions { width: still.width, height: still.height };
+            return VideoFrame::from_raw_bytes(
+                dims,
+                PixelFormat::Rgba8,
+                ColorSpaceTag::SRGB,
+                idx,
+                1,
+                Rational64 { num: 1, den: 1 },
+                still.rgba.clone(),
+            );
+        }
         if let Some(still) = &self.still {
             let dims = Dimensions { width: still.width, height: still.height };
             return VideoFrame::from_raw_bytes(
@@ -571,11 +661,7 @@ pub fn probe_media_info(path: &Path) -> Result<encodercraft_demux::MediaInfo, En
     use encodercraft_demux::{AudioStreamInfo, ContainerKind, MediaInfo, VideoStreamInfo};
 
     let header = encodercraft_demux::probe_file(path);
-    let moving = match &header {
-        Ok(info) => info.container.is_video() || !info.video_streams.is_empty(),
-        Err(_) => true,
-    };
-    let reader = if moving { MediaReader::open(path).ok().filter(|r| !matches!(r.probe().kind, SourceKind::Still)) } else { None };
+    let reader = MediaReader::open(path).ok();
     let (mut info, reader) = match (header, reader) {
         (Ok(info), reader) => (info, reader),
         (Err(_), Some(reader)) => (

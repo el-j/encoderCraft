@@ -18,25 +18,22 @@ pub struct CodecCapability {
 
 /// Every video codec known to the engine, in display order.
 pub const CODEC_CAPABILITIES: &[CodecCapability] = &[
-    CodecCapability { codec: "H.264", decode: true, encode: true, decode_verified: true, notes: "8-bit 4:2:0 progressive decode (filmcraft-h264)" },
-    CodecCapability { codec: "HEVC", decode: true, encode: true, decode_verified: true, notes: "Main / Main 10 decode (filmcraft-hevc)" },
-    CodecCapability { codec: "VP8", decode: true, encode: false, decode_verified: true, notes: "decode only (filmcraft-vp8)" },
-    CodecCapability { codec: "VP9", decode: true, encode: true, decode_verified: true, notes: "filmcraft-vp9" },
-    CodecCapability { codec: "AV1", decode: true, encode: true, decode_verified: true, notes: "pure-Rust decoder (filmcraft-av1)" },
-    CodecCapability {
-        codec: "MPEG-2",
-        decode: true,
-        encode: false,
-        decode_verified: true,
-        notes: "MPEG-1/2 in PS and TS, decode only (filmcraft-mpeg2v)",
-    },
-    CodecCapability { codec: "ProRes", decode: true, encode: true, decode_verified: true, notes: "filmcraft-prores" },
+    CodecCapability { codec: "H.264", decode: true, encode: true, decode_verified: true, notes: "8-bit 4:2:0 progressive (craft-video)" },
+    CodecCapability { codec: "HEVC", decode: true, encode: true, decode_verified: true, notes: "Main / Main 10 (craft-video)" },
+    CodecCapability { codec: "VP8", decode: true, encode: false, decode_verified: true, notes: "decode (craft-video)" },
+    CodecCapability { codec: "VP9", decode: true, encode: true, decode_verified: true, notes: "craft-video" },
+    CodecCapability { codec: "AV1", decode: true, encode: true, decode_verified: true, notes: "craft-video" },
+    CodecCapability { codec: "APV", decode: true, encode: true, decode_verified: true, notes: "RFC 9924 10/12-bit 422/444 (craft-video)" },
+    CodecCapability { codec: "MPEG-2", decode: true, encode: true, decode_verified: true, notes: "H.262 Main/422 Profile (craft-video)" },
+    CodecCapability { codec: "MPEG-4 Part 2", decode: false, encode: true, decode_verified: false, notes: "Simple Profile mp4v/XVID (craft-video)" },
+    CodecCapability { codec: "FFV1", decode: true, encode: true, decode_verified: true, notes: "RFC 9043 v3 lossless (craft-video)" },
+    CodecCapability { codec: "ProRes", decode: true, encode: true, decode_verified: true, notes: "craft-video" },
     CodecCapability {
         codec: "DNxHD/DNxHR",
         decode: true,
         encode: true,
         decode_verified: false,
-        notes: "filmcraft-dnx; round-trips in video-codecs tests only",
+        notes: "craft-video; round-trips in video-codecs tests",
     },
     CodecCapability { codec: "Motion JPEG", decode: false, encode: true, decode_verified: false, notes: "encode only" },
     CodecCapability { codec: "GIF", decode: false, encode: true, decode_verified: false, notes: "animated GIF89a encode only" },
@@ -44,13 +41,15 @@ pub const CODEC_CAPABILITIES: &[CodecCapability] = &[
 
 /// Video codecs the muxer of `container` can store; empty for non-video containers.
 pub fn codecs_for_container(container: ContainerType) -> &'static [VideoCodecKind] {
-    use VideoCodecKind::{Av1, DnxHd, Gif, H264, Hevc, ProRes, Vp9};
+    use VideoCodecKind::{Apv, Av1, DnxHd, Ffv1, Gif, H264, Hevc, Mpeg2, Mpeg4Sp, ProRes, Vp9};
     match container {
-        ContainerType::IsoBmffMp4 | ContainerType::MatroskaMkv => &[H264, Hevc, Av1, Vp9],
-        ContainerType::QuickTimeMov => &[H264, Hevc, ProRes, DnxHd],
+        ContainerType::IsoBmffMp4 => &[H264, Hevc, Av1, Vp9, Apv],
+        ContainerType::QuickTimeMov => &[H264, Hevc, ProRes, DnxHd, Apv],
+        ContainerType::MatroskaMkv => &[H264, Hevc, Av1, Vp9, Ffv1, Mpeg2, Apv],
         ContainerType::WebM => &[Vp9, Av1],
-        ContainerType::MxfOp1a | ContainerType::MxfOpAtom => &[DnxHd, ProRes, H264],
-        ContainerType::MpegTs => &[H264, Hevc],
+        ContainerType::MxfOp1a | ContainerType::MxfOpAtom => &[DnxHd, ProRes, H264, Mpeg2],
+        ContainerType::MpegTs => &[H264, Hevc, Mpeg2],
+        ContainerType::Avi => &[Mpeg4Sp, H264, Ffv1, Mpeg2],
         ContainerType::AnimatedGif => &[Gif],
         _ => &[],
     }
@@ -71,6 +70,7 @@ pub fn render_container_matrix_markdown() -> String {
         ("MXF OP1a", ContainerType::MxfOp1a),
         ("MXF OP-Atom", ContainerType::MxfOpAtom),
         ("MPEG-TS", ContainerType::MpegTs),
+        ("AVI", ContainerType::Avi),
         ("GIF", ContainerType::AnimatedGif),
     ];
     let codecs = [
@@ -80,6 +80,10 @@ pub fn render_container_matrix_markdown() -> String {
         ("VP9", VideoCodecKind::Vp9),
         ("ProRes", VideoCodecKind::ProRes),
         ("DNxHR", VideoCodecKind::DnxHd),
+        ("APV", VideoCodecKind::Apv),
+        ("MPEG-2", VideoCodecKind::Mpeg2),
+        ("MPEG-4", VideoCodecKind::Mpeg4Sp),
+        ("FFV1", VideoCodecKind::Ffv1),
         ("GIF", VideoCodecKind::Gif),
     ];
     let mut out = String::from("| Container |");
@@ -142,11 +146,11 @@ mod tests {
 
     #[test]
     fn every_encoder_kind_is_listed_as_encodable() {
-        for id in ["h264", "hevc", "prores", "dnxhd", "av1", "vp9", "mjpeg", "gif"] {
+        for id in ["h264", "hevc", "prores", "dnxhd", "av1", "vp9", "apv", "mpeg2", "mpeg4", "ffv1", "mjpeg", "gif"] {
             assert!(VideoCodecKind::parse(id).is_some(), "{id} is not a known encoder");
         }
         let encodable = CODEC_CAPABILITIES.iter().filter(|c| c.encode).count();
-        assert_eq!(encodable, 8);
+        assert_eq!(encodable, 12);
     }
 
     #[test]
@@ -154,8 +158,9 @@ mod tests {
         assert!(container_accepts(ContainerType::QuickTimeMov, VideoCodecKind::ProRes));
         assert!(!container_accepts(ContainerType::IsoBmffMp4, VideoCodecKind::ProRes));
         assert!(!container_accepts(ContainerType::WebM, VideoCodecKind::H264));
+        assert!(container_accepts(ContainerType::Avi, VideoCodecKind::Mpeg4Sp));
         assert!(codecs_for_container(ContainerType::Wave).is_empty());
-        assert_eq!(render_container_matrix_markdown().lines().count(), 10);
+        assert_eq!(render_container_matrix_markdown().lines().count(), 11);
     }
 
     #[test]

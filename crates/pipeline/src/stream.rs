@@ -80,6 +80,7 @@ pub(crate) struct StreamSpec<'a> {
 pub(crate) struct FrameProcessor {
     pub scaler: FrameScaler,
     pub color: ColorTransform,
+    pub icc_transform: Option<encodercraft_color::IccColorTransform>,
     pub lut: Option<Lut3D>,
     pub timecode: Option<TimecodeOverlay>,
     pub watermark: Option<crate::overlay::WatermarkOverlay>,
@@ -94,6 +95,12 @@ pub(crate) struct FrameProcessor {
 impl FrameProcessor {
     pub(crate) fn apply(&self, index: u64, src: &VideoFrame, out: &mut VideoFrame) -> Result<(), EncoderError> {
         self.scaler.scale_cropped_into(src, out, self.crop.as_ref())?;
+        if let Some(icc) = &self.icc_transform
+            && out.format == encodercraft_color::PixelFormat::Rgba8
+        {
+            let (plane_data, _) = out.plane_mut(0)?;
+            icc.transform_rgba8(plane_data).map_err(|e| EncoderError::Internal(format!("ICC color transform failed: {e}")))?;
+        }
         if let Some(sdr) = &self.sdr_conform
             && sdr.enabled
         {
