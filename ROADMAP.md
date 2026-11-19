@@ -1,8 +1,8 @@
 # encoderCraft Roadmap
 
-> **Stage: Beta Release (v0.1.0-beta.1)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
+> **Stage: Beta Release (v0.1.0-beta.2)** · **Target:** Adobe Media Encoder 2026 (v26.5.x)  
 > **Repository:** `github.com/el-j/encodercraft` (transferring to `github.com/storytold/encodercraft`)  
-> **Last reviewed:** 2026-11-18 · **Last updated:** 2026-11-18 · **Change:** Active Milestone 52 (Upstream craft-libs Codec Consolidation & Advanced AME Parity)  
+> **Last reviewed:** 2026-11-19 · **Last updated:** 2026-11-19 · **Change:** Completed Milestones 50, 51, and 52; Released v0.1.0-beta.2  
 
 Progress toward full feature parity with Adobe Media Encoder—and universal multi-media superiority across the ArtCraft ecosystem. This page is the executive summary; detailed specifications are maintained in:
 - [docs/architecture.md](docs/architecture.md) (system architecture and layer boundaries)
