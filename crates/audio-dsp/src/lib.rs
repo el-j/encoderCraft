@@ -18,7 +18,10 @@ pub mod session;
 
 pub use aac::AacEncoderWrapper;
 pub use delay::apply_audio_delay;
-pub use io::{decode_audio, encode_audio_aiff, encode_audio_caf, encode_audio_flac, encode_audio_mp3, encode_audio_ogg_vorbis, encode_audio_opus};
+pub use io::{
+    decode_audio, decode_audio_qoa, encode_audio_ac3, encode_audio_aiff, encode_audio_alac, encode_audio_caf, encode_audio_eac3, encode_audio_flac,
+    encode_audio_mp3, encode_audio_ogg_vorbis, encode_audio_opus, encode_audio_qoa,
+};
 pub use limiter::PeakLimiter;
 pub use loudness::{LoudnessStats, measure_loudness, normalize_loudness};
 pub use matrix::apply_audio_matrix;

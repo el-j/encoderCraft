@@ -1,16 +1,16 @@
 //! Material eXchange Format (SMPTE ST 377-1 MXF OP1a and OP-Atom) multiplexer.
 //!
-//! Powered by `filmcraft-mxf`, providing frame-wrapped broadcast OP1a multiplexing
+//! Powered by `craft-media`, providing frame-wrapped broadcast OP1a multiplexing
 //! (Avid DNxHD/DNxHR VC-3, Apple ProRes RDD 44, H.264/AVC ST 381-3, and Broadcast Wave PCM ST 382)
 //! as well as clip-wrapped OP-Atom essence containers for Avid Media Composer workflows.
 
 use std::io::{Seek, Write};
 
-use encodercraft_core::{AudioSampleBuffer, EncoderError};
-use filmcraft_mxf::{
+use craft_media::mxf::{
     CodedKind, ColorSpace, FrameInfo, MxfWriter, PackageIds, Pattern, PictureCoding, PictureDesc, Rational, SoundDesc, StartTimecode, WriterConfig,
     encode_pcm,
 };
+use encodercraft_core::{AudioSampleBuffer, EncoderError};
 
 use crate::muxer::{AudioStreamConfig, VideoSample, VideoStreamConfig};
 
@@ -145,9 +145,9 @@ mod tests {
 
         let finished = muxer.finish().unwrap();
         let bytes = finished.into_inner();
-        assert!(filmcraft_mxf::sniff(&bytes));
+        assert!(craft_media::mxf::sniff(&bytes));
 
-        let parsed = filmcraft_mxf::open(bytes.as_slice()).unwrap();
+        let parsed = craft_media::mxf::open(bytes.as_slice()).unwrap();
         assert_eq!(parsed.tracks.len(), 2);
     }
 }

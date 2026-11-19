@@ -59,6 +59,7 @@ impl Slot {
     fn pump(&mut self, ctx: &egui::Context, name: &str, frame: u64) {
         let Some(decoder) = &self.decoder else { return };
         while let Some(ev) = decoder.poll() {
+            ctx.request_repaint();
             match ev {
                 PreviewEvent::Opened { probe, frame_count } => {
                     self.frame_count = frame_count;
@@ -90,6 +91,9 @@ impl Slot {
         if self.frame_count > 0 && self.requested_frame != Some(wanted) {
             decoder.request_frame(wanted);
             self.requested_frame = Some(wanted);
+            ctx.request_repaint();
+        } else if self.decoder.is_some() && self.texture.is_none() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
 }
@@ -114,7 +118,7 @@ pub struct AudioPreview {
     pub summary: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DocumentPreview {
     pub path: PathBuf,
     pub title: String,
@@ -122,6 +126,19 @@ pub struct DocumentPreview {
     pub total_pages: usize,
     pub pages_text: Vec<Vec<String>>,
     pub summary: String,
+    pub cached_texture: Option<(usize, egui::TextureHandle)>,
+}
+
+impl std::fmt::Debug for DocumentPreview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DocumentPreview")
+            .field("path", &self.path)
+            .field("title", &self.title)
+            .field("current_page", &self.current_page)
+            .field("total_pages", &self.total_pages)
+            .field("summary", &self.summary)
+            .finish()
+    }
 }
 
 impl DocumentPreview {
@@ -396,7 +413,12 @@ impl PreviewState {
                     pages_text.push(vec![file_name.clone(), format!("Document format: {}", ext.to_ascii_uppercase())]);
                 }
 
-                let total_pages = pages_text.len();
+                let mut total_pages = pages_text.len();
+                if ext.as_str() == "pdf"
+                    && let Ok(count) = encodercraft_pipeline::pdf_page_count(&bytes)
+                {
+                    total_pages = total_pages.max(count);
+                }
                 let summary = format!("Document: {} · {} page(s)", ext.to_ascii_uppercase(), total_pages);
                 self.source.summary = Some(summary.clone());
                 self.source.size = Some((612, 792));
@@ -410,6 +432,7 @@ impl PreviewState {
                     total_pages,
                     pages_text,
                     summary,
+                    cached_texture: None,
                 }));
             }
             "svg" | "eps" | "ai" | "wmf" | "vectorcraft" => {
@@ -775,7 +798,7 @@ fn paint_universal_media(
             paint_audio_waveform(painter, frame_rect, response, audio, transport, tokens);
         }
         UniversalMediaState::Document(doc) => {
-            paint_document_preview(painter, frame_rect, doc);
+            paint_document_preview(ctx, painter, frame_rect, response, doc, transport, tokens);
         }
         UniversalMediaState::Vector(vec) => {
             paint_vector_preview(ctx, painter, frame_rect, vec, tokens);
@@ -844,9 +867,76 @@ fn paint_audio_waveform(
     );
 }
 
-fn paint_document_preview(painter: &egui::Painter, frame_rect: Rect, doc: &DocumentPreview) {
+fn paint_document_preview(
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    frame_rect: Rect,
+    response: &egui::Response,
+    doc: &mut DocumentPreview,
+    transport: &mut Transport,
+    tokens: &Tokens,
+) {
     // Backdrop
     painter.rect_filled(frame_rect, 2.0, Color32::from_rgb(26, 28, 32));
+
+    // Synchronize page with transport
+    if doc.total_pages > 0 {
+        doc.current_page = (transport.position() as usize).min(doc.total_pages.saturating_sub(1));
+    }
+
+    // Interactive scrub across pages
+    if doc.total_pages > 1
+        && (response.dragged() || response.clicked())
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        let scrub_frac = ((pos.x - frame_rect.min.x) / frame_rect.width().max(1.0)).clamp(0.0, 1.0);
+        let target_page = (scrub_frac * (doc.total_pages.saturating_sub(1)) as f32).round() as u64;
+        transport.seek(target_page);
+        doc.current_page = (target_page as usize).min(doc.total_pages.saturating_sub(1));
+        ctx.request_repaint();
+    }
+
+    let is_pdf = doc.path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+    if is_pdf {
+        let needs_load = match &doc.cached_texture {
+            Some((page_idx, _)) => *page_idx != doc.current_page,
+            None => true,
+        };
+        if needs_load
+            && let Ok(bytes) = std::fs::read(&doc.path)
+            && let Ok((width, height, rgba)) = encodercraft_pipeline::render_pdf_page_to_rgba(&bytes, doc.current_page, 960.0)
+        {
+            let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
+            let tex = ctx.load_texture(format!("pdf-preview-{}-{}", doc.path.display(), doc.current_page), image, egui::TextureOptions::LINEAR);
+            doc.cached_texture = Some((doc.current_page, tex));
+            ctx.request_repaint();
+        }
+    }
+
+    if let Some((page_idx, ref tex)) = doc.cached_texture
+        && page_idx == doc.current_page
+    {
+        let tex_size = tex.size_vec2();
+        let aspect = (tex_size.x / tex_size.y.max(1.0)).clamp(0.2, 5.0);
+        let paper_h = (frame_rect.height() - 24.0).max(60.0);
+        let paper_w = (paper_h * aspect).min(frame_rect.width() - 20.0);
+        let paper_rect = Rect::from_center_size(frame_rect.center() - Vec2::new(0.0, 6.0), Vec2::new(paper_w, paper_h));
+
+        let shadow_rect = paper_rect.translate(Vec2::new(2.0, 3.0));
+        painter.rect_filled(shadow_rect, 2.0, Color32::from_black_alpha(80));
+
+        painter.image(tex.id(), paper_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        painter.rect_stroke(paper_rect, 1.0, Stroke::new(1.0, Color32::from_rgb(100, 105, 115)), StrokeKind::Outside);
+
+        painter.text(
+            Pos2::new(paper_rect.center().x, frame_rect.bottom() - 12.0),
+            egui::Align2::CENTER_CENTER,
+            format!("Page {} of {}", doc.current_page + 1, doc.total_pages),
+            egui::FontId::proportional(11.0),
+            tokens.text_primary,
+        );
+        return;
+    }
 
     // Centered sheet of paper (aspect ratio ~ 0.77 for standard 612x792 pt page)
     let paper_h = (frame_rect.height() - 16.0).max(60.0);

@@ -14,6 +14,7 @@ pub enum ContainerKind {
     WebM,
     Mxf,
     MpegTs,
+    Avi,
     // Audio containers
     Wav,
     Rf64Wav,
@@ -82,6 +83,7 @@ impl ContainerKind {
             Self::WebM => "WebM",
             Self::Mxf => "Material Exchange Format (MXF)",
             Self::MpegTs => "MPEG Transport Stream",
+            Self::Avi => "Audio Video Interleave (AVI)",
             Self::Wav => "Waveform Audio (WAV)",
             Self::Rf64Wav => "RF64 Broadcast Wave (>4GB)",
             Self::Aiff => "Audio Interchange (AIFF)",
@@ -144,6 +146,7 @@ impl ContainerKind {
             Self::WebM => Some(ContainerType::WebM),
             Self::Mxf => Some(ContainerType::MxfOp1a),
             Self::MpegTs => Some(ContainerType::IsoBmffMp4),
+            Self::Avi => Some(ContainerType::Avi),
             Self::Wav | Self::Rf64Wav => Some(ContainerType::Wave),
             Self::Aiff => Some(ContainerType::Aiff),
             Self::Flac => Some(ContainerType::Flac),
@@ -303,6 +306,7 @@ fn sniff_riff_family(bytes: &[u8]) -> Option<ContainerKind> {
         match bytes.get(8..12) {
             Some(b"WAVE") => return Some(ContainerKind::Wav),
             Some(b"WEBP") => return Some(ContainerKind::WebP),
+            Some(b"AVI " | b"AVIX") => return Some(ContainerKind::Avi),
             _ => {}
         }
     }

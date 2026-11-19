@@ -1,6 +1,6 @@
-//! Avid DNxHR video encoder wrapper backed by `craft-dnx`.
+//! Avid DNxHR video encoder wrapper backed by `craft-video`.
 
-use craft_dnx::{ChromaFormat, ColorVolume, Encoder, EncoderConfig, Frame, Interlace, Profile};
+use craft_video::dnx::{ChromaFormat, ColorVolume, Encoder, EncoderConfig, Frame, Interlace, Profile};
 use encodercraft_core::{EncoderError, Rational64, VideoFrame};
 
 use crate::encoder::{EncodedPacket, VideoEncoder};

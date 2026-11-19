@@ -21,10 +21,13 @@ pub mod scale;
 pub mod stitch;
 pub mod stream;
 pub mod transform;
+pub mod universal_reader;
 
 pub use captions::{CaptionBurner, CaptionTrack, NativeCaptionFormat};
 pub use channel_buffer::{DEFAULT_RING_BUFFER_CAPACITY, FrameRingBuffer};
-pub use document::{DocumentCanvas, DocumentItem, DocumentPage, create_zip_archive, extract_zip_entry, list_zip_entries};
+pub use document::{
+    DocumentCanvas, DocumentItem, DocumentPage, create_zip_archive, extract_zip_entry, list_zip_entries, pdf_page_count, render_pdf_page_to_rgba,
+};
 pub use inventory::{SequenceInfo, SourceInventory, inspect_bytes, inspect_source};
 pub use lut::{InterpolationMode, Lut1D, Lut3D, LutError, LutVideoFrameExt};
 pub use naming::{CollisionPolicy, NamingContext, expand_template, resolve_output_path};
@@ -36,3 +39,4 @@ pub use scale::FrameScaler;
 pub use stitch::{ClipStitcher, StitchOptions, stitch_audio_buffers};
 pub use stream::{PipelineLimits, StreamStats};
 pub use transform::{deinterlace, flip, rotate};
+pub use universal_reader::{init_universal_media_openers, open_universal_media_reader};

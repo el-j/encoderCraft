@@ -35,6 +35,10 @@ impl<W: Write + Seek> MkvMuxerBuilder<W> {
             b"av01" | b"AV01" => "V_AV1",
             b"avc1" | b"h264" => "V_MPEG4/ISO/AVC",
             b"hev1" | b"hvc1" => "V_MPEGH/ISO/HEVC",
+            b"apv1" => "V_APV",
+            b"mp2v" | b"mpg2" => "V_MPEG2",
+            b"mp4v" | b"DX50" | b"XVID" => "V_MPEG4/ISO/SP",
+            b"FFV1" | b"ffv1" => "V_FFV1",
             _ => "V_UNCOMPRESSED",
         };
 
@@ -59,6 +63,10 @@ impl<W: Write + Seek> MkvMuxerBuilder<W> {
             b"vorb" => "A_VORBIS",
             b"mp4a" | b"aac " => "A_AAC",
             b"flac" => "A_FLAC",
+            b"ac-3" | b"ac3 " => "A_AC3",
+            b"ec-3" | b"eac3" => "A_EAC3",
+            b"alac" => "A_ALAC",
+            b"mp3 " | b".mp3" => "A_MPEG/L3",
             _ => "A_PCM/INT/LIT",
         };
 

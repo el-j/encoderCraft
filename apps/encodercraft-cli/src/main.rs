@@ -27,6 +27,7 @@ fn main() {
 
 fn run() -> Result<(), EncoderError> {
     env_logger::init();
+    encodercraft_pipeline::init_universal_media_openers();
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
@@ -445,7 +446,13 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
     }
 
     let registry = default_preset_registry();
-    if let Some(container) = to
+    let inferred_container = output
+        .as_ref()
+        .filter(|o| total_is_single(&inputs) && !o.is_dir())
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        .and_then(encodercraft_core::ContainerType::from_extension);
+    if let Some(container) = to.or(inferred_container)
         && !preset_explicit
         && let Some(p) = registry.list().iter().find(|p| p.container == container)
     {
@@ -525,6 +532,8 @@ fn cmd_encode(args: &[String]) -> Result<(), EncoderError> {
         } else if let Some(container) = session_output_container(input_path, &output_path) {
             target.container = container;
         } else if let Some(container) = project_output_container(input_path, &output_path)? {
+            target.container = container;
+        } else if let Some(container) = inferred_container {
             target.container = container;
         }
 

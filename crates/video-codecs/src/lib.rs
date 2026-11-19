@@ -6,30 +6,40 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod apv;
 pub mod av1;
 pub mod capabilities;
 pub mod decoder;
 pub mod dispatcher;
 pub mod dnx;
 pub mod encoder;
+pub mod ffv1;
 pub mod gif;
 pub mod h264;
 pub mod hevc;
 pub mod mjpeg;
+pub mod mpeg2;
+pub mod mpeg4;
 pub mod params;
 pub mod prores;
 pub mod vp9;
 pub mod yuv;
 
+pub use apv::ApvEncoderWrapper;
 pub use av1::Av1EncoderWrapper;
-pub use decoder::{Vp8DecoderWrapper, decode_dnx_packet, decode_prores_packet, decode_video_packet_auto};
+pub use decoder::{
+    Ffv1DecoderWrapper, Mpeg2DecoderWrapper, Vp8DecoderWrapper, decode_apv_packet, decode_dnx_packet, decode_prores_packet, decode_video_packet_auto,
+};
 pub use dispatcher::{VideoCodecKind, create_video_encoder, create_video_encoder_with};
 pub use dnx::DnxEncoderWrapper;
 pub use encoder::{EncodedPacket, VideoEncoder};
+pub use ffv1::Ffv1EncoderWrapper;
 pub use gif::GifEncoder;
 pub use h264::H264EncoderWrapper;
 pub use hevc::HevcEncoderWrapper;
 pub use mjpeg::MjpegEncoder;
+pub use mpeg2::Mpeg2EncoderWrapper;
+pub use mpeg4::Mpeg4EncoderWrapper;
 pub use params::EncodeParams;
 pub use prores::ProResEncoderWrapper;
 pub use vp9::Vp9EncoderWrapper;
