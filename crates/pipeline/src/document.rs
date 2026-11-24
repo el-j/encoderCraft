@@ -215,56 +215,21 @@ impl DocumentCanvas {
         Err(EncoderError::InvalidContainer("unrecognized prepress document format".to_string()))
     }
 
-    /// Imports Microsoft Word OpenXML through DesignCraft's bounded DOCX reader with direct XML fallback.
+    /// Imports Microsoft Word OpenXML through `craft-docx` bounded reader with direct XML fallback.
     pub fn from_docx_bytes(bytes: &[u8]) -> Result<Self, EncoderError> {
         if bytes.len() > 50 * 1024 * 1024 {
             return Err(EncoderError::InvalidContainer("DOCX exceeds the 50 MiB import limit".into()));
         }
-        if let Ok(imported) = designcraft_textimport::import("document.docx", bytes) {
-            for warning in &imported.warnings {
-                log::info!("DOCX import note: {warning}");
+        if let Ok(word_doc) = craft_docx::read(bytes) {
+            for skipped in &word_doc.skipped_parts {
+                log::info!("DOCX skipped part: {skipped}");
             }
-            if !imported.story.text.trim().is_empty() {
-                let story = imported.story;
-                let mut doc = Self::new("Imported Word Document");
-                let mut cur_page_idx = 0;
-                let mut cur_y = 720.0;
-                for (paragraph_index, raw_text) in story.text.split('\n').enumerate() {
-                    let paragraph = story.paras.get(paragraph_index);
-                    let style = paragraph.map(|paragraph| paragraph.style.to_ascii_lowercase()).unwrap_or_default();
-                    let font_size = if style == "title" {
-                        24.0
-                    } else if style.starts_with("heading") {
-                        18.0
-                    } else {
-                        12.0
-                    };
-                    if let Some(table_id) = paragraph.and_then(|paragraph| paragraph.table)
-                        && let Some(table) = story.tables.get(&table_id)
-                        && raw_text.contains('\u{E009}')
-                    {
-                        for row_index in 0..table.rows.len() {
-                            let mut row = Vec::new();
-                            for column_index in 0..table.columns.len() {
-                                let cell_index = row_index.saturating_mul(table.columns.len()).saturating_add(column_index);
-                                if let Some(cell) = table.cells.get(cell_index) {
-                                    row.push(cell.text.text.replace('\n', " "));
-                                }
-                            }
-                            append_document_text(&mut doc, &row.join(" | "), 12.0, &mut cur_page_idx, &mut cur_y);
-                        }
-                        continue;
-                    }
-
-                    let page_break = raw_text.chars().any(|character| matches!(character, '\u{E004}' | '\u{E011}' | '\u{E012}'));
-                    let text = raw_text.chars().filter(|character| !('\u{E000}'..='\u{E1FF}').contains(character)).collect::<String>();
-                    append_document_text(&mut doc, &text, font_size, &mut cur_page_idx, &mut cur_y);
-                    if page_break {
-                        doc.add_page();
-                        cur_page_idx = doc.pages.len().saturating_sub(1);
-                        cur_y = 720.0;
-                    }
-                }
+            let mut doc = Self::new("Imported Word Document");
+            let mut cur_page_idx = 0;
+            let mut cur_y = 720.0;
+            let mut has_content = false;
+            append_wordmodel_blocks(&word_doc.body, &mut doc, &mut cur_page_idx, &mut cur_y, &mut has_content);
+            if has_content {
                 return Ok(doc);
             }
         }
@@ -899,6 +864,76 @@ fn render_page_content(page: &DocumentPage) -> String {
         }
     }
     content_stream
+}
+
+fn collect_wordmodel_text(blocks: &[std::sync::Arc<craft_wordmodel::Block>]) -> String {
+    let mut parts = Vec::new();
+    for block in blocks {
+        if let craft_wordmodel::Block::Para(para) = block.as_ref() {
+            let text: String = para.plain_text().chars().filter(|ch| *ch != '\u{FFFC}' && !('\u{E000}'..='\u{E1FF}').contains(ch)).collect();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+    }
+    parts.join(" ")
+}
+
+fn append_wordmodel_blocks(
+    blocks: &[std::sync::Arc<craft_wordmodel::Block>],
+    doc: &mut DocumentCanvas,
+    page_index: &mut usize,
+    y: &mut f64,
+    has_content: &mut bool,
+) {
+    for block in blocks {
+        match block.as_ref() {
+            craft_wordmodel::Block::Para(para) => {
+                if para.props.page_break_before == Some(true) && *has_content {
+                    doc.add_page();
+                    *page_index = doc.pages.len().saturating_sub(1);
+                    *y = 720.0;
+                }
+                let style = para.props.style.as_deref().unwrap_or_default().to_ascii_lowercase();
+                let font_size = if style == "title" {
+                    24.0
+                } else if style.starts_with("heading") || para.props.outline_level.is_some_and(|lvl| lvl <= 1) {
+                    18.0
+                } else {
+                    12.0
+                };
+                let plain = para.plain_text();
+                for (seg_idx, seg) in plain.split(craft_wordmodel::para::PAGE_BREAK).enumerate() {
+                    if seg_idx > 0 {
+                        doc.add_page();
+                        *page_index = doc.pages.len().saturating_sub(1);
+                        *y = 720.0;
+                    }
+                    let text: String = seg.chars().filter(|ch| *ch != '\u{FFFC}' && !('\u{E000}'..='\u{E1FF}').contains(ch)).collect();
+                    if !text.trim().is_empty() {
+                        *has_content = true;
+                        append_document_text(doc, &text, font_size, page_index, y);
+                    }
+                }
+            }
+            craft_wordmodel::Block::Table(table) => {
+                for row in &table.rows {
+                    let mut cells = Vec::with_capacity(row.cells.len());
+                    for cell in &row.cells {
+                        let cell_text = collect_wordmodel_text(&cell.blocks);
+                        if !cell_text.is_empty() {
+                            cells.push(cell_text);
+                        }
+                    }
+                    if !cells.is_empty() {
+                        *has_content = true;
+                        append_document_text(doc, &cells.join(" | "), 12.0, page_index, y);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn append_document_text(doc: &mut DocumentCanvas, text: &str, font_size: f64, page_index: &mut usize, y: &mut f64) {

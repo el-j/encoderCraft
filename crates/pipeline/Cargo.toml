@@ -22,9 +22,11 @@ encodercraft-video-codecs = { workspace = true }
 encodercraft-image-codecs = { workspace = true }
 encodercraft-source = { workspace = true }
 encodercraft-spatial-io = { workspace = true }
-texturecraft-formats = { workspace = true }
-texturecraft-geom = { workspace = true }
-designcraft-textimport = { workspace = true }
+craft-mesh = { workspace = true }
+craft-usd = { workspace = true }
+craft-zip = { workspace = true }
+craft-docx = { workspace = true }
+craft-wordmodel = { workspace = true }
 hayro = { workspace = true }
 lopdf = { workspace = true }
 image = { workspace = true }
@@ -32,7 +34,6 @@ craft-media = { workspace = true }
 craft-captions = { workspace = true }
 craft-timeline = { workspace = true }
 craft-aaf = { workspace = true }
-filmcraft-time = { workspace = true }
 filmcraft-color = { workspace = true }
 craft-audio = { workspace = true }
 crossbeam-channel = { workspace = true }

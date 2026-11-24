@@ -63,33 +63,177 @@ impl Drop for PipeStreamGuard {
     }
 }
 
-fn import_texturecraft_mesh(path: &Path) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
-    let imported = texturecraft_formats::import_mesh(path)
-        .map_err(|error| EncoderError::InvalidContainer(format!("failed to import 3D mesh `{}`: {error}", path.display())))?;
-    let source_mesh = imported.mesh;
-    if source_mesh.indices.len() % 3 != 0 {
-        return Err(EncoderError::InvalidContainer("imported 3D mesh has an incomplete triangle".into()));
+fn import_craft_mesh(path: &Path) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
+    const MAX_MESH_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
+    let metadata = std::fs::metadata(path).map_err(|error| EncoderError::Io(format!("failed to inspect 3D mesh `{}`: {error}", path.display())))?;
+    if metadata.len() > MAX_MESH_SOURCE_BYTES {
+        return Err(EncoderError::InvalidContainer(format!("3D mesh `{}` exceeds the {MAX_MESH_SOURCE_BYTES}-byte limit", path.display())));
     }
+    let bytes = std::fs::read(path).map_err(|error| EncoderError::Io(format!("failed to read 3D mesh `{}`: {error}", path.display())))?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("mesh");
+    import_mesh_bytes(name, &bytes)
+}
 
-    let mut mesh = encodercraft_spatial_io::TriangleMesh::new(path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("ImportedMesh"));
-    mesh.vertices = source_mesh.positions.iter().map(|point| [point.x, point.y, point.z]).collect();
-    mesh.indices = source_mesh.indices.as_chunks::<3>().0.to_vec();
+fn import_mesh_bytes(name: &str, bytes: &[u8]) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
+    let ext = Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    let stem = Path::new(name).file_stem().and_then(|s| s.to_str()).unwrap_or("ImportedMesh");
+    let limits = craft_mesh::Limits::default();
+    let map_err = |error: craft_mesh::Error| EncoderError::InvalidContainer(format!("failed to import 3D mesh `{name}`: {error}"));
+    let scene = match ext.as_str() {
+        "obj" => craft_mesh::obj::read(bytes, &limits, &mut craft_mesh::no_external).map_err(map_err)?,
+        "stl" => craft_mesh::stl::read(bytes, &limits).map_err(map_err)?,
+        "ply" => craft_mesh::ply::read(bytes, &limits).map_err(map_err)?,
+        "glb" | "gltf" => craft_mesh::gltf::read(bytes, &limits, &mut craft_mesh::no_external).map_err(map_err)?,
+        "fbx" => craft_mesh::fbx::read(bytes, &limits, &mut craft_mesh::no_external).map_err(map_err)?,
+        "dae" => craft_mesh::dae::read(bytes, &limits).map_err(map_err)?,
+        "abc" => craft_mesh::abc::read(bytes, &limits).map_err(map_err)?,
+        "usdz" => return import_usdz_mesh(stem, bytes),
+        "usda" | "usd" | "usdc" => return import_usd_layer_mesh(stem, bytes),
+        _ => return Err(EncoderError::InvalidContainer(format!("unsupported 3D mesh format `{name}`"))),
+    };
+    craft_mesh_scene_to_triangle_mesh(stem, scene, &limits)
+}
+
+fn craft_mesh_scene_to_triangle_mesh(
+    name: &str,
+    scene: craft_mesh::Scene,
+    limits: &craft_mesh::Limits,
+) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
+    let mut mesh = encodercraft_spatial_io::TriangleMesh::new(name);
+    let instances = scene.instances(limits).map_err(|error| EncoderError::InvalidContainer(format!("invalid 3D scene hierarchy: {error}")))?;
+    for (mesh_idx, xform) in instances {
+        let Some(src) = scene.meshes.get(mesh_idx) else {
+            return Err(EncoderError::InvalidContainer("3D scene instance references a missing mesh".into()));
+        };
+        let unified = src.unified();
+        let base_vertex =
+            u32::try_from(mesh.vertices.len()).map_err(|_| EncoderError::InvalidContainer("3D mesh vertex count overflows u32".into()))?;
+        for pos in &unified.positions {
+            let p = craft_mesh::transform_point(&xform, *pos);
+            mesh.vertices.push([p[0] as f32, p[1] as f32, p[2] as f32]);
+        }
+        for part in &unified.parts {
+            for &[a, b, c] in part {
+                let tri = [
+                    base_vertex.checked_add(a).ok_or_else(|| EncoderError::InvalidContainer("3D triangle index overflow".into()))?,
+                    base_vertex.checked_add(b).ok_or_else(|| EncoderError::InvalidContainer("3D triangle index overflow".into()))?,
+                    base_vertex.checked_add(c).ok_or_else(|| EncoderError::InvalidContainer("3D triangle index overflow".into()))?,
+                ];
+                if tri.iter().any(|&idx| mesh.vertices.get(idx as usize).is_none()) {
+                    return Err(EncoderError::InvalidContainer("3D mesh triangle references a missing vertex".into()));
+                }
+                mesh.indices.push(tri);
+            }
+        }
+    }
     mesh.generate_flat_normals();
     Ok(mesh)
 }
 
-fn to_texturecraft_mesh(mesh: &encodercraft_spatial_io::TriangleMesh) -> Result<texturecraft_geom::Mesh, EncoderError> {
-    let mut indices = Vec::with_capacity(mesh.indices.len().saturating_mul(3));
+fn import_usdz_mesh(name: &str, bytes: &[u8]) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
+    const MAX_USDZ_ENTRY_BYTES: u64 = 256 * 1024 * 1024;
+    let limits = craft_zip::Limits { max_entries: 1024, max_total_bytes: MAX_USDZ_ENTRY_BYTES };
+    let mut archive =
+        craft_zip::Archive::open(bytes, limits).map_err(|error| EncoderError::InvalidContainer(format!("invalid USDZ archive `{name}`: {error}")))?;
+    for index in 0..archive.len() {
+        let Some(entry_name) =
+            archive.entry_name(index).map_err(|error| EncoderError::InvalidContainer(format!("invalid USDZ entry name: {error}")))?
+        else {
+            continue;
+        };
+        let lower = entry_name.to_ascii_lowercase();
+        if (lower.ends_with(".usda") || lower.ends_with(".usdc") || lower.ends_with(".usd"))
+            && let Some(entry_bytes) = archive
+                .read_index(index, MAX_USDZ_ENTRY_BYTES)
+                .map_err(|error| EncoderError::InvalidContainer(format!("failed reading USDZ entry `{entry_name}`: {error}")))?
+        {
+            return import_usd_layer_mesh(name, &entry_bytes);
+        }
+    }
+    Err(EncoderError::InvalidContainer(format!("USDZ archive `{name}` contains no USD layer")))
+}
+
+fn import_usd_layer_mesh(name: &str, bytes: &[u8]) -> Result<encodercraft_spatial_io::TriangleMesh, EncoderError> {
+    let layer = match craft_usd::scene::read_layer(bytes) {
+        Ok(layer) => layer,
+        Err(err) => {
+            if bytes.starts_with(b"PXR-USDC")
+                && let Ok(parsed) = encodercraft_spatial_io::parse_usdc(bytes)
+            {
+                return Ok(parsed);
+            }
+            return Err(EncoderError::InvalidContainer(format!("failed to parse USD layer `{name}`: {err}")));
+        }
+    };
+    let mut out = encodercraft_spatial_io::TriangleMesh::new(name);
+    for prim in &layer.prims {
+        append_usd_prim_mesh(&mut out, prim)?;
+    }
+    if out.vertices.is_empty() {
+        return Err(EncoderError::InvalidContainer(format!("USD layer `{name}` contains no mesh geometry")));
+    }
+    out.generate_flat_normals();
+    Ok(out)
+}
+
+fn append_usd_prim_mesh(out: &mut encodercraft_spatial_io::TriangleMesh, prim: &craft_usd::scene::PrimSpec) -> Result<(), EncoderError> {
+    let Some(craft_usd::scene::Val::Num(points)) = prim.props.get("points").and_then(|p| p.value.as_ref()) else {
+        return Ok(());
+    };
+    let Some(craft_usd::scene::Val::Num(indices)) = prim.props.get("faceVertexIndices").and_then(|p| p.value.as_ref()) else {
+        return Ok(());
+    };
+    let base_vertex = u32::try_from(out.vertices.len()).map_err(|_| EncoderError::InvalidContainer("USD vertex count overflows u32".into()))?;
+    for xyz in points.as_chunks::<3>().0 {
+        out.vertices.push([xyz[0] as f32, xyz[1] as f32, xyz[2] as f32]);
+    }
+    if let Some(craft_usd::scene::Val::Num(counts)) = prim.props.get("faceVertexCounts").and_then(|p| p.value.as_ref()) {
+        let mut cursor = 0usize;
+        for &count_f in counts {
+            let count = count_f.round().max(0.0) as usize;
+            let face = indices
+                .get(cursor..cursor.saturating_add(count))
+                .ok_or_else(|| EncoderError::InvalidContainer("USD faceVertexIndices truncated".into()))?;
+            cursor = cursor.saturating_add(count);
+            for win in face.get(1..).unwrap_or_default().windows(2) {
+                push_usd_triangle(out, base_vertex, face[0], win[0], win[1])?;
+            }
+        }
+    } else {
+        for tri in indices.as_chunks::<3>().0 {
+            push_usd_triangle(out, base_vertex, tri[0], tri[1], tri[2])?;
+        }
+    }
+    Ok(())
+}
+
+fn push_usd_triangle(out: &mut encodercraft_spatial_io::TriangleMesh, base_vertex: u32, a: f64, b: f64, c: f64) -> Result<(), EncoderError> {
+    let to_idx = |v: f64| -> Result<u32, EncoderError> {
+        let local = u32::try_from(v.round() as i64).map_err(|_| EncoderError::InvalidContainer("negative or invalid USD vertex index".into()))?;
+        let idx = base_vertex.checked_add(local).ok_or_else(|| EncoderError::InvalidContainer("USD vertex index overflow".into()))?;
+        if out.vertices.get(idx as usize).is_none() {
+            return Err(EncoderError::InvalidContainer("USD triangle references out-of-range vertex".into()));
+        }
+        Ok(idx)
+    };
+    out.indices.push([to_idx(a)?, to_idx(b)?, to_idx(c)?]);
+    Ok(())
+}
+
+fn to_craft_mesh_scene(mesh: &encodercraft_spatial_io::TriangleMesh) -> Result<craft_mesh::Scene, EncoderError> {
+    let mut corners = Vec::with_capacity(mesh.indices.len().saturating_mul(3));
     for triangle in &mesh.indices {
         for &index in triangle {
             if mesh.vertices.get(index as usize).is_none() {
                 return Err(EncoderError::InvalidContainer("3D mesh triangle references a missing vertex".into()));
             }
-            indices.push(index);
+            corners.push(craft_mesh::Corner::at(index));
         }
     }
-    let positions = mesh.vertices.iter().map(|point| texturecraft_geom::glam::Vec3::new(point[0], point[1], point[2])).collect();
-    Ok(texturecraft_geom::Mesh { positions, indices, ..Default::default() })
+    let positions = mesh.vertices.iter().map(|point| [f64::from(point[0]), f64::from(point[1]), f64::from(point[2])]).collect();
+    let part = craft_mesh::Part { name: mesh.name.clone(), corners, ..craft_mesh::Part::default() };
+    let cm = craft_mesh::Mesh { name: mesh.name.clone(), positions, parts: vec![part], ..craft_mesh::Mesh::default() };
+    Ok(craft_mesh::Scene::from_meshes(vec![cm], vec![]))
 }
 
 fn prepare_audio_for_target(mut audio: AudioSampleBuffer, target: &OutputTarget) -> Result<AudioSampleBuffer, EncoderError> {
@@ -1161,9 +1305,7 @@ impl TranscodePipeline {
             SourceDescriptor::File { path, .. } if path.exists() => {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                 match ext.as_str() {
-                    "obj" | "stl" | "ply" | "glb" | "gltf" | "usdz" | "dae" | "fbx" | "abc" | "usdc" | "usd" | "usda" => {
-                        import_texturecraft_mesh(path)?
-                    }
+                    "obj" | "stl" | "ply" | "glb" | "gltf" | "usdz" | "dae" | "fbx" | "abc" | "usdc" | "usd" | "usda" => import_craft_mesh(path)?,
                     "step" | "stp" | "splat" => {
                         let metadata = std::fs::metadata(path)
                             .map_err(|error| EncoderError::Io(format!("failed to inspect source 3D file `{}`: {error}", path.display())))?;
@@ -1204,16 +1346,18 @@ impl TranscodePipeline {
             return Ok(());
         }
 
-        let texturecraft_mesh = to_texturecraft_mesh(&mesh)?;
+        let craft_scene = to_craft_mesh_scene(&mesh)?;
+        let mesh_limits = craft_mesh::Limits::default();
         match target.container {
             ContainerType::Gltf => {
-                let glb_bytes = texturecraft_formats::glb_bytes(&texturecraft_mesh, &mesh.name, &[])
+                let glb_bytes = craft_mesh::gltf::write_glb(&craft_scene, &mesh_limits)
                     .map_err(|error| EncoderError::UnsupportedCodec(format!("failed to export GLB: {error}")))?;
                 std::fs::write(&target.output_path, glb_bytes).map_err(|e| EncoderError::Io(format!("failed to write GLB file: {e}")))?;
             }
             ContainerType::Obj => {
-                let obj_bytes = texturecraft_formats::obj_bytes(&texturecraft_mesh, &mesh.name);
-                std::fs::write(&target.output_path, obj_bytes).map_err(|e| EncoderError::Io(format!("failed to write OBJ file: {e}")))?;
+                let obj_text = craft_mesh::obj::write(&craft_scene, None, &mesh_limits)
+                    .map_err(|error| EncoderError::UnsupportedCodec(format!("failed to export OBJ: {error}")))?;
+                std::fs::write(&target.output_path, obj_text.as_bytes()).map_err(|e| EncoderError::Io(format!("failed to write OBJ file: {e}")))?;
             }
             ContainerType::Stl => {
                 let stl_bytes = encodercraft_spatial_io::write_stl_binary(&mesh);
@@ -1224,9 +1368,8 @@ impl TranscodePipeline {
                 std::fs::write(&target.output_path, ply_bytes).map_err(|e| EncoderError::Io(format!("failed to write PLY file: {e}")))?;
             }
             ContainerType::Usdz => {
-                let usdz = texturecraft_formats::usd_bytes(&texturecraft_mesh, &mesh.name, &[], texturecraft_formats::UsdFormat::Usdz)
-                    .map_err(|error| EncoderError::UnsupportedCodec(format!("failed to export USDZ: {error}")))?;
-                std::fs::write(&target.output_path, usdz.bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
+                let usdz_bytes = encodercraft_spatial_io::write_usdz(&mesh)?;
+                std::fs::write(&target.output_path, usdz_bytes).map_err(|e| EncoderError::Io(format!("failed to write USDZ file: {e}")))?;
             }
             ContainerType::Usdc => {
                 let usdc_bytes = encodercraft_spatial_io::write_usdc(&mesh);
@@ -3829,16 +3972,16 @@ mod tests {
             [("from_step.stl", stl_from_step), ("from_step.glb", glb_from_step), ("from_step.usdz", usdz_from_step), ("from_step.obj", obj_from_step)]
         {
             let bytes = std::fs::read(output).unwrap();
-            let imported = texturecraft_formats::import_mesh_bytes(name, &bytes).unwrap();
-            assert_eq!(imported.mesh.indices.len(), 3, "{name}");
+            let imported = import_mesh_bytes(name, &bytes).unwrap();
+            assert_eq!(imported.indices.len(), 1, "{name}");
         }
 
         let stp_src = dir.path().join("part.stp");
         let stp_glb = dir.path().join("from_stp.glb");
         std::fs::write(&stp_src, step_bytes).unwrap();
         TranscodePipeline::new(selection_spec(stp_src, stp_glb.clone(), ContainerType::Gltf, Default::default())).execute().unwrap();
-        let stp_mesh = texturecraft_formats::import_mesh_bytes("from_stp.glb", &std::fs::read(stp_glb).unwrap()).unwrap();
-        assert_eq!(stp_mesh.mesh.indices.len(), 3);
+        let stp_mesh = import_mesh_bytes("from_stp.glb", &std::fs::read(stp_glb).unwrap()).unwrap();
+        assert_eq!(stp_mesh.indices.len(), 1);
     }
 
     #[test]
@@ -3990,9 +4133,9 @@ mod tests {
         assert!(usdz_out.exists());
         let usdz_bytes = std::fs::read(&usdz_out).unwrap();
         assert!(usdz_bytes.starts_with(b"PK\x03\x04"));
-        let imported = texturecraft_formats::import_mesh_bytes("pyramid.usdz", &usdz_bytes).unwrap();
-        assert_eq!(imported.mesh.positions.len(), 3);
-        assert_eq!(imported.mesh.indices.len(), 3);
+        let imported = import_mesh_bytes("pyramid.usdz", &usdz_bytes).unwrap();
+        assert_eq!(imported.vertices.len(), 3);
+        assert_eq!(imported.indices.len(), 1);
     }
 
     #[test]
@@ -4002,13 +4145,14 @@ mod tests {
         mesh.vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
         mesh.indices = vec![[0, 1, 2]];
         mesh.generate_flat_normals();
-        let texture_mesh = to_texturecraft_mesh(&mesh).unwrap();
+        let craft_scene = to_craft_mesh_scene(&mesh).unwrap();
+        let mesh_limits = craft_mesh::Limits::default();
         let sources = [
-            ("obj", texturecraft_formats::obj_bytes(&texture_mesh, "RoundTrip")),
+            ("obj", craft_mesh::obj::write(&craft_scene, None, &mesh_limits).unwrap().into_bytes()),
             ("stl", encodercraft_spatial_io::write_stl_binary(&mesh)),
             ("ply", encodercraft_spatial_io::write_ply_binary(&mesh)),
-            ("glb", texturecraft_formats::glb_bytes(&texture_mesh, "RoundTrip", &[]).unwrap()),
-            ("usdz", texturecraft_formats::usd_bytes(&texture_mesh, "RoundTrip", &[], texturecraft_formats::UsdFormat::Usdz).unwrap().bytes),
+            ("glb", craft_mesh::gltf::write_glb(&craft_scene, &mesh_limits).unwrap()),
+            ("usdz", encodercraft_spatial_io::write_usdz(&mesh).unwrap()),
         ];
         let output_formats = [
             ("obj", ContainerType::Obj),
@@ -4047,8 +4191,8 @@ mod tests {
             for (output_extension, _) in output_formats {
                 let path = dir.path().join(format!("{source_extension}_to_{output_extension}.{output_extension}"));
                 let bytes = std::fs::read(&path).unwrap();
-                let imported = texturecraft_formats::import_mesh_bytes(path.file_name().unwrap().to_str().unwrap(), &bytes).unwrap();
-                assert_eq!(imported.mesh.indices.len(), 3, "{} -> {output_extension}", source_extension);
+                let imported = import_mesh_bytes(path.file_name().unwrap().to_str().unwrap(), &bytes).unwrap();
+                assert_eq!(imported.indices.len(), 1, "{} -> {output_extension}", source_extension);
             }
         }
     }
