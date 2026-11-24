@@ -725,7 +725,7 @@ dependencies = [
 [[package]]
 name = "craft-aaf"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-audio",
  "craft-cfb",
@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "craft-audio"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs)",
  "craft-xml",
@@ -756,7 +756,7 @@ dependencies = [
 [[package]]
 name = "craft-captions"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-timeline",
  "craft-xml",
@@ -766,7 +766,7 @@ dependencies = [
 [[package]]
 name = "craft-cfb"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 
 [[package]]
 name = "craft-cms"
@@ -779,7 +779,7 @@ dependencies = [
 [[package]]
 name = "craft-cms"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "md-5 0.10.6",
  "rayon",
@@ -788,12 +788,12 @@ dependencies = [
 [[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 
 [[package]]
 name = "craft-gainmap"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -801,7 +801,7 @@ dependencies = [
 [[package]]
 name = "craft-i18n"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "fixed_decimal",
  "icu_decimal",
@@ -832,7 +832,7 @@ dependencies = [
 [[package]]
 name = "craft-keymap"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "egui",
  "serde",
@@ -850,7 +850,7 @@ dependencies = [
 [[package]]
 name = "craft-media"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "chrono",
  "thiserror 2.0.21",
@@ -859,7 +859,7 @@ dependencies = [
 [[package]]
 name = "craft-menu"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-keymap",
  "craft-quit",
@@ -872,7 +872,7 @@ dependencies = [
 [[package]]
 name = "craft-mesh"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-opc",
  "craft-xml",
@@ -884,7 +884,7 @@ dependencies = [
 [[package]]
 name = "craft-opc"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-xml",
  "craft-zip",
@@ -895,7 +895,7 @@ dependencies = [
 [[package]]
 name = "craft-quit"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "dispatch2",
  "egui",
@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "craft-svg"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-xml",
  "flate2",
@@ -921,7 +921,7 @@ dependencies = [
 [[package]]
 name = "craft-time"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -930,7 +930,7 @@ dependencies = [
 [[package]]
 name = "craft-timeline"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-time",
  "craft-xml",
@@ -941,7 +941,7 @@ dependencies = [
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-fonts-build",
  "craft-i18n",
@@ -962,7 +962,7 @@ dependencies = [
 [[package]]
 name = "craft-video"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "craft-media 0.1.0 (git+https://github.com/storytold/craft-libs)",
  "thiserror 2.0.21",
@@ -971,7 +971,7 @@ dependencies = [
 [[package]]
 name = "craft-window"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "egui",
  "objc2 0.6.5",
@@ -982,7 +982,7 @@ dependencies = [
 [[package]]
 name = "craft-xml"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "quick-xml",
  "serde",
@@ -992,7 +992,7 @@ dependencies = [
 [[package]]
 name = "craft-zip"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs#08da5e1486ee640de1d2cccd8fe8dd32b1d3b62c"
+source = "git+https://github.com/storytold/craft-libs#249a41bd9306a1b34330ac94e596a1a8b881378a"
 dependencies = [
  "flate2",
  "thiserror 2.0.21",
@@ -1072,37 +1072,6 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
-
-[[package]]
-name = "defmt"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a0795ac740cb54d7b3775c9c17345f6aaecf884c01733b39d6017738e0e3e1"
-dependencies = [
- "bitflags 1.3.2",
- "defmt-macros",
-]
-
-[[package]]
-name = "defmt-macros"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "840bb056bd99c495c9188198a258ab787c79f306d864db3e6e8451442d6d8366"
-dependencies = [
- "defmt-parser",
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
-name = "defmt-parser"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71958f69fb2de856c5dd51ac9377e986ca1aa5919f931bf5395a807277f889a0"
-dependencies = [
- "thiserror 2.0.21",
-]
 
 [[package]]
 name = "derive_arbitrary"
@@ -1829,9 +1798,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.11.11"
+version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
+checksum = "82bdfc6e01c305a3ea46ed815b06ac0b379d7c5eac588fa4464048d731c4dcdf"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2833,9 +2802,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52eeb56858fe88b5e65fa4ee01e3d8f923b16160e8e6dabc1dbdbf0ae5a175c6"
+checksum = "caeb21ff474c3bcef0ddca7673de06692b02f20299fc92598ec0619382d60ed9"
 dependencies = [
  "flatbuffers",
  "iceoryx2-bb-concurrency",
@@ -2860,9 +2829,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-concurrency"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5221f9f1b83e76e42457a42744dcf2c03632197667095cff2877ca49b93e498a"
+checksum = "479f08a6de942195df50a07b7be4ab48ab03a6a05d7e8aac8c94fedde853244b"
 dependencies = [
  "iceoryx2-bb-elementary-traits",
  "iceoryx2-pal-concurrency-sync",
@@ -2870,9 +2839,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-container"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bccb6c83f372068244c867932088e47ce623958da638261ca7b341da88dea9d9"
+checksum = "c4684d52d996726fe2fd0a8e5bffc754c7153e309c97c1e07c57059d153d4930"
 dependencies = [
  "iceoryx2-bb-concurrency",
  "iceoryx2-bb-derive-macros",
@@ -2884,11 +2853,10 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-derive-macros"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88ba7a5cdaa11b6e6099fd1bfa56d670d038bb1145e8695191a132fe299eb91f"
+checksum = "ea91b39d262554835704507fc0bae0f3067d6a5f76a0b804d8249c6213374b97"
 dependencies = [
- "iceoryx2-bb-elementary",
  "iceoryx2-bb-elementary-traits",
  "proc-macro2",
  "quote",
@@ -2897,9 +2865,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-elementary"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5539862e6caf28a7156025fce24ab0dd7ad74ad80a0046d5d9416cebe0a2818"
+checksum = "7e01978188e19ffb103a9a324715512d67af861042fa789b4e48ad55aad68799"
 dependencies = [
  "iceoryx2-bb-concurrency",
  "iceoryx2-bb-elementary-traits",
@@ -2910,15 +2878,15 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-elementary-traits"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b3c2de44394c3b8d7c8050b6777fa8e48cf0e2768021d6d4a106681f1d4ae73"
+checksum = "855041f1c5a40913cea99f1b8b3e7783cd836f97a1bb1dcc8eaf4e6ce176e524"
 
 [[package]]
 name = "iceoryx2-bb-flatbuffers"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9cd907ec1dcdb58944b8458607989a9f3b8ec98d717f4b234d0c3bed0fde387"
+checksum = "c6e76b81813bd9f00fae0bf1e6e7612bd22fbae9a8a540dbd7951ad56d55b603"
 dependencies = [
  "flatbuffers",
  "iceoryx2-bb-container",
@@ -2931,9 +2899,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-linux"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6caff54c10fd90bc8845685377e8356ed470a7372856aa9319693169e701ef2f"
+checksum = "eafdaf7422a7dfe8a1f25bc5f91a13e2d2ec6e52beb5bea42b9e624dc234fbf8"
 dependencies = [
  "iceoryx2-bb-concurrency",
  "iceoryx2-bb-container",
@@ -2946,9 +2914,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-lock-free"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01349c8dd9822eb47474f5ac7311b2eba8306ae74bd3836fd7b25b776d5334ef"
+checksum = "4d326413bedcf19719b58e7c52e89962d11a84fe9fe019408a7dc2ce9b502dc7"
 dependencies = [
  "iceoryx2-bb-concurrency",
  "iceoryx2-bb-derive-macros",
@@ -2959,9 +2927,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-loggers"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a270d43a7ac891be8ea872f42f9933c37b83fa08824c2e3233c9d421b6aff05"
+checksum = "bdcdbf0487574bc91484160d9028c9f3e0a6012ada3a05c2d05ae1882495ffbe"
 dependencies = [
  "iceoryx2-bb-print",
  "iceoryx2-log-types",
@@ -2971,9 +2939,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-memory"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "386a347317457459b732fbe23f48a1e53d55906f41cf918d91be3cb8cd15b582"
+checksum = "61eef6d87e7d7a310ce3eab0b81101ea2b1c5792ed2b794a713ea02f2e89ecd0"
 dependencies = [
  "iceoryx2-bb-concurrency",
  "iceoryx2-bb-derive-macros",
@@ -2986,9 +2954,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-posix"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "131fcb2599e2f184d6c56b6ff338378c6611a7cc1ebf6fb4249296fed32c5cb8"
+checksum = "a69ba71eabda16227a9c62f17ff8d6a6a10f7f6f772fcdfe6753f2aab13c215a"
 dependencies = [
  "enum-iterator",
  "iceoryx2-bb-concurrency",
@@ -3007,18 +2975,18 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-bb-print"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bd214546d19830d3d39e05255cb233c17f9604ddf0a5e0f306f63fbdc3d9a63"
+checksum = "8e4eddafeaa317927738e1ebf3ef09bf9c95a3a7b2991cc3df30b6397741c670"
 dependencies = [
  "iceoryx2-pal-print",
 ]
 
 [[package]]
 name = "iceoryx2-bb-system-types"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1726e1149f2748ebb05039b7b5d71d8ebfd527b91ba1ace4e75ab6f3da22001"
+checksum = "7ea6bc9d2f7dc6e3258d9365c3b35ef43d2cd57ab3c2f2171805aa178e3215c2"
 dependencies = [
  "iceoryx2-bb-container",
  "iceoryx2-bb-derive-macros",
@@ -3032,9 +3000,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-cal"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62fed30472e8053487d7b6f0b7e50b1b123b89cd0dd4a7f75895907e92d57386"
+checksum = "04d3f397f1ee7046b1ea18abf0ab3486f86de68e7352639c2f18730ed76391fa"
 dependencies = [
  "iceoryx2-bb-concurrency",
  "iceoryx2-bb-container",
@@ -3056,9 +3024,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-log"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b624c5b925821ff47ef331a11235f496f2a2b6cbdfe438b9d3cb8c7798332cfe"
+checksum = "aba8ace739027d084ea20f0bf2eca36ace923ce39590c957d9ad5ec699a4488e"
 dependencies = [
  "iceoryx2-log-types",
  "iceoryx2-pal-concurrency-sync",
@@ -3066,39 +3034,37 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-log-types"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6be60fc8a117effbfbba17817ecd29a9e351469eabf8fa16b8a6cf76959a6f3"
+checksum = "9d3ba5af77c7aa15bbfc4c2e4d5576640882c0e9066c357e1f45d3a59d3166b4"
 
 [[package]]
 name = "iceoryx2-pal-concurrency-sync"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9875e323a8d05cd0c6020d27c2f21b64b90c964e12752873fa4bb5de803aa3c6"
+checksum = "a3f85013309fb25f93936e2b435ff945349134961d6e1f47727b21d215b2be99"
 
 [[package]]
 name = "iceoryx2-pal-configuration"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68c8bb0061206b9998f769a90faecc5f4a2204fd246b87921d00ce9bfae0af3e"
+checksum = "1c125f4538282a6501bfa007a97040d14803b52a745eafe9e7fcec26fc8c9f49"
 
 [[package]]
 name = "iceoryx2-pal-os-api"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4bd9121c8b67c4639bd3d0649855f78fdfc02fdb9f058ef860e105fcf91101c"
+checksum = "8a1479b0b7e7a89b720614909e55d5cc34685451ac7f9092d59aa78c4142e924"
 dependencies = [
- "bindgen",
- "cc",
  "iceoryx2-pal-posix",
  "libc",
 ]
 
 [[package]]
 name = "iceoryx2-pal-posix"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2476d73922180693f0a2157668c450ef79ddadd26bc574e927aceac875ad0229"
+checksum = "39c28f4a1e197a06c64fc2614c8ea667dcad4f29a30014e98ee70972af30fac2"
 dependencies = [
  "bindgen",
  "cc",
@@ -3110,9 +3076,9 @@ dependencies = [
 
 [[package]]
 name = "iceoryx2-pal-print"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16911630d7b6a5edfb277fbe9bcc838b49e2153f12fe10fc514c774bac7e3b16"
+checksum = "556f0dfaf3ca30d06115eb7718232c07de359a2de3e9c15950a4e593c841d8e6"
 dependencies = [
  "iceoryx2-pal-posix",
 ]
@@ -3412,11 +3378,10 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
-version = "0.2.38"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2b005715dcbeb0089a3c0dab99f2ff1cc3b2525323552703d648585d342a383"
+checksum = "c5e77cbfb9fff4798e283c2d69dff39fc2c45e7da017e5ce95b654e46ea41236"
 dependencies = [
- "defmt",
  "jiff-core",
  "jiff-static",
  "log",
@@ -3427,24 +3392,23 @@ dependencies = [
 
 [[package]]
 name = "jiff-core"
-version = "0.1.1"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e52fe76043ccecc9005d2305ebaadf7d7fc0cc89ca6baa10a94d6bc68c7128c"
+checksum = "b6b46a105a9874634dd96231021526bf24ca04955a5998c59a9c7666e634b7b8"
 dependencies = [
- "defmt",
  "log",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.38"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc9817253cf7c7ee4684451bd327e88d6f3658014e54a29198625590650695c"
+checksum = "e9067a0b23e5be3147d56b2dcf652b18e6b1364caca93fb157653b6fbcab23a9"
 dependencies = [
  "jiff-core",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -3957,9 +3921,9 @@ dependencies = [
 
 [[package]]
 name = "notify"
-version = "8.2.2"
+version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c41a04a5f59df9322cc657286dd2d79f90816119b22c5f847607c850110205ab"
+checksum = "5482d5bd11b91a337521980e5d52fe115bdccfb4c217099daaf0abd69159dc4e"
 dependencies = [
  "bitflags 2.13.2",
  "inotify",
@@ -3972,13 +3936,14 @@ dependencies = [
  "objc2-core-services",
  "walkdir",
  "windows-sys 0.61.2",
+ "xxhash-rust",
 ]
 
 [[package]]
 name = "notify-types"
-version = "2.2.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a437a9308232ce794b1e7fdf540d38ea37efc3c73492640c13b4c8568b8f108"
+checksum = "cbd044e85df3d939d8e32a1c35a3b737c7d0a4eeb7acd737bd207644e00f4e5f"
 dependencies = [
  "bitflags 2.13.2",
 ]
@@ -7296,6 +7261,12 @@ dependencies = [
  "encodercraft-video-codecs",
  "serde_json",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40de123dbb523ebcc00d61ec01840ad192578afc378d859f3429caa38308fad5"
 
 [[package]]
 name = "yansi"

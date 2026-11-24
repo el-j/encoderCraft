@@ -135,7 +135,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["std", "clo
 rayon = "1"
 crossbeam-channel = "0.5"
 iceoryx2 = { version = "0.10", default-features = false, features = ["std"] }
-notify = "8"
+notify = "9"
 kurbo = { version = "0.13", features = ["serde"] }
 bytemuck = "1"
 miniz_oxide = "0.9"
