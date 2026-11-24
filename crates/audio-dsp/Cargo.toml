@@ -12,16 +12,13 @@ workspace = true
 [dependencies]
 encodercraft-core = { workspace = true }
 craft-audio = { workspace = true }
-craft-aac = { workspace = true }
-craft-audio-io = { workspace = true }
-craft-dsp = { workspace = true }
+craft-audio-dsp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 miniz_oxide = { workspace = true }
 thiserror = { workspace = true }
 audio2mp3-core = "0.2.0"
 oxideav-vorbis = "0.0.13"
-effectcraft-opusenc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

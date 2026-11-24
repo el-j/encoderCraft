@@ -136,8 +136,8 @@ mod tests {
         let dicom_bytes = encode_dicom(&frame).unwrap();
         assert_eq!(&dicom_bytes[128..132], b"DICM");
 
-        // Verify decodable by photocraft-codecs
-        let decoded = photocraft_codecs::decode_with(&dicom_bytes, &photocraft_codecs::DecodeOptions::default()).unwrap();
+        // Verify decodable by craft-image-codecs
+        let decoded = craft_image_codecs::decode_with(&dicom_bytes, &craft_image_codecs::DecodeOptions::default()).unwrap();
         assert_eq!(decoded.dimensions(), (4, 4));
     }
 }

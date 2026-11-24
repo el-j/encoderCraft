@@ -5,13 +5,13 @@
 
 use std::path::{Path, PathBuf};
 
+use craft_image_codecs::{ChannelLayout, EncodeOptions, Format, Image};
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{ClientInfo, ContainerType, CraftJobSpec, JobPriority, OutputTarget, Rational64, SourceDescriptor, StartPolicy, VideoFrame};
 use encodercraft_geom::Dimensions;
 use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
 use encodercraft_pipeline::TranscodePipeline;
 use encodercraft_source::MediaReader;
-use photocraft_codecs::{ChannelLayout, EncodeOptions, Format, Image};
 use tempfile::tempdir;
 
 const W: u32 = 64;
@@ -128,7 +128,7 @@ fn fixture_jpeg_with_exif_rotation_is_uprighted_on_decode() {
         }
     }
     let image = Image::from_u8(W, H, ChannelLayout::Rgb, rgb).unwrap();
-    let raw_jpeg = photocraft_codecs::encode(&image, Format::Jpeg, &EncodeOptions::default()).unwrap();
+    let raw_jpeg = craft_image_codecs::encode(&image, Format::Jpeg, &EncodeOptions::default()).unwrap();
     let exif = make_exif_payload(6);
     let bytes = insert_jpeg_app1_exif(&raw_jpeg, &exif);
 
@@ -155,7 +155,7 @@ fn fixture_16bit_tiff_decodes_and_transcodes() {
         }
     }
     let image = Image::from_u16(W, H, ChannelLayout::Rgba, &u16_data).unwrap();
-    let bytes = photocraft_codecs::encode(&image, Format::Tiff, &EncodeOptions::default()).unwrap();
+    let bytes = craft_image_codecs::encode(&image, Format::Tiff, &EncodeOptions::default()).unwrap();
     let path = dir.path().join("16bit.tif");
     std::fs::write(&path, bytes).unwrap();
 
@@ -183,7 +183,7 @@ fn fixture_cmyk_jpeg_decodes_and_transcodes() {
         }
     }
     let image = Image::from_u8(W, H, ChannelLayout::Cmyk, cmyk).unwrap();
-    let bytes = photocraft_codecs::encode(&image, Format::Jpeg, &EncodeOptions::default()).unwrap();
+    let bytes = craft_image_codecs::encode(&image, Format::Jpeg, &EncodeOptions::default()).unwrap();
     let path = dir.path().join("cmyk.jpg");
     std::fs::write(&path, bytes).unwrap();
 
@@ -209,7 +209,7 @@ fn fixture_palette_png_decodes_and_transcodes() {
             indices.push(((x + y) % 4) as u8);
         }
     }
-    let bytes = photocraft_codecs::encode_png_indexed(W, H, &indices, &palette, None, None, None).unwrap();
+    let bytes = craft_image_codecs::encode_png_indexed(W, H, &indices, &palette, None, None, None).unwrap();
     let path = dir.path().join("palette.png");
     std::fs::write(&path, bytes).unwrap();
 
@@ -232,7 +232,7 @@ fn fixture_grayscale_decodes_and_transcodes() {
         }
     }
     let image = Image::from_u8(W, H, ChannelLayout::Gray, gray).unwrap();
-    let bytes = photocraft_codecs::encode(&image, Format::Png, &EncodeOptions::default()).unwrap();
+    let bytes = craft_image_codecs::encode(&image, Format::Png, &EncodeOptions::default()).unwrap();
     let path = dir.path().join("gray.png");
     std::fs::write(&path, bytes).unwrap();
 
@@ -316,7 +316,7 @@ fn fixtures_truncated_files_fail_cleanly_without_leftovers() {
     // 1. Truncated 16-bit TIFF
     let u16_data = vec![0u16; (W * H * 4) as usize];
     let image = Image::from_u16(W, H, ChannelLayout::Rgba, &u16_data).unwrap();
-    let tiff_bytes = photocraft_codecs::encode(&image, Format::Tiff, &EncodeOptions::default()).unwrap();
+    let tiff_bytes = craft_image_codecs::encode(&image, Format::Tiff, &EncodeOptions::default()).unwrap();
     let cut_tiff = dir.path().join("cut.tif");
     std::fs::write(&cut_tiff, &tiff_bytes[..tiff_bytes.len() / 3]).unwrap();
     let out_tiff = dir.path().join("out_tiff.png");
@@ -326,7 +326,7 @@ fn fixtures_truncated_files_fail_cleanly_without_leftovers() {
     // 2. Truncated CMYK JPEG
     let cmyk_data = vec![128u8; (W * H * 4) as usize];
     let cmyk_image = Image::from_u8(W, H, ChannelLayout::Cmyk, cmyk_data).unwrap();
-    let cmyk_bytes = photocraft_codecs::encode(&cmyk_image, Format::Jpeg, &EncodeOptions::default()).unwrap();
+    let cmyk_bytes = craft_image_codecs::encode(&cmyk_image, Format::Jpeg, &EncodeOptions::default()).unwrap();
     let cut_cmyk = dir.path().join("cut_cmyk.jpg");
     std::fs::write(&cut_cmyk, &cmyk_bytes[..cmyk_bytes.len() / 3]).unwrap();
     let out_cmyk = dir.path().join("out_cmyk.png");

@@ -1010,6 +1010,20 @@ Ingest newly unified and added codecs from upstream `storytold/craft-libs`: migr
 
 ---
 
+### Milestone 53: ArtCraft Ecosystem Consolidation & Shared Infrastructure Alignment
+Tracked under Milestone [M53 - ArtCraft Ecosystem Consolidation & Shared Infrastructure Alignment](https://github.com/el-j/encoderCraft/milestone/31) addressing issues [#360](https://github.com/el-j/encoderCraft/issues/360)–[#363](https://github.com/el-j/encoderCraft/issues/363).
+
+#### Objective & Context
+Keep `encoderCraft` aligned with the upstream ArtCraft (`storytold/craft-libs`) consolidation and sibling-app conventions across FilmCraft, SoundCraft, and PhotoCraft: eliminate deleted sibling-app dependencies so `Cargo.lock` converges cleanly, adopt shared ArtCraft infrastructure (`craft-mcp-server`, `craft-jsonrpc`, `craft-docpath`, `craft-update`), and match CI/profile rules.
+
+#### Deliverables & Sub-Tasks:
+1. [x] **M53.1: Deleted Sibling Audio/Image Crate Migration & Unified `craft-libs` Pin ([#360](https://github.com/el-j/encoderCraft/issues/360))** — Migrated `filmcraft-aac`, `filmcraft-opus`, `effectcraft-opusenc`, `soundcraft-audio-io`, `soundcraft-dsp`, and `photocraft-codecs` onto `craft-audio`, `craft-audio-dsp`, and `craft-image-codecs`, pinned all workspace `craft-libs` entries to `fab45709`, and added `symphonia-bundle-flac` (`overflow-checks = false`) and `craft-video` (`opt-level = 3`) dev-profile overrides.
+2. [ ] **M53.2: Migrate Remaining `filmcraft`/`texturecraft`/`designcraft` Bridges to `craft-libs` ([#361](https://github.com/el-j/encoderCraft/issues/361))** — Replace remaining sibling-app time, color, frame, media, mesh, and text import bridges with canonical `craft-libs` and ArtCraft native format crates.
+3. [ ] **M53.3: Adopt Shared ArtCraft App Infrastructure ([#362](https://github.com/el-j/encoderCraft/issues/362))** — Integrate `craft-mcp-server`, `craft-jsonrpc`/`craft-control-protocol`, `craft-docpath`, and `craft-update`.
+4. [ ] **M53.4: GitHub Workflows & Workspace Hygiene Parity ([#363](https://github.com/el-j/encoderCraft/issues/363))** — Add `house-rules.yml`, align `egui` workspace patch entries, and synchronize CI/release conventions.
+
+---
+
 ## 3. Risk Mitigation & Technical Contingencies
 
 | Technical Risk | Likelihood | Impact | Architectural Mitigation |

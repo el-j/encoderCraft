@@ -327,10 +327,10 @@ impl MediaReader {
             return Err(EncoderError::InvalidJobSpec(format!("{context}: image file is larger than the {} MiB limit", MAX_WHOLE_FILE_BYTES >> 20)));
         }
         let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("{context}: {e}")))?;
-        if ext == "webp" && photocraft_codecs::webp_is_animated(&bytes) {
+        if ext == "webp" && craft_image_codecs::webp_is_animated(&bytes) {
             return Ok(None);
         }
-        let image = photocraft_codecs::decode_with(&bytes, &photocraft_codecs::DecodeOptions::default())
+        let image = craft_image_codecs::decode_with(&bytes, &craft_image_codecs::DecodeOptions::default())
             .map_err(|e| EncoderError::InvalidContainer(format!("{context}: {e}")))?;
         let (width, height) = image.dimensions();
         let rgba = image.to_rgba8();
@@ -348,7 +348,7 @@ impl MediaReader {
                 pixel_format: format!("{:?}", image.layout()),
                 bit_depth: 8,
                 color_space: ColorSpaceTag::SRGB,
-                has_alpha: matches!(image.layout(), photocraft_codecs::ChannelLayout::Rgba | photocraft_codecs::ChannelLayout::GrayA),
+                has_alpha: matches!(image.layout(), craft_image_codecs::ChannelLayout::Rgba | craft_image_codecs::ChannelLayout::GrayA),
                 bitrate: None,
             }),
             audio: Vec::new(),

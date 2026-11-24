@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use effectcraft_opusenc::OpusEncoder;
+use craft_audio::opus::encoder::Encoder as OpusEncoder;
 use encodercraft_audio_dsp::{AacEncoderWrapper, SincResampler, normalize_loudness, remix_channels};
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{AudioSampleBuffer, ContainerType, CraftJobSpec, EncoderError, OutputTarget, Rational64, SourceDescriptor, VideoFrame};
@@ -191,7 +191,8 @@ fn encode_opus_buffer(encoder: &mut OpusEncoder, audio: &AudioSampleBuffer, pend
             pending.push(if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 });
         }
         if pending.len() == frame_len {
-            packets.push(encoder.encode_float(pending));
+            let pkt = encoder.encode_float(pending).map_err(|e| EncoderError::Internal(format!("Opus frame encode failed: {e}")))?;
+            packets.push(pkt);
             pending.clear();
         }
     }
@@ -2300,7 +2301,8 @@ impl TranscodePipeline {
             Some(feed) if use_opus => {
                 let channels = u8::try_from(feed.layout().channel_count())
                     .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the Opus encoder limit".into()))?;
-                let encoder = OpusEncoder::new(channels, opus_bitrate_bps(target, usize::from(channels))?);
+                let encoder = OpusEncoder::new(channels, opus_bitrate_bps(target, usize::from(channels))?)
+                    .map_err(|e| EncoderError::Internal(format!("Opus encoder init failed: {e}")))?;
                 let a_cfg = AudioStreamConfig {
                     codec_fourcc: *b"Opus",
                     sample_rate: 48_000,
@@ -2418,7 +2420,8 @@ impl TranscodePipeline {
                     let remaining_samples = pending.len() / channels;
                     if remaining_samples > 0 {
                         pending.resize(frame_len, 0.0);
-                        let packet = opus_encoder.encode_float(&pending);
+                        let packet =
+                            opus_encoder.encode_float(&pending).map_err(|e| EncoderError::Internal(format!("Opus tail encode failed: {e}")))?;
                         let pts = samples_to_micros(next_sample)?;
                         let duration = u32::try_from(samples_to_micros(
                             u64::try_from(remaining_samples).map_err(|_| EncoderError::Internal("Opus tail exceeds the timestamp limit".into()))?,
@@ -2456,7 +2459,8 @@ impl TranscodePipeline {
             .map_err(|_| EncoderError::InvalidJobSpec("audio channel count exceeds the encoder limit".into()))?;
 
         let (mut audio_encoder, audio_track) = if use_opus {
-            let encoder = OpusEncoder::new(channels, opus_bitrate_bps(target, usize::from(channels))?);
+            let encoder = OpusEncoder::new(channels, opus_bitrate_bps(target, usize::from(channels))?)
+                .map_err(|e| EncoderError::Internal(format!("Opus encoder init failed: {e}")))?;
             let a_cfg = AudioStreamConfig {
                 codec_fourcc: *b"Opus",
                 sample_rate: 48_000,
@@ -2547,7 +2551,7 @@ impl TranscodePipeline {
                 let remaining_samples = pending.len() / ch_count;
                 if remaining_samples > 0 {
                     pending.resize(frame_len, 0.0);
-                    let packet = opus_encoder.encode_float(&pending);
+                    let packet = opus_encoder.encode_float(&pending).map_err(|e| EncoderError::Internal(format!("Opus tail encode failed: {e}")))?;
                     let pts = samples_to_micros(next_sample)?;
                     let duration = u32::try_from(samples_to_micros(
                         u64::try_from(remaining_samples).map_err(|_| EncoderError::Internal("Opus tail exceeds the timestamp limit".into()))?,
