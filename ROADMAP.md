@@ -443,6 +443,15 @@ Tracked under Milestone [M52 - Upstream craft-libs Codec Consolidation & Advance
 - [x] **M52.6: Editorial Timeline & Project Interchange via craft-timeline & craft-aaf ([#335](https://github.com/el-j/encoderCraft/issues/335))** – Integrate CMX 3600 EDL, Final Cut Pro 7 XML, and OpenTimelineIO (OTIO) JSON via `craft-timeline`, and AAF (Edit Protocol) & OMF 2.0 with embedded PCM audio essence via `craft-aaf`.
 - [x] **M52.7: End-to-End Blackbox Codec Matrix & Conformance Test Suite for Upstream Codecs ([#336](https://github.com/el-j/encoderCraft/issues/336))** – Synthetic test suite validating roundtrip transcode integrity, format bitstreams, metadata preservation, and GUI parameter sync across all newly added upstream codecs.
 
+## Milestone 53: ArtCraft Ecosystem Consolidation & Shared Infrastructure Alignment
+
+Tracked under Milestone [M53 - ArtCraft Ecosystem Consolidation & Shared Infrastructure Alignment](https://github.com/el-j/encoderCraft/milestone/31) addressing issues [#360](https://github.com/el-j/encoderCraft/issues/360)–[#363](https://github.com/el-j/encoderCraft/issues/363).
+
+- [x] **M53.1: Deleted Sibling Audio/Image Crate Migration & Unified `craft-libs` Pin ([#360](https://github.com/el-j/encoderCraft/issues/360))** – Replaced `filmcraft-aac`, `filmcraft-opus`, `effectcraft-opusenc`, `soundcraft-audio-io`, `soundcraft-dsp`, and `photocraft-codecs` with canonical `craft-audio`, `craft-audio-dsp`, and `craft-image-codecs`, removing `photocraft`, `soundcraft`, and `effectcraft` from `Cargo.lock`, pinning all `storytold/craft-libs` dependencies to a single commit (`fab45709`), and adding the `symphonia-bundle-flac` / `craft-video` dev-profile overrides.
+- [ ] **M53.2: Migrate Remaining `filmcraft`/`texturecraft`/`designcraft` Bridges to `craft-libs` ([#361](https://github.com/el-j/encoderCraft/issues/361))** – Replace legacy sibling time/color/frame/media/mesh/text crates with canonical `craft-libs` crates and native ArtCraft project format crates.
+- [ ] **M53.3: Adopt Shared ArtCraft App Infrastructure ([#362](https://github.com/el-j/encoderCraft/issues/362))** – Integrate `craft-mcp-server`, `craft-jsonrpc`/`craft-control-protocol`, `craft-docpath`, and `craft-update`.
+- [ ] **M53.4: GitHub Workflows & Workspace Hygiene Parity ([#363](https://github.com/el-j/encoderCraft/issues/363))** – Align `house-rules.yml`, `egui` patch entries, and CI/release workflows with FilmCraft and SoundCraft.
+
 ## Known Issues (alpha.1, tracked above)
 
 - Queue ran one job per Start click, video output was empty or 24 s long, images were grey and the preview was blank (fixed on main, ships in alpha.2).

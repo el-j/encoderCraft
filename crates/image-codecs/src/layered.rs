@@ -449,8 +449,8 @@ impl LayeredImage {
         if bytes.starts_with(b"8BPS") {
             return Self::from_psd_bytes(bytes);
         }
-        // Fallback for standard flat images (PNG, JPEG, etc.) via photocraft-codecs
-        if let Ok(img) = photocraft_codecs::decode_with(bytes, &photocraft_codecs::DecodeOptions::default()) {
+        // Fallback for standard flat images (PNG, JPEG, etc.) via craft-image-codecs
+        if let Ok(img) = craft_image_codecs::decode_with(bytes, &craft_image_codecs::DecodeOptions::default()) {
             let (w, h) = (img.width(), img.height());
             let mut layered = Self::new("Imported Flat Image", w, h);
             let rgba = img.to_rgba8().to_vec();

@@ -10,7 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-photocraft-codecs = { workspace = true }
+craft-image-codecs = { workspace = true }
 encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }

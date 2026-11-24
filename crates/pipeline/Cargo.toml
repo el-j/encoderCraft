@@ -34,7 +34,7 @@ craft-timeline = { workspace = true }
 craft-aaf = { workspace = true }
 filmcraft-time = { workspace = true }
 filmcraft-color = { workspace = true }
-effectcraft-opusenc = { workspace = true }
+craft-audio = { workspace = true }
 crossbeam-channel = { workspace = true }
 rayon = { workspace = true }
 chrono = { workspace = true }
@@ -46,7 +46,7 @@ log = { workspace = true }
 
 [dev-dependencies]
 encodercraft-shared-stream = { workspace = true }
-photocraft-codecs = { workspace = true }
+craft-image-codecs = { workspace = true }
 encodercraft-presets = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }

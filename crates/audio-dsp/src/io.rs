@@ -1,9 +1,9 @@
-//! Audio decoding and encoding wrappers backed by `craft-audio-io`.
+//! Audio decoding and encoding wrappers backed by `craft-audio`.
 //!
 //! Provides decoding for compressed formats (MP3, FLAC, Ogg Vorbis, AAC, CAF, WAV, AIFF)
 //! and encoding for FLAC, AIFF, and WAV.
 
-use craft_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
+use craft_audio::{AudioBuffer, BitDepth, EncodeFormat, EncodeOptions};
 use encodercraft_core::{AudioSampleBuffer, ChannelLayout, EncoderError};
 
 /// Decodes any supported audio container and format into a planar `AudioSampleBuffer`.
@@ -12,20 +12,6 @@ pub fn decode_audio(bytes: &[u8]) -> Result<AudioSampleBuffer, EncoderError> {
         return decode_audio_qoa(bytes);
     }
 
-    // First try craft_audio_io
-    let decoded_io = std::panic::catch_unwind(|| craft_audio_io::decode(bytes, None));
-    if let Ok(Ok((_info, buf))) = decoded_io {
-        let layout = match buf.channels.len() {
-            1 => ChannelLayout::Mono,
-            2 => ChannelLayout::Stereo,
-            6 => ChannelLayout::Surround51,
-            8 => ChannelLayout::Surround71,
-            _ => ChannelLayout::Stereo,
-        };
-        return AudioSampleBuffer::from_planar_channels(buf.sample_rate, layout, 0, buf.channels);
-    }
-
-    // Fallback to craft_audio::decode
     let decoded_craft = std::panic::catch_unwind(|| craft_audio::decode(bytes, None));
     if let Ok(Ok((_info, buf))) = decoded_craft {
         let layout = match buf.channels.len() {
@@ -44,17 +30,17 @@ pub fn decode_audio(bytes: &[u8]) -> Result<AudioSampleBuffer, EncoderError> {
 /// Encodes an `AudioSampleBuffer` to lossless FLAC format.
 pub fn encode_audio_flac(buffer: &AudioSampleBuffer) -> Result<Vec<u8>, EncoderError> {
     let audio_buf = AudioBuffer { sample_rate: buffer.sample_rate, channels: buffer.clone().into_planar_channels() };
-    let opts = EncodeOptions { format: FileFormat::Flac, bit_depth: BitDepth::Int24, dither: true, bwf: None };
+    let opts = EncodeOptions::new(EncodeFormat::Flac).with_bit_depth(BitDepth::Int24).with_dither(true);
 
-    craft_audio_io::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("FLAC encoding failed: {e}")))
+    craft_audio::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("FLAC encoding failed: {e}")))
 }
 
 /// Encodes an `AudioSampleBuffer` to Apple AIFF format.
 pub fn encode_audio_aiff(buffer: &AudioSampleBuffer) -> Result<Vec<u8>, EncoderError> {
     let audio_buf = AudioBuffer { sample_rate: buffer.sample_rate, channels: buffer.clone().into_planar_channels() };
-    let opts = EncodeOptions { format: FileFormat::Aiff, bit_depth: BitDepth::Int24, dither: true, bwf: None };
+    let opts = EncodeOptions::new(EncodeFormat::Aiff).with_bit_depth(BitDepth::Int24).with_dither(true);
 
-    craft_audio_io::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("AIFF encoding failed: {e}")))
+    craft_audio::encode(&audio_buf, &opts).map_err(|e| EncoderError::Internal(format!("AIFF encoding failed: {e}")))
 }
 
 /// Encodes an `AudioSampleBuffer` to standard MPEG-1 Layer III (MP3) format with optional ID3v2 tags.
@@ -199,7 +185,8 @@ pub fn encode_audio_opus(
     let channels = (buffer.channel_count().clamp(1, 2)) as u8;
     let bitrate_bps = bitrate_kbps.clamp(16, 510) * 1000;
 
-    let mut enc = effectcraft_opusenc::OpusEncoder::new(channels, bitrate_bps);
+    let mut enc = craft_audio::opus::encoder::Encoder::new(channels, bitrate_bps)
+        .map_err(|e| EncoderError::Internal(format!("Opus encoder init failed: {e}")))?;
     let c = channels as usize;
     let _len = buffer.samples_per_channel();
 
@@ -217,12 +204,15 @@ pub fn encode_audio_opus(
         }
     }
 
-    let frame_size = effectcraft_opusenc::OpusEncoder::FRAME_SIZE;
+    let frame_size = craft_audio::opus::encoder::Encoder::FRAME_SIZE;
     let total = r_len + enc.pre_skip() as usize;
     let frame_count = total.div_ceil(frame_size);
     pcm.resize(frame_count * frame_size * c, 0.0);
 
-    let packets: Vec<Vec<u8>> = pcm.chunks(frame_size * c).map(|f| enc.encode_float(f)).collect();
+    let packets: Vec<Vec<u8>> = pcm
+        .chunks(frame_size * c)
+        .map(|f| enc.encode_float(f).map_err(|e| EncoderError::Internal(format!("Opus frame encode failed: {e}"))))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut out = Vec::new();
     // Page 0: OpusHead (header_type 0x02 = beginning of stream)

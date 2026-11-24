@@ -1,13 +1,13 @@
-//! Still-image encoding through the ArtCraft `photocraft-codecs` crate.
+//! Still-image encoding through the ArtCraft `craft-image-codecs` crate.
 //!
 //! Frames arrive as straight-alpha RGBA8 (or RGB8). Formats without an alpha channel receive the
 //! image flattened onto a background colour, never a silently dropped alpha channel.
 
-use encodercraft_color::PixelFormat;
-use encodercraft_core::{EncoderError, VideoFrame};
-use photocraft_codecs::{
+use craft_image_codecs::{
     ChannelLayout, DdsCompression, DdsOptions, DpxBits, EncodeOptions, ExrCompression, Format, Image, JpegFormat, PngCompression, TiffCompression,
 };
+use encodercraft_color::PixelFormat;
+use encodercraft_core::{EncoderError, VideoFrame};
 
 /// Still formats the encoder can write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +127,7 @@ impl Default for StillOptions {
     }
 }
 
-fn codec_err(e: photocraft_codecs::CodecError) -> EncoderError {
+fn codec_err(e: craft_image_codecs::CodecError) -> EncoderError {
     EncoderError::InvalidContainer(format!("image encode failed: {e}"))
 }
 
@@ -183,22 +183,22 @@ pub fn encode_still(frame: &VideoFrame, format: StillFormat, options: &StillOpti
             u16_samples.push(u16::from_le_bytes([px[6], px[7]]));
         }
         let image = Image::from_u16(w, h, ChannelLayout::Rgba, &u16_samples).map_err(codec_err)?;
-        return photocraft_codecs::encode(&image, format.codec_format(), &opts).map_err(codec_err);
+        return craft_image_codecs::encode(&image, format.codec_format(), &opts).map_err(codec_err);
     }
 
     let (w, h, pixels, has_alpha) = frame_pixels(frame, !format.has_alpha(), options.background)?;
     let layout = if has_alpha { ChannelLayout::Rgba } else { ChannelLayout::Rgb };
     let image = Image::from_u8(w, h, layout, pixels).map_err(codec_err)?;
-    photocraft_codecs::encode(&image, format.codec_format(), &opts).map_err(codec_err)
+    craft_image_codecs::encode(&image, format.codec_format(), &opts).map_err(codec_err)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use craft_image_codecs::DecodeOptions;
     use encodercraft_color::ColorSpaceTag;
     use encodercraft_core::Rational64;
     use encodercraft_geom::Dimensions;
-    use photocraft_codecs::DecodeOptions;
 
     const W: u32 = 12;
     const H: u32 = 8;
@@ -226,7 +226,7 @@ mod tests {
     }
 
     fn decode(bytes: &[u8]) -> Vec<u8> {
-        let img = photocraft_codecs::decode_with(bytes, &DecodeOptions::default()).unwrap();
+        let img = craft_image_codecs::decode_with(bytes, &DecodeOptions::default()).unwrap();
         assert_eq!(img.dimensions(), (W, H));
         img.to_rgba8()
     }

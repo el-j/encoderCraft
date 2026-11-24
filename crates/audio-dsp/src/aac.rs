@@ -1,6 +1,6 @@
-//! AAC-LC audio encoder wrapper backed by `craft-aac`.
+//! AAC-LC audio encoder wrapper backed by `craft-audio::aac`.
 
-use craft_aac::{Encoder, EncoderConfig};
+use craft_audio::aac::{Encoder, EncoderConfig};
 use encodercraft_core::{AudioSampleBuffer, EncoderError};
 
 /// AAC-LC (MPEG-4 Audio Low Complexity) audio encoder.

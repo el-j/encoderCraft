@@ -435,8 +435,8 @@ impl SessionRenderer<'_> {
             }
         }
 
-        let master_gain = craft_dsp::db_to_gain(clamp_db(session.master_volume_db));
-        let (left_gain, right_gain) = craft_dsp::pan::gains(session.master_pan, craft_dsp::pan::PanLaw::Zero);
+        let master_gain = db_to_gain(clamp_db(session.master_volume_db));
+        let (left_gain, right_gain) = craft_audio_dsp::pan::gains(session.master_pan, craft_audio_dsp::pan::PanLaw::Zero);
         for (plane, pan_gain) in master.iter_mut().zip([left_gain, right_gain]) {
             for s in plane.iter_mut() {
                 *s *= master_gain * pan_gain;
@@ -455,7 +455,7 @@ impl SessionRenderer<'_> {
         let total = self.total_samples;
         let rate = self.session.sample_rate;
         let mut out = vec![vec![0.0f32; total]; 2];
-        let track_gain = craft_dsp::db_to_gain(clamp_db(track.volume_db));
+        let track_gain = db_to_gain(clamp_db(track.volume_db));
         let declick = ((rate as f32 * DECLICK_SECONDS) as usize).max(1);
 
         for clip in &track.clips {
@@ -482,16 +482,16 @@ impl SessionRenderer<'_> {
                 segment.push(plane.get(src_in..src_in + n).map(<[f32]>::to_vec).unwrap_or_default());
             }
             let fade = declick.min(n / 2);
-            craft_dsp::offline::fade(&mut segment, fade, fade, craft_dsp::offline::FadeShape::EqualPower);
+            apply_equal_power_fade(&mut segment, fade, fade);
 
-            let gain = track_gain * craft_dsp::db_to_gain(clamp_db(clip.gain_db));
+            let gain = track_gain * db_to_gain(clamp_db(clip.gain_db));
             let stereo_source = segment.len() == 2;
             let (pan, law) = match (ignore_pan, stereo_source) {
-                (true, _) => (0.0, craft_dsp::pan::PanLaw::Zero),
-                (false, true) => (track.pan, craft_dsp::pan::PanLaw::Zero),
-                (false, false) => (track.pan, craft_dsp::pan::PanLaw::Minus3),
+                (true, _) => (0.0, craft_audio_dsp::pan::PanLaw::Zero),
+                (false, true) => (track.pan, craft_audio_dsp::pan::PanLaw::Zero),
+                (false, false) => (track.pan, craft_audio_dsp::pan::PanLaw::Minus3),
             };
-            let (left_gain, right_gain) = craft_dsp::pan::gains(pan, law);
+            let (left_gain, right_gain) = craft_audio_dsp::pan::gains(pan, law);
 
             let left_src = segment.first().map(Vec::as_slice).unwrap_or(&[]);
             let right_src = segment.get(1).map(Vec::as_slice).unwrap_or(left_src);
@@ -533,6 +533,40 @@ impl SessionRenderer<'_> {
     }
 }
 
+fn db_to_gain(db: f32) -> f32 {
+    10f32.powf(db / 20.0)
+}
+
+fn peak_amplitude(planes: &[Vec<f32>]) -> f32 {
+    planes.iter().flat_map(|p| p.iter()).fold(0.0f32, |acc, &s| if s.is_finite() { acc.max(s.abs()) } else { acc })
+}
+
+fn apply_equal_power_fade(planes: &mut [Vec<f32>], fade_in: usize, fade_out: usize) {
+    for plane in planes.iter_mut() {
+        let len = plane.len();
+        let fi = fade_in.min(len);
+        if fi > 0 {
+            for i in 0..fi {
+                let t = i as f32 / fi as f32;
+                let g = (t * std::f32::consts::FRAC_PI_2).sin();
+                if let Some(sample) = plane.get_mut(i) {
+                    *sample *= g;
+                }
+            }
+        }
+        let fo = fade_out.min(len);
+        if fo > 0 {
+            for i in 0..fo {
+                let t = i as f32 / fo as f32;
+                let g = (t * std::f32::consts::FRAC_PI_2).sin();
+                if let Some(sample) = plane.get_mut(len - 1 - i) {
+                    *sample *= g;
+                }
+            }
+        }
+    }
+}
+
 fn clamp_db(db: f32) -> f32 {
     if db.is_finite() { db.clamp(-144.0, 24.0) } else { 0.0 }
 }
@@ -546,7 +580,7 @@ fn guard_peak(planes: &mut [Vec<f32>]) {
             }
         }
     }
-    let peak = craft_dsp::offline::peak(planes);
+    let peak = peak_amplitude(planes);
     if peak > 1.0 {
         let scale = 1.0 / peak;
         for plane in planes.iter_mut() {
@@ -570,7 +604,7 @@ fn decode_source(path: &Path, session_rate: u32) -> Result<Vec<Vec<f32>>, Encode
         return Err(EncoderError::InvalidJobSpec(format!("clip source `{}` exceeds the {MAX_SOURCE_FILE_BYTES} byte limit", path.display())));
     }
     let bytes = std::fs::read(path).map_err(|e| EncoderError::Io(format!("failed to read clip source `{}`: {e}", path.display())))?;
-    let (_info, decoded) = craft_audio_io::decode(&bytes, None)
+    let (_info, decoded) = craft_audio::decode(&bytes, None)
         .map_err(|e| EncoderError::InvalidJobSpec(format!("failed to decode clip source `{}`: {e}", path.display())))?;
     drop(bytes);
 
@@ -601,7 +635,10 @@ fn decode_source(path: &Path, session_rate: u32) -> Result<Vec<Vec<f32>>, Encode
         if out_frames > MAX_RENDER_SAMPLES as u128 {
             return Err(EncoderError::InvalidJobSpec(format!("clip source `{}` is too long after resampling", path.display())));
         }
-        folded = craft_dsp::offline::resample(&folded, source_rate, session_rate);
+        let refs: Vec<&[f32]> = folded.iter().map(Vec::as_slice).collect();
+        folded = craft_audio_dsp::offline::resample(&refs, source_rate, session_rate).ok_or_else(|| {
+            EncoderError::InvalidJobSpec(format!("failed to resample clip source `{}` from {source_rate} Hz to {session_rate} Hz", path.display()))
+        })?;
     }
     Ok(folded)
 }
@@ -783,12 +820,12 @@ mod tests {
         assert_eq!(decoded.tracks[0].name, "Ambience");
     }
 
-    use craft_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
+    use craft_audio::{AudioBuffer, BitDepth, EncodeFormat, EncodeOptions};
 
     fn write_wav(path: &Path, rate: u32, channels: Vec<Vec<f32>>) {
         let buffer = AudioBuffer { sample_rate: rate, channels };
-        let options = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None };
-        std::fs::write(path, craft_audio_io::encode(&buffer, &options).unwrap()).unwrap();
+        let options = EncodeOptions::new(EncodeFormat::Wav).with_bit_depth(BitDepth::Float32);
+        std::fs::write(path, craft_audio::encode(&buffer, &options).unwrap()).unwrap();
     }
 
     fn sine(rate: u32, freq: f32, seconds: f32, amp: f32) -> Vec<f32> {
@@ -869,7 +906,7 @@ mod tests {
         let (_, stem) = renderer.render_stem(0).unwrap();
 
         let left = stem.channel(0).unwrap();
-        let expected = 0.4 * craft_dsp::db_to_gain(-12.0);
+        let expected = 0.4 * db_to_gain(-12.0);
         assert_eq!(stem.samples_per_channel(), 36_000);
         assert!(left[..12_000].iter().all(|v| *v == 0.0), "audio before the clip start must be silent");
         assert!((left[24_000] - expected).abs() < 1e-4, "{} vs {expected}", left[24_000]);
