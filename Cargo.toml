@@ -67,8 +67,11 @@ craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs",
 craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["egui"] }
 craft-menu = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
 craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["egui"] }
-craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["stl", "obj", "ply", "gltf"] }
+craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["stl", "obj", "ply", "gltf", "fbx", "dae", "abc"] }
 craft-docx = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
+craft-wordmodel = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
+craft-usd = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
+craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
 craft-svg = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
 craft-markdown = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
 craft-html = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
@@ -93,9 +96,6 @@ filmcraft-media = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-color = { git = "https://github.com/storytold/filmcraft" }
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft" }
-texturecraft-formats = { git = "https://github.com/storytold/texturecraft", rev = "386630ee85cb22679295b24013575d1aecb39ad2" }
-texturecraft-geom = { git = "https://github.com/storytold/texturecraft", rev = "386630ee85cb22679295b24013575d1aecb39ad2" }
-designcraft-textimport = { git = "https://github.com/storytold/designcraft", rev = "ed43b4a6ab028c15d406cc61463204c7a439dc7d" }
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }
