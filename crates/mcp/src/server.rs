@@ -7,7 +7,8 @@ use encodercraft_engine::QueueManager;
 use encodercraft_presets::PresetRegistry;
 use serde_json::Value;
 
-use crate::tools::{call_tool, list_tools};
+use crate::roots::AutomationRoots;
+use crate::tools::{call_tool_with_roots, list_tools};
 
 /// Maximum accepted length of a single MCP JSON-RPC request line (4 MiB).
 const MAX_MCP_LINE_BYTES: usize = 4 * 1024 * 1024;
@@ -15,6 +16,7 @@ const MAX_MCP_LINE_BYTES: usize = 4 * 1024 * 1024;
 struct EncoderCraftTools {
     queue_mgr: Arc<QueueManager>,
     preset_registry: Arc<Mutex<PresetRegistry>>,
+    roots: Option<AutomationRoots>,
 }
 
 impl craft_mcp_server::Tools for EncoderCraftTools {
@@ -27,7 +29,7 @@ impl craft_mcp_server::Tools for EncoderCraftTools {
     }
 
     fn call(&mut self, name: &str, args: &Value) -> Value {
-        match call_tool(name, args, &self.queue_mgr, &self.preset_registry) {
+        match call_tool_with_roots(name, args, &self.queue_mgr, &self.preset_registry, self.roots.as_ref()) {
             Ok(result) => {
                 let text = serde_json::to_string_pretty(&result).unwrap_or_default();
                 craft_mcp_server::text_result(text, false)
@@ -45,13 +47,22 @@ pub struct McpServer {
 impl McpServer {
     /// Creates a new MCP server wrapping the given queue manager and preset registry.
     pub fn new(queue_mgr: Arc<QueueManager>, preset_registry: Arc<Mutex<PresetRegistry>>) -> Self {
+        Self::build(queue_mgr, preset_registry, None)
+    }
+
+    /// Creates a new MCP server that enforces canonical read and write root boundaries.
+    pub fn with_roots(queue_mgr: Arc<QueueManager>, preset_registry: Arc<Mutex<PresetRegistry>>, roots: AutomationRoots) -> Self {
+        Self::build(queue_mgr, preset_registry, Some(roots))
+    }
+
+    fn build(queue_mgr: Arc<QueueManager>, preset_registry: Arc<Mutex<PresetRegistry>>, roots: Option<AutomationRoots>) -> Self {
         let info = craft_mcp_server::Info {
             name: "encodercraft-mcp",
             title: "encoderCraft",
             version: env!("CARGO_PKG_VERSION"),
             max_line: MAX_MCP_LINE_BYTES,
         };
-        let tools = EncoderCraftTools { queue_mgr, preset_registry };
+        let tools = EncoderCraftTools { queue_mgr, preset_registry, roots };
         Self { inner: Mutex::new(craft_mcp_server::Server::new(info, tools)) }
     }
 

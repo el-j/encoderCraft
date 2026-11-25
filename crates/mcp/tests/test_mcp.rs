@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use encodercraft_engine::QueueManager;
-use encodercraft_mcp::McpServer;
+use encodercraft_mcp::{AutomationRoots, McpServer};
 use encodercraft_presets::PresetRegistry;
 use serde_json::{Value, json};
 
@@ -304,4 +304,115 @@ fn test_mcp_rejects_oversized_request_line() {
     let resp: Value = serde_json::from_str(&server.process_message(&oversized).unwrap()).unwrap();
     assert_eq!(resp["error"]["code"].as_i64(), Some(-32600));
     assert!(resp["error"]["message"].as_str().is_some_and(|m| m.contains("too large")));
+}
+
+fn call_tool_raw(server: &McpServer, id: u64, name: &str, arguments: Value) -> Value {
+    let req = json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name, "arguments": arguments } });
+    serde_json::from_str(&server.process_message(&req.to_string()).unwrap()).unwrap()
+}
+
+fn assert_tool_refused(server: &McpServer, id: u64, name: &str, arguments: Value) {
+    let resp = call_tool_raw(server, id, name, arguments);
+    let is_err = resp["result"]["isError"].as_bool() == Some(true) || resp.get("error").is_some();
+    assert!(is_err, "expected MCP call {name} to be refused, got {resp}");
+}
+
+#[test]
+fn test_mcp_enforces_automation_read_and_write_roots() {
+    let read_dir = tempfile::tempdir().unwrap();
+    let write_dir = tempfile::tempdir().unwrap();
+    let outside_dir = tempfile::tempdir().unwrap();
+
+    let in_read = read_dir.path().join("inside.wav");
+    let out_read = outside_dir.path().join("outside.wav");
+    let in_write = write_dir.path().join("out.flac");
+    let forbidden_write_in_read = read_dir.path().join("should_not_write.flac");
+    write_test_wav(&in_read);
+    write_test_wav(&out_read);
+
+    let roots = AutomationRoots::new(read_dir.path(), write_dir.path()).unwrap();
+    let queue_mgr = Arc::new(QueueManager::new_in_memory());
+    let server = McpServer::with_roots(queue_mgr, Arc::new(Mutex::new(PresetRegistry::default())), roots);
+
+    // Allowed inside roots
+    let probe_ok = call_tool(&server, 1, "encodercraft_probe_media", json!({ "path": in_read.to_string_lossy() }));
+    assert_eq!(probe_ok["container"], "Wav");
+
+    let submit_ok = call_tool(
+        &server,
+        2,
+        "encodercraft_submit_transcode",
+        json!({
+            "source_path": in_read.to_string_lossy(),
+            "preset_name": "Lossless FLAC Master (24-bit 48kHz)",
+            "output_path": in_write.to_string_lossy(),
+        }),
+    );
+    assert!(submit_ok["jobId"].as_str().is_some());
+
+    // Refused outside read/write roots and '..' traversal
+    assert_tool_refused(&server, 3, "encodercraft_probe_media", json!({ "path": out_read.to_string_lossy() }));
+    assert_tool_refused(&server, 4, "encodercraft_probe_media", json!({ "path": "../outside.wav" }));
+    assert_tool_refused(
+        &server,
+        5,
+        "encodercraft_submit_transcode",
+        json!({
+            "source_path": in_read.to_string_lossy(),
+            "preset_name": "Lossless FLAC Master (24-bit 48kHz)",
+            "output_path": forbidden_write_in_read.to_string_lossy(),
+        }),
+    );
+    assert_tool_refused(
+        &server,
+        6,
+        "encodercraft_batch_transcode",
+        json!({
+            "source_paths": [in_read.to_string_lossy()],
+            "preset_name": "Lossless FLAC Master (24-bit 48kHz)",
+        }),
+    );
+    assert_tool_refused(
+        &server,
+        7,
+        "encodercraft_stitch_clips",
+        json!({
+            "clip_paths": [in_read.to_string_lossy(), out_read.to_string_lossy()],
+            "output_path": write_dir.path().join("stitched.mp4").to_string_lossy(),
+        }),
+    );
+    assert_tool_refused(
+        &server,
+        8,
+        "encodercraft_set_output_dir",
+        json!({
+            "job_ids": [],
+            "output_dir": outside_dir.path().to_string_lossy(),
+        }),
+    );
+    assert_tool_refused(
+        &server,
+        9,
+        "encodercraft_execute_command",
+        json!({
+            "command_id": "preset.export",
+            "params": { "path": outside_dir.path().join("presets.json").to_string_lossy() },
+        }),
+    );
+    assert_tool_refused(
+        &server,
+        10,
+        "encodercraft_execute_command",
+        json!({
+            "command_id": "media.source_properties",
+            "params": { "path": out_read.to_string_lossy() },
+        }),
+    );
+
+    #[cfg(unix)]
+    {
+        let link = read_dir.path().join("escape.wav");
+        std::os::unix::fs::symlink(&out_read, &link).unwrap();
+        assert_tool_refused(&server, 11, "encodercraft_probe_media", json!({ "path": link.to_string_lossy() }));
+    }
 }
