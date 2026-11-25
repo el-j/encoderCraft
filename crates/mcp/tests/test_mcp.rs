@@ -295,3 +295,13 @@ fn test_all_mcp_tools_and_queue_actions() {
     let about_res = call_tool(&server, 109, "encodercraft_execute_command", json!({ "command_id": "app.about", "params": {} }));
     assert_eq!(about_res["name"], "encoderCraft");
 }
+
+#[test]
+fn test_mcp_rejects_oversized_request_line() {
+    let queue_mgr = Arc::new(QueueManager::new_in_memory());
+    let server = McpServer::new(queue_mgr, Arc::new(Mutex::new(PresetRegistry::default())));
+    let oversized = " ".repeat((4 * 1024 * 1024) + 16);
+    let resp: Value = serde_json::from_str(&server.process_message(&oversized).unwrap()).unwrap();
+    assert_eq!(resp["error"]["code"].as_i64(), Some(-32600));
+    assert!(resp["error"]["message"].as_str().is_some_and(|m| m.contains("too large")));
+}

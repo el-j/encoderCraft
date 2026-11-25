@@ -26,6 +26,7 @@ encodercraft-source = { workspace = true }
 encodercraft-watch = { workspace = true }
 filmcraft-scopes = { workspace = true }
 craft-ui = { workspace = true }
+craft-update = { workspace = true }
 craft-keymap = { workspace = true }
 craft-window = { workspace = true }
 craft-menu = { workspace = true }

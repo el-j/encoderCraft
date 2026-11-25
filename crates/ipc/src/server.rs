@@ -1,6 +1,6 @@
 //! JSON-RPC IPC server listening over Unix domain sockets and TCP streams.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::path::Path;
@@ -203,39 +203,84 @@ fn write_response(writer: &mut impl Write, resp: &IpcResponse) -> bool {
     writer.write_all(json.as_bytes()).and_then(|()| writer.flush()).is_ok()
 }
 
-/// Reads JSON lines and answers each one until the peer disconnects.
-fn serve_client(reader: impl std::io::Read, mut writer: impl Write, handler: &dyn IpcHandler) -> Result<(), EncoderError> {
+/// Maximum accepted length of a single newline-delimited IPC request line (4 MiB).
+const MAX_IPC_LINE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Reads bounded JSON lines and answers each one until the peer disconnects.
+fn serve_client(reader: impl std::io::Read, writer: impl Write, handler: &dyn IpcHandler) -> Result<(), EncoderError> {
+    serve_client_with_limit(reader, writer, handler, MAX_IPC_LINE_BYTES)
+}
+
+fn serve_client_with_limit(
+    reader: impl std::io::Read,
+    mut writer: impl Write,
+    handler: &dyn IpcHandler,
+    max_bytes: usize,
+) -> Result<(), EncoderError> {
     let mut reader = BufReader::new(reader);
-    let mut line = String::new();
 
-    while let Ok(n) = reader.read_line(&mut line) {
-        if n == 0 {
-            break;
-        }
-
-        match serde_json::from_str::<IpcRequest>(&line) {
-            Ok(req) => {
-                let mut alive = true;
-                if !handler.stream(&req, &mut |resp| {
-                    alive = write_response(&mut writer, &resp);
-                    alive
-                }) {
-                    alive = write_response(&mut writer, &handler.handle(&req));
+    loop {
+        match craft_jsonrpc::read_line(&mut reader, max_bytes) {
+            Ok(None) => break,
+            Ok(Some(bytes)) => {
+                let Ok(line) = std::str::from_utf8(&bytes) else {
+                    if !write_response(&mut writer, &IpcResponse::error(0, "malformed request: invalid UTF-8")) {
+                        break;
+                    }
+                    continue;
+                };
+                if line.trim().is_empty() {
+                    continue;
                 }
-                if !alive {
-                    break;
+                match serde_json::from_str::<IpcRequest>(line) {
+                    Ok(req) => {
+                        let mut alive = true;
+                        if !handler.stream(&req, &mut |resp| {
+                            alive = write_response(&mut writer, &resp);
+                            alive
+                        }) {
+                            alive = write_response(&mut writer, &handler.handle(&req));
+                        }
+                        if !alive {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        if !write_response(&mut writer, &IpcResponse::error(0, format!("malformed request: {e}"))) {
+                            break;
+                        }
+                    }
                 }
             }
-            Err(e) => {
-                if !write_response(&mut writer, &IpcResponse::error(0, format!("malformed request: {e}"))) {
-                    break;
-                }
+            Err(craft_jsonrpc::LineError::TooLong) => {
+                let _ = write_response(&mut writer, &IpcResponse::error(0, "request exceeds maximum line length"));
+                break;
             }
+            Err(craft_jsonrpc::LineError::Io(_)) => break,
         }
-
-        line.clear();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+
+    struct PingHandler;
+    impl IpcHandler for PingHandler {
+        fn handle(&self, req: &IpcRequest) -> IpcResponse {
+            IpcResponse::success(req.id, serde_json::json!({ "ok": true }))
+        }
+    }
+
+    #[test]
+    fn oversized_request_line_returns_error_without_unbounded_allocation() {
+        let oversized = format!("{{\"id\":1,\"method\":\"ping\",\"params\":{{\"pad\":\"{}\"}}}}\n", "x".repeat(256));
+        let mut out = Vec::new();
+        serve_client_with_limit(oversized.as_bytes(), &mut out, &PingHandler, 128).unwrap();
+        let reply: IpcResponse = serde_json::from_slice(&out).unwrap();
+        assert!(reply.error.as_deref().is_some_and(|msg| msg.contains("maximum line length")));
+    }
 }
 
 #[cfg(all(test, unix))]

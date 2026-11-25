@@ -1,135 +1,68 @@
-//! Model Context Protocol (MCP) server stdio runner.
+//! Model Context Protocol (MCP) server stdio runner powered by `craft-mcp-server`.
 
 use std::io::{BufRead, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use encodercraft_engine::QueueManager;
 use encodercraft_presets::PresetRegistry;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::tools::{call_tool, list_tools};
 
-/// MCP server controller.
-pub struct McpServer {
+/// Maximum accepted length of a single MCP JSON-RPC request line (4 MiB).
+const MAX_MCP_LINE_BYTES: usize = 4 * 1024 * 1024;
+
+struct EncoderCraftTools {
     queue_mgr: Arc<QueueManager>,
     preset_registry: Arc<Mutex<PresetRegistry>>,
+}
+
+impl craft_mcp_server::Tools for EncoderCraftTools {
+    fn instructions(&self) -> String {
+        "Inspect media files, query presets, submit and manage batch transcoding jobs, and execute shared encoderCraft commands.".into()
+    }
+
+    fn list(&mut self) -> Vec<Value> {
+        list_tools().as_array().cloned().unwrap_or_default()
+    }
+
+    fn call(&mut self, name: &str, args: &Value) -> Value {
+        match call_tool(name, args, &self.queue_mgr, &self.preset_registry) {
+            Ok(result) => {
+                let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+                craft_mcp_server::text_result(text, false)
+            }
+            Err(err) => craft_mcp_server::text_result(err.to_string(), true),
+        }
+    }
+}
+
+/// MCP server controller backed by the shared `craft-mcp-server` protocol engine.
+pub struct McpServer {
+    inner: Mutex<craft_mcp_server::Server<EncoderCraftTools>>,
 }
 
 impl McpServer {
     /// Creates a new MCP server wrapping the given queue manager and preset registry.
     pub fn new(queue_mgr: Arc<QueueManager>, preset_registry: Arc<Mutex<PresetRegistry>>) -> Self {
-        Self { queue_mgr, preset_registry }
+        let info = craft_mcp_server::Info {
+            name: "encodercraft-mcp",
+            title: "encoderCraft",
+            version: env!("CARGO_PKG_VERSION"),
+            max_line: MAX_MCP_LINE_BYTES,
+        };
+        let tools = EncoderCraftTools { queue_mgr, preset_registry };
+        Self { inner: Mutex::new(craft_mcp_server::Server::new(info, tools)) }
     }
 
     /// Processes a single incoming JSON-RPC line from the client.
     /// Returns `Some(response_json)` or `None` if the message was a notification requiring no response.
     pub fn process_message(&self, raw: &str) -> Option<String> {
-        let req: Value = serde_json::from_str(raw).ok()?;
-        let id = req.get("id");
-        let method = req.get("method").and_then(Value::as_str)?;
-
-        let response = match method {
-            "initialize" => {
-                let id = id?;
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {}
-                        },
-                        "serverInfo": {
-                            "name": "encodercraft-mcp",
-                            "version": "0.1.0"
-                        }
-                    }
-                })
-            }
-            "notifications/initialized" => {
-                // Notifications do not receive a response
-                return None;
-            }
-            "ping" => {
-                let id = id?;
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {}
-                })
-            }
-            "tools/list" => {
-                let id = id?;
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "tools": list_tools()
-                    }
-                })
-            }
-            "tools/call" => {
-                let id = id?;
-                let params = req.get("params")?;
-                let name = params.get("name").and_then(Value::as_str)?;
-                let empty_args = json!({});
-                let args = params.get("arguments").unwrap_or(&empty_args);
-
-                match call_tool(name, args, &self.queue_mgr, &self.preset_registry) {
-                    Ok(result) => {
-                        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": text
-                                    }
-                                ]
-                            }
-                        })
-                    }
-                    Err(err) => {
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "error": {
-                                "code": -32000,
-                                "message": err.to_string()
-                            }
-                        })
-                    }
-                }
-            }
-            _ => {
-                let id = id?;
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32601,
-                        "message": format!("Method '{method}' not found")
-                    }
-                })
-            }
-        };
-
-        serde_json::to_string(&response).ok()
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner).handle_line(raw)
     }
 
-    /// Runs the stdio loop, reading requests from `reader` and writing responses to `writer`.
+    /// Runs the bounded stdio loop, reading requests from `reader` and writing responses to `writer`.
     pub fn run_stdio<R: BufRead, W: Write>(&self, mut reader: R, mut writer: W) -> std::io::Result<()> {
-        let mut line = String::new();
-        while reader.read_line(&mut line)? > 0 {
-            if let Some(resp) = self.process_message(&line) {
-                writer.write_all(resp.as_bytes())?;
-                writer.write_all(b"\n")?;
-                writer.flush()?;
-            }
-            line.clear();
-        }
-        Ok(())
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner).serve(&mut reader, &mut writer)
     }
 }

@@ -19,6 +19,9 @@ use crate::queue_panel::{QueuePanelState, render_queue_panel};
 use crate::theme::{Brightness, Tokens, apply_theme};
 use crate::watch_panel::{WatchPanelState, render_watch_panel, trigger_watch_scan};
 
+static ENCODERCRAFT_APP: craft_update::App =
+    craft_update::App::new("encodercraft", "EncoderCraft", "Media transcoding and batch queue", "el-j/encoderCraft");
+
 /// The root egui application for encoderCraft.
 pub struct EncoderCraftApp {
     pub queue_mgr: Arc<QueueManager>,
@@ -44,6 +47,9 @@ pub struct EncoderCraftApp {
     pub stitch_state: crate::stitch_dialog::StitchDialogState,
     pub pending_source_properties: Option<std::path::PathBuf>,
     pub show_about_dialog: bool,
+    updater: craft_update::updater::Updater,
+    check_updates_requested: bool,
+    show_update_result_dialog: bool,
     /// The workspace name dialog (Save As or Rename) is open for this command.
     name_dialog: Option<crate::commands::AppCommand>,
     /// Set by the Quit command; the next frame asks the window to close.
@@ -107,6 +113,9 @@ impl EncoderCraftApp {
             stitch_state: crate::stitch_dialog::StitchDialogState::default(),
             pending_source_properties: None,
             show_about_dialog: false,
+            updater: craft_update::updater::Updater::new(&ENCODERCRAFT_APP, env!("CARGO_PKG_VERSION")),
+            check_updates_requested: false,
+            show_update_result_dialog: false,
             name_dialog: None,
             quit_requested: false,
             #[cfg(target_os = "macos")]
@@ -134,6 +143,13 @@ impl EncoderCraftApp {
     /// Chooses who draws the window frame (decided by the desktop runner before the window opens).
     pub fn with_title_bar(mut self, style: crate::titlebar::TitleBarStyle) -> Self {
         self.title_bar = style;
+        self
+    }
+
+    /// Overrides the release check source (for headless tests).
+    pub fn with_updater_source(mut self, source: craft_update::updater::CheckSource) -> Self {
+        let placeholder = craft_update::updater::Updater::new(&ENCODERCRAFT_APP, env!("CARGO_PKG_VERSION"));
+        self.updater = std::mem::replace(&mut self.updater, placeholder).with_source(source);
         self
     }
 
@@ -364,6 +380,12 @@ impl EncoderCraftApp {
             C::Quit => {
                 if self.dispatch_app_command_value(C::Quit, serde_json::json!({})).is_some() {
                     self.quit_requested = true;
+                }
+            }
+            C::CheckForUpdates => {
+                if self.dispatch_app_command_value(C::CheckForUpdates, serde_json::json!({})).is_some() {
+                    self.check_updates_requested = true;
+                    self.show_update_result_dialog = true;
                 }
             }
             C::About => {
@@ -769,6 +791,8 @@ impl EncoderCraftApp {
             menu.set_gate(craft_menu::Gate {
                 modal: self.prefs_state.is_open
                     || self.show_about_dialog
+                    || self.show_update_result_dialog
+                    || self.updater.prompt_open()
                     || self.name_dialog.is_some()
                     || !self.pending_conversion_approvals.is_empty(),
                 recording_shortcut: self.prefs_state.shortcut_recording.is_some(),
@@ -995,6 +1019,7 @@ impl EncoderCraftApp {
         if self.prefs_state.prefs.remove_finished_on_exit {
             let _ = self.queue_mgr.clear_completed_jobs();
         }
+        self.updater.start_pending_update();
     }
 
     /// Renders the complete application frame inside an egui Ui.
@@ -1263,6 +1288,35 @@ impl EncoderCraftApp {
                 ui.add_space(4.0);
                 ui.label(RichText::new("Clean-Room Adobe Media Encoder Parity").strong());
             });
+        }
+
+        // 8. In-App Updater (`craft-update`)
+        self.drive_updater(&ctx);
+    }
+
+    fn drive_updater(&mut self, ctx: &egui::Context) {
+        if std::mem::take(&mut self.check_updates_requested) {
+            self.updater.check_now(ctx);
+        }
+        self.updater.tick(ctx);
+        if self.updater.prompt_open() {
+            self.show_update_result_dialog = false;
+        }
+        if self.show_update_result_dialog {
+            match craft_update::CheckResultDialog::new(&ENCODERCRAFT_APP, env!("CARGO_PKG_VERSION")).show(ctx, self.updater.status()) {
+                craft_update::CheckResultResponse::None => {}
+                craft_update::CheckResultResponse::Close => {
+                    self.updater.dismiss_status();
+                    self.show_update_result_dialog = false;
+                }
+                craft_update::CheckResultResponse::CheckAgain => self.updater.check_now(ctx),
+                craft_update::CheckResultResponse::RestartToUpdate => self.updater.restart_to_update(),
+            }
+        }
+        match self.updater.show(ctx) {
+            craft_update::updater::Action::None => {}
+            craft_update::updater::Action::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
+            craft_update::updater::Action::Close => self.quit_requested = true,
         }
     }
 
@@ -1794,5 +1848,24 @@ mod tests {
 
         let jobs = app.queue_mgr.list_jobs();
         assert_eq!(jobs.len(), 2, "Should have queued both clip1.mp3 and track1.wav, ignoring notes.txt");
+    }
+
+    #[test]
+    fn test_check_for_updates_command_drives_updater_without_network() {
+        let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
+            .with_updater_source(Arc::new(|| Ok(None)));
+        app.run_command(crate::commands::AppCommand::CheckForUpdates);
+        assert!(app.check_updates_requested);
+
+        let ctx = egui::Context::default();
+        for _ in 0..20 {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+            out.textures_delta.clear();
+            if matches!(app.updater.status(), craft_update::updater::Status::UpToDate) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(app.updater.status(), &craft_update::updater::Status::UpToDate);
     }
 }

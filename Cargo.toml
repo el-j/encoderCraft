@@ -88,6 +88,10 @@ craft-gainmap = { git = "https://github.com/storytold/craft-libs", rev = "fab457
 craft-timeline = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["xml", "otio", "serde"] }
 craft-aaf = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
 craft-time = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
+craft-mcp-server = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
+craft-jsonrpc = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
+craft-docpath = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
+craft-update = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["egui"] }
 
 # Official ArtCraft repositories remaining prior to upstream consolidation
 filmcraft-scopes = { git = "https://github.com/storytold/filmcraft" }

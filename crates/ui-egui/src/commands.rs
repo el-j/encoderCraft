@@ -86,6 +86,7 @@ pub enum AppCommand {
     ResetWorkspace,
     DeleteWorkspace,
     SetPanelVisibility,
+    CheckForUpdates,
     About,
 }
 
@@ -293,6 +294,7 @@ pub const COMMANDS: &[CommandInfo] = &[
     context_info(AppCommand::ResetWorkspace, "workspace.reset", "Reset Workspace", Menu::Window, Some("workspace.reset")),
     context_info(AppCommand::DeleteWorkspace, "workspace.delete", "Delete Workspace", Menu::Window, Some("workspace.delete")),
     context_info(AppCommand::SetPanelVisibility, "workspace.set_visibility", "Set Panel Visibility", Menu::Window, Some("workspace.set_visibility")),
+    info(AppCommand::CheckForUpdates, "help.check_for_updates", "Check for Updates...", Menu::Help, None, Some("app.check_for_updates"), false),
     info(AppCommand::About, "help.about", "About encoderCraft", Menu::Help, None, Some("app.about"), false),
 ];
 
@@ -396,7 +398,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const ALL: [AppCommand; 49] = [
+    const ALL: [AppCommand; 50] = [
         AppCommand::AddMedia,
         AppCommand::AddFolder,
         AppCommand::AddMediaItem,
@@ -445,6 +447,7 @@ mod tests {
         AppCommand::ResetWorkspace,
         AppCommand::DeleteWorkspace,
         AppCommand::SetPanelVisibility,
+        AppCommand::CheckForUpdates,
         AppCommand::About,
     ];
 
