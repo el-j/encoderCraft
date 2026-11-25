@@ -6,8 +6,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod roots;
 pub mod server;
 pub mod tools;
 
+pub use roots::AutomationRoots;
 pub use server::McpServer;
-pub use tools::{call_tool, list_tools};
+pub use tools::{call_tool, call_tool_with_roots, list_tools};

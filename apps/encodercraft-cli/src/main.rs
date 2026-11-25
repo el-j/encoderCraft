@@ -14,7 +14,7 @@ use encodercraft_demux::probe_file;
 use encodercraft_dispatch::DispatchClient;
 use encodercraft_engine::{EngineIpcHandler, LossyConversionKey, QueueManager};
 use encodercraft_ipc::IpcServer;
-use encodercraft_mcp::McpServer;
+use encodercraft_mcp::{AutomationRoots, McpServer};
 use encodercraft_presets::{PresetRegistry, evaluate_preset};
 use encodercraft_watch::{WatchFolderConfig, WatchFolderService};
 
@@ -51,7 +51,7 @@ fn run() -> Result<(), EncoderError> {
         Some("stream-test") => stream::cmd_stream_test(&args[2..])?,
         Some("lut-convert") => cmd_lut_convert(&args[2..])?,
         Some("caption-convert") => cmd_caption_convert(&args[2..])?,
-        Some("mcp") => cmd_mcp()?,
+        Some("mcp") => cmd_mcp(&args[2..])?,
         Some("--version") | Some("-V") => println!("encodercraft-cli {}", env!("CARGO_PKG_VERSION")),
         Some("--help") | Some("-h") | Some("help") => print_usage(),
         Some(cmd) => {
@@ -112,7 +112,8 @@ fn print_usage() {
     println!("  command execute <id> [json-params]     Execute a shared command on the running instance");
     println!("  watch <dir> -p <preset> -o <out_dir>    Start automated directory monitor");
     println!("  daemon [--port <port>]                  Run background IPC daemon");
-    println!("  mcp                                     Run Model Context Protocol server over stdio");
+    println!("  mcp --automation-read-root <dir> --automation-write-root <dir>");
+    println!("                                          Run sandboxed Model Context Protocol server over stdio");
 }
 
 /// Parses `25`, `29.97` or `30000/1001` into an exact frame rate.
@@ -1086,18 +1087,75 @@ fn cmd_daemon(args: &[String]) -> Result<(), EncoderError> {
     }
 }
 
-fn cmd_mcp() -> Result<(), EncoderError> {
+fn parse_mcp_roots(args: &[String]) -> Result<AutomationRoots, EncoderError> {
+    let mut read_root: Option<PathBuf> = None;
+    let mut write_root: Option<PathBuf> = None;
+    let mut idx = 0;
+
+    while let Some(arg) = args.get(idx) {
+        if let Some(val) = arg.strip_prefix("--automation-read-root=") {
+            read_root = Some(PathBuf::from(val));
+            idx += 1;
+        } else if let Some(val) = arg.strip_prefix("--automation-write-root=") {
+            write_root = Some(PathBuf::from(val));
+            idx += 1;
+        } else if arg == "--automation-read-root" {
+            let val = args.get(idx + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--automation-read-root requires a directory path".into()))?;
+            read_root = Some(PathBuf::from(val));
+            idx += 2;
+        } else if arg == "--automation-write-root" {
+            let val = args.get(idx + 1).ok_or_else(|| EncoderError::InvalidJobSpec("--automation-write-root requires a directory path".into()))?;
+            write_root = Some(PathBuf::from(val));
+            idx += 2;
+        } else {
+            return Err(EncoderError::InvalidJobSpec(format!(
+                "unknown mcp option '{arg}'; expected --automation-read-root <dir> --automation-write-root <dir>"
+            )));
+        }
+    }
+
+    let read = read_root
+        .ok_or_else(|| EncoderError::InvalidJobSpec("encodercraft-cli mcp requires --automation-read-root and --automation-write-root".into()))?;
+    let write = write_root
+        .ok_or_else(|| EncoderError::InvalidJobSpec("encodercraft-cli mcp requires --automation-read-root and --automation-write-root".into()))?;
+    AutomationRoots::new(read, write)
+}
+
+fn cmd_mcp(args: &[String]) -> Result<(), EncoderError> {
+    let roots = parse_mcp_roots(args)?;
     let queue_mgr = Arc::new(QueueManager::new_in_memory());
     if let Some(path) = encodercraft_engine::default_preferences_path() {
         queue_mgr.set_conversion_preferences_path(path);
     }
     let preset_registry = Arc::new(Mutex::new(default_preset_registry()));
-    let server = McpServer::new(queue_mgr, preset_registry);
+    let server = McpServer::with_roots(queue_mgr, preset_registry, roots);
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
 
     server.run_stdio(stdin.lock(), stdout.lock()).map_err(|e| EncoderError::Io(format!("MCP stdio error: {e}")))
+}
+
+#[cfg(test)]
+mod mcp_cli_tests {
+    use super::*;
+
+    #[test]
+    fn mcp_refuses_to_start_without_both_automation_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_string_lossy().into_owned();
+
+        assert!(parse_mcp_roots(&[]).is_err());
+        assert!(parse_mcp_roots(&["--automation-read-root".into(), d.clone()]).is_err());
+        assert!(parse_mcp_roots(&["--automation-write-root".into(), d.clone()]).is_err());
+        assert!(parse_mcp_roots(&["--unknown-flag".into()]).is_err());
+
+        let missing = dir.path().join("does-not-exist").to_string_lossy().into_owned();
+        assert!(parse_mcp_roots(&["--automation-read-root".into(), missing, "--automation-write-root".into(), d.clone(),]).is_err());
+
+        let roots = parse_mcp_roots(&["--automation-read-root".into(), d.clone(), format!("--automation-write-root={d}")]).unwrap();
+        assert_eq!(roots.read_root(), roots.write_root());
+    }
 }
 
 fn default_preset_registry() -> PresetRegistry {

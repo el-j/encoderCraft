@@ -144,6 +144,17 @@ pub fn call_tool(
     queue_mgr: &Arc<QueueManager>,
     preset_registry: &Arc<Mutex<PresetRegistry>>,
 ) -> Result<Value, EncoderError> {
+    call_tool_with_roots(name, args, queue_mgr, preset_registry, None)
+}
+
+/// Executes an MCP tool call while enforcing optional automation read/write roots.
+pub fn call_tool_with_roots(
+    name: &str,
+    args: &Value,
+    queue_mgr: &Arc<QueueManager>,
+    preset_registry: &Arc<Mutex<PresetRegistry>>,
+    roots: Option<&crate::roots::AutomationRoots>,
+) -> Result<Value, EncoderError> {
     match name {
         "encodercraft_list_commands" => {
             let registry = CommandRegistry::with_preset_registry(Arc::clone(preset_registry));
@@ -157,6 +168,9 @@ pub fn call_tool(
                 .and_then(Value::as_str)
                 .ok_or_else(|| EncoderError::InvalidJobSpec("missing required argument 'command_id'".into()))?;
             let params = args.get("params").cloned().unwrap_or_else(|| json!({}));
+            if let Some(roots) = roots {
+                roots.check_command_params(command_id, &params)?;
+            }
             CommandRegistry::with_preset_registry(Arc::clone(preset_registry)).dispatch(queue_mgr, command_id, params)
         }
         "encodercraft_submit_transcode" => {
@@ -172,6 +186,8 @@ pub fn call_tool(
                 .get("output_path")
                 .and_then(Value::as_str)
                 .ok_or_else(|| EncoderError::InvalidJobSpec("missing required argument 'output_path'".into()))?;
+            let resolved_source = check_read_arg(roots, std::path::Path::new(source_path))?;
+            let resolved_output = check_write_arg(roots, std::path::Path::new(output_path))?;
 
             let reg = preset_registry.lock().unwrap_or_else(PoisonError::into_inner);
             let preset = reg.find_by_name(preset_name).ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown preset '{preset_name}'")))?;
@@ -180,7 +196,7 @@ pub fn call_tool(
 
             let target = OutputTarget {
                 target_id: format!("{job_id}-target-1"),
-                output_path: PathBuf::from(output_path),
+                output_path: resolved_output,
                 preset_name: preset.name.clone(),
                 container: preset.container,
                 custom_width: None,
@@ -202,7 +218,7 @@ pub fn call_tool(
                 },
                 priority: JobPriority::Normal,
                 start_policy: StartPolicy::AutoStart,
-                source: SourceDescriptor::File { path: PathBuf::from(source_path), start_tick: None, duration_ticks: None, timebase: None },
+                source: SourceDescriptor::File { path: resolved_source, start_tick: None, duration_ticks: None, timebase: None },
                 targets: vec![target],
             };
 
@@ -234,7 +250,8 @@ pub fn call_tool(
         "encodercraft_probe_media" => {
             let path_str =
                 args.get("path").and_then(Value::as_str).ok_or_else(|| EncoderError::InvalidJobSpec("missing required argument 'path'".into()))?;
-            let info = probe_file(std::path::Path::new(path_str))?;
+            let resolved = check_read_arg(roots, std::path::Path::new(path_str))?;
+            let info = probe_file(&resolved)?;
             Ok(json!(info))
         }
         "encodercraft_batch_transcode" => {
@@ -245,16 +262,20 @@ pub fn call_tool(
                 .and_then(Value::as_str)
                 .ok_or_else(|| EncoderError::InvalidJobSpec("missing required argument 'preset_name'".into()))?;
             let out_dir = args.get("output_dir").and_then(Value::as_str).map(PathBuf::from);
+            if let Some(ref dir) = out_dir {
+                let _ = check_write_arg(roots, dir)?;
+            }
 
             let reg = preset_registry.lock().unwrap_or_else(PoisonError::into_inner);
             let preset = reg.find_by_name(preset_name).ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown preset '{preset_name}'")))?;
 
             let mut queued_ids = Vec::new();
             for (idx, p_str) in paths.iter().enumerate() {
-                let p = PathBuf::from(p_str);
+                let p = check_read_arg(roots, std::path::Path::new(p_str))?;
                 let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
                 let out_file =
                     if let Some(ref d) = out_dir { d.join(format!("{stem}_encoded.mp4")) } else { p.with_file_name(format!("{stem}_encoded.mp4")) };
+                let out_file = check_write_arg(roots, &out_file)?;
 
                 let job_id = format!(
                     "mcp-batch-{}-{}",
@@ -305,8 +326,12 @@ pub fn call_tool(
                 .ok_or_else(|| EncoderError::InvalidJobSpec("missing required argument 'output_path'".into()))?;
             let preset_name = args.get("preset_name").and_then(Value::as_str).unwrap_or("Match Source - High Bitrate").to_string();
 
-            let paths = clip_strs.into_iter().map(PathBuf::from).collect();
-            let job_id = queue_mgr.stitch_sources_into_job(paths, PathBuf::from(out_str), preset_name)?;
+            let mut paths = Vec::with_capacity(clip_strs.len());
+            for raw in clip_strs {
+                paths.push(check_read_arg(roots, std::path::Path::new(&raw))?);
+            }
+            let out_path = check_write_arg(roots, std::path::Path::new(out_str))?;
+            let job_id = queue_mgr.stitch_sources_into_job(paths, out_path, preset_name)?;
             Ok(json!({ "jobId": job_id, "status": "Queued" }))
         }
         "encodercraft_manage_queue" => {
@@ -363,11 +388,26 @@ pub fn call_tool(
                 .and_then(Value::as_str)
                 .map(PathBuf::from)
                 .ok_or_else(|| EncoderError::InvalidJobSpec("missing 'output_dir'".into()))?;
+            let output_dir = check_write_arg(roots, &output_dir)?;
 
             let count = queue_mgr.set_jobs_output_dir(&job_ids, output_dir)?;
             Ok(json!({ "modifiedCount": count }))
         }
         _ => Err(EncoderError::InvalidJobSpec(format!("unknown MCP tool '{name}'"))),
+    }
+}
+
+fn check_read_arg(roots: Option<&crate::roots::AutomationRoots>, path: &std::path::Path) -> Result<PathBuf, EncoderError> {
+    match roots {
+        Some(r) => r.check_read(path),
+        None => Ok(path.to_path_buf()),
+    }
+}
+
+fn check_write_arg(roots: Option<&crate::roots::AutomationRoots>, path: &std::path::Path) -> Result<PathBuf, EncoderError> {
+    match roots {
+        Some(r) => r.check_write(path),
+        None => Ok(path.to_path_buf()),
     }
 }
 
