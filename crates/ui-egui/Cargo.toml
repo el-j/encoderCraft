@@ -33,7 +33,7 @@ craft-menu = { workspace = true }
 craft-audio = { workspace = true }
 craft-mesh = { workspace = true }
 craft-svg = { workspace = true }
-egui = { workspace = true, features = ["default_fonts"] }
+egui = { workspace = true }
 chrono = { workspace = true }
 rfd = { workspace = true }
 serde = { workspace = true }
