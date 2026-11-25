@@ -25,7 +25,7 @@ jobs:
       os: '["ubuntu-24.04", "windows-latest"]'
       timeout-minutes: 90
       # Use the suite-pinned font assets without adding them as a Cargo dependency or committing binaries.
-      craft-fonts-ref: aced4137c022f1f587624d48e81ec77e1914a9cc
+      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
       require-craft-fonts: true
       tools: ""
       targets: ""
