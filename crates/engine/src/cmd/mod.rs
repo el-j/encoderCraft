@@ -1129,6 +1129,19 @@ impl CommandRegistry {
             }))
         }));
 
+        self.register(CommandSpec::new(
+            "app.check_for_updates",
+            "Check for Updates",
+            "Requests an update check against published releases",
+            |_, _| {
+                Ok(serde_json::json!({
+                    "repository": "el-j/encoderCraft",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "checkRequested": true
+                }))
+            },
+        ));
+
         // The engine only acknowledges; the window that owns the process closes itself.
         self.register(CommandSpec::new("app.quit", "Quit encoderCraft", "Asks the running application to quit", |_, _| {
             Ok(serde_json::json!({ "quit": true }))

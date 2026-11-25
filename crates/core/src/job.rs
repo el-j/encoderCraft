@@ -1462,6 +1462,7 @@ impl CraftJobSpec {
         if self.job_id.trim().is_empty() {
             return Err(EncoderError::InvalidJobSpec("jobId cannot be empty".into()));
         }
+        validate_source_paths(&self.source)?;
         for target in &self.targets {
             target.selection.validate()?;
         }
@@ -1477,6 +1478,7 @@ impl CraftJobSpec {
             if target.output_path.as_os_str().is_empty() {
                 return Err(EncoderError::InvalidJobSpec(format!("target `{}` has empty outputPath", target.target_id)));
             }
+            validate_target_paths(target)?;
         }
 
         Ok(())
@@ -1493,6 +1495,51 @@ impl CraftJobSpec {
         spec.validate()?;
         Ok(spec)
     }
+}
+
+fn validate_stored_path(label: &str, path: &std::path::Path) -> Result<(), EncoderError> {
+    let raw = path.to_string_lossy();
+    match craft_docpath::classify(&raw) {
+        craft_docpath::PathKind::Local | craft_docpath::PathKind::Network => Ok(()),
+        craft_docpath::PathKind::Device => Err(EncoderError::InvalidJobSpec(format!("{label} refers to a device path"))),
+        craft_docpath::PathKind::Url => Err(EncoderError::InvalidJobSpec(format!("{label} cannot be a remote URL"))),
+        craft_docpath::PathKind::Invalid => Err(EncoderError::InvalidJobSpec(format!("{label} is not a valid filesystem path"))),
+    }
+}
+
+fn validate_optional_path(label: &str, path: Option<&PathBuf>) -> Result<(), EncoderError> {
+    if let Some(p) = path
+        && !p.as_os_str().is_empty()
+    {
+        validate_stored_path(label, p)?;
+    }
+    Ok(())
+}
+
+fn validate_source_paths(source: &SourceDescriptor) -> Result<(), EncoderError> {
+    match source {
+        SourceDescriptor::File { path, .. } => validate_stored_path("source path", path),
+        SourceDescriptor::StitchedClips { clips } => {
+            for (idx, clip) in clips.iter().enumerate() {
+                validate_stored_path(&format!("stitched clip {idx} path"), &clip.path)?;
+            }
+            Ok(())
+        }
+        SourceDescriptor::Pipe { .. } => Ok(()),
+        SourceDescriptor::ProjectReference { project_path, host_cli_path, .. } => {
+            validate_stored_path("projectPath", project_path)?;
+            validate_optional_path("hostCliPath", host_cli_path.as_ref())
+        }
+    }
+}
+
+fn validate_target_paths(target: &OutputTarget) -> Result<(), EncoderError> {
+    validate_stored_path(&format!("target `{}` outputPath", target.target_id), &target.output_path)?;
+    validate_optional_path(&format!("target `{}` lutPath", target.target_id), target.lut_path.as_ref())?;
+    validate_optional_path(&format!("target `{}` captionPath", target.target_id), target.caption_path.as_ref())?;
+    validate_optional_path(&format!("target `{}` iccProfilePath", target.target_id), target.icc_profile_path.as_ref())?;
+    let wm_path = target.watermark.as_ref().and_then(|wm| wm.path.as_ref());
+    validate_optional_path(&format!("target `{}` watermark path", target.target_id), wm_path)
 }
 
 #[cfg(test)]
@@ -1777,5 +1824,40 @@ mod tests {
         let mut disabled_audio = deserialized;
         disabled_audio.export_audio = false;
         assert!(!disabled_audio.is_audio_enabled());
+    }
+
+    #[test]
+    fn test_validate_rejects_unsafe_docpaths() {
+        let mut spec = CraftJobSpec {
+            version: "1.0.0".into(),
+            job_id: "docpath_test".into(),
+            client_info: ClientInfo { app_name: "Test".into(), app_version: "0.1.0".into(), pid: 1, user_notes: None },
+            priority: JobPriority::Normal,
+            start_policy: StartPolicy::AutoStart,
+            source: SourceDescriptor::File {
+                path: PathBuf::from("https://evil.example/input.mov"),
+                start_tick: None,
+                duration_ticks: None,
+                timebase: None,
+            },
+            targets: vec![OutputTarget {
+                target_id: "t1".into(),
+                output_path: PathBuf::from("/media/out.mp4"),
+                preset_name: "Custom".into(),
+                container: ContainerType::IsoBmffMp4,
+                ..Default::default()
+            }],
+        };
+        assert!(spec.validate().is_err());
+
+        spec.source = SourceDescriptor::File { path: PathBuf::from("/media/input.mov"), start_tick: None, duration_ticks: None, timebase: None };
+        assert!(spec.validate().is_ok());
+
+        spec.targets[0].output_path = PathBuf::from(r"\\.\PhysicalDrive0");
+        assert!(spec.validate().is_err());
+
+        spec.targets[0].output_path = PathBuf::from("/media/out.mp4");
+        spec.targets[0].lut_path = Some(PathBuf::from("NUL"));
+        assert!(spec.validate().is_err());
     }
 }
