@@ -167,7 +167,7 @@ pub fn render_prefs_dialog(
                     .min_scrolled_height(available_h)
                     .show(ui, |ui| {
                         ui.set_min_height(available_h);
-                        match state.selected_category {
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| match state.selected_category {
                             PrefsCategory::General => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
                                     ui.label(RichText::new("General Options").strong());
@@ -400,7 +400,7 @@ pub fn render_prefs_dialog(
                                     ui.label(RichText::new("Drop compatible provider bundles into ~/.config/encodercraft/providers/ to install.").weak().size(11.0));
                                 });
                             }
-                        };
+                        });
                     });
             });
 
@@ -435,6 +435,40 @@ pub fn render_prefs_dialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Where the widget labelled `label` is drawn, from the frame's accessibility tree.
+    fn bounds_of(output: &egui::FullOutput, label: &str) -> Option<egui::Rect> {
+        let update = output.platform_output.accesskit_update.as_ref()?;
+        let (_, node) = update.nodes.iter().find(|(_, node)| node.label() == Some(label))?;
+        let r = node.bounds()?;
+        Some(egui::Rect::from_min_max(egui::pos2(r.x0 as f32, r.y0 as f32), egui::pos2(r.x1 as f32, r.y1 as f32)))
+    }
+
+    #[test]
+    fn a_page_lists_its_options_one_under_another_inside_the_window() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut state = PrefsDialogState { is_open: true, ..PrefsDialogState::default() };
+        let mut shortcuts = crate::settings::WorkspaceShortcuts::default();
+        let tokens = Tokens::dark();
+        let mut theme_change = None;
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
+        let mut output = None;
+        // The window sizes itself over the first frames.
+        for _ in 0..3 {
+            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut frame = ctx.run_ui(input, |ui| render_prefs_dialog(ui.ctx(), &mut state, &mut shortcuts, &tokens, &mut theme_change));
+            frame.textures_delta.clear();
+            output = Some(frame);
+        }
+        let Some(output) = output else { panic!("no frame ran") };
+        let options = ["Play chime when finished encoding", "Auto-start queue when media is added", "Remove completed items from queue on exit"];
+        let rects: Vec<egui::Rect> = options.iter().map(|option| bounds_of(&output, option).unwrap_or_else(|| panic!("{option} is shown"))).collect();
+        for pair in rects.windows(2) {
+            assert!(pair[1].top() >= pair[0].bottom() - 1.0, "each option sits below the one before it: {pair:?}");
+        }
+        assert!(rects.iter().all(|rect| rect.right() <= screen.right()), "every option fits in the window: {rects:?}");
+    }
 
     #[test]
     fn test_prefs_categories_labels_and_defaults() {
