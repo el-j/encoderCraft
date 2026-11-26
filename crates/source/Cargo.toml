@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 craft-image-codecs = { workspace = true }
+craft-time = { workspace = true }
 encodercraft-core = { workspace = true }
 encodercraft-geom = { workspace = true }
 encodercraft-color = { workspace = true }
@@ -21,7 +22,6 @@ filmcraft-media = { workspace = true }
 filmcraft-color = { workspace = true }
 filmcraft-codecs = { workspace = true }
 filmcraft-frame = { workspace = true }
-filmcraft-time = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

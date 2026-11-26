@@ -1,7 +1,7 @@
-//! Named workspaces backed by craft-ui's validated, dockable panel layout.
+//! Named workspaces backed by `craft-behavior`'s validated, dockable panel layout.
 
-use craft_ui::docking::{Action, DockError, Layout, Node, Permissions, Workspace as DockWorkspace};
-use craft_ui::layout::{SplitAxis, SplitSize};
+use craft_behavior::dock::{Action, DockError, Layout, Node, Permissions, SplitSize, Workspace as DockWorkspace};
+use craft_behavior::flow::Axis;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -46,7 +46,7 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn is_visible(&self, panel: PanelId) -> bool {
-        self.dock.layout.contains(&panel)
+        self.dock.layout().contains(&panel)
     }
 
     pub fn focus_neighbor(&mut self, current: PanelId, forward: bool) -> Result<Option<PanelId>, DockError> {
@@ -71,48 +71,42 @@ impl Workspace {
             PanelId::Preview => Some(PanelId::Queue),
             _ => Some(PanelId::Preview),
         };
-        self.dock.set_visible(panel, visible, fallback, |_| Permissions::default())
+        self.dock.set_visible(panel, visible, fallback, false, |_| Permissions::ALL)
     }
 
     pub fn apply_actions(&mut self, actions: impl IntoIterator<Item = Action<PanelId>>) -> Result<(), DockError> {
-        self.dock.apply_all(actions, |_| Permissions::default()).map(drop)
+        self.dock.apply_all(actions, false, |_| Permissions::ALL).map(drop)
     }
 }
 
 fn tabs(panel: PanelId) -> Node<PanelId> {
-    Node::Tabs { panels: vec![panel], active: 0 }
+    Node::tabs(vec![panel], 0)
 }
 
-fn split(axis: SplitAxis, ratio: f32, first: Node<PanelId>, second: Node<PanelId>) -> Node<PanelId> {
-    Node::Split { axis, size: SplitSize::Ratio(ratio), first: Box::new(first), second: Box::new(second) }
+fn split(axis: Axis, ratio: f32, first: Node<PanelId>, second: Node<PanelId>) -> Node<PanelId> {
+    Node::split(axis, SplitSize::Ratio(ratio), first, second)
 }
 
 fn default_layout(name: &str) -> Workspace {
-    let left = split(SplitAxis::Vertical, 0.57, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets));
-    let queue_encoding =
-        split(SplitAxis::Vertical, 0.67, Node::Tabs { panels: vec![PanelId::Queue, PanelId::WatchFolders], active: 0 }, tabs(PanelId::Encoding));
+    let left = split(Axis::Y, 0.57, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets));
+    let queue_encoding = split(Axis::Y, 0.67, Node::tabs(vec![PanelId::Queue, PanelId::WatchFolders], 0), tabs(PanelId::Encoding));
     let layout = match name {
-        DEFAULT_WORKSPACE => split(SplitAxis::Horizontal, 0.44, left, queue_encoding),
+        DEFAULT_WORKSPACE => split(Axis::X, 0.44, left, queue_encoding),
         QUEUE_WORKSPACE => split(
-            SplitAxis::Horizontal,
+            Axis::X,
             0.24,
-            split(SplitAxis::Vertical, 0.5, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets)),
-            split(
-                SplitAxis::Horizontal,
-                0.52,
-                Node::Tabs { panels: vec![PanelId::Queue, PanelId::WatchFolders], active: 0 },
-                tabs(PanelId::Encoding),
-            ),
+            split(Axis::Y, 0.5, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets)),
+            split(Axis::X, 0.52, Node::tabs(vec![PanelId::Queue, PanelId::WatchFolders], 0), tabs(PanelId::Encoding)),
         ),
         PREVIEW_WORKSPACE => split(
-            SplitAxis::Horizontal,
+            Axis::X,
             0.2,
-            split(SplitAxis::Vertical, 0.5, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets)),
-            split(SplitAxis::Horizontal, 0.78, tabs(PanelId::Preview), tabs(PanelId::Encoding)),
+            split(Axis::Y, 0.5, tabs(PanelId::MediaBrowser), tabs(PanelId::Presets)),
+            split(Axis::X, 0.78, tabs(PanelId::Preview), tabs(PanelId::Encoding)),
         ),
-        _ => split(SplitAxis::Horizontal, 0.44, left, queue_encoding),
+        _ => split(Axis::X, 0.44, left, queue_encoding),
     };
-    Workspace { name: name.into(), dock: DockWorkspace::new(Layout { root: Some(layout), floating: Vec::new() }) }
+    Workspace { name: name.into(), dock: DockWorkspace::new(Layout::new(Some(layout), Vec::new())) }
 }
 
 /// The active workspace and the built-in/user-defined layouts.
@@ -304,31 +298,31 @@ mod tests {
 
     #[test]
     fn default_layout_matches_the_target_panel_arrangement_and_proportions() {
-        fn split(node: &Node<PanelId>) -> Option<(SplitAxis, f32, &Node<PanelId>, &Node<PanelId>)> {
+        fn split(node: &Node<PanelId>) -> Option<(Axis, f32, &Node<PanelId>, &Node<PanelId>)> {
             match node {
-                Node::Split { axis, size: SplitSize::Ratio(ratio), first, second } => Some((*axis, *ratio, first, second)),
+                Node::Split { axis, size: SplitSize::Ratio(ratio), first, second, .. } => Some((*axis, *ratio, first, second)),
                 _ => None,
             }
         }
 
         fn only_panel(node: &Node<PanelId>, expected: PanelId) -> bool {
-            matches!(node, Node::Tabs { panels, active: 0 } if panels.as_slice() == [expected])
+            matches!(node, Node::Tabs { panels, active: 0, .. } if panels.as_slice() == [expected])
         }
 
         let workspace = WorkspaceSet::default();
-        let root = workspace.current().and_then(|current| current.dock.layout.root.as_ref()).expect("default layout has a root");
+        let root = workspace.current().and_then(|current| current.dock.layout().root.as_ref()).expect("default layout has a root");
         let (axis, root_ratio, left, right) = split(root).expect("default layout root is split");
-        assert_eq!(axis, SplitAxis::Horizontal);
+        assert_eq!(axis, Axis::X);
         assert!((root_ratio - 0.44).abs() < f32::EPSILON);
         let (axis, left_ratio, media, presets) = split(left).expect("left column is split");
-        assert_eq!(axis, SplitAxis::Vertical);
+        assert_eq!(axis, Axis::Y);
         assert!((left_ratio - 0.57).abs() < f32::EPSILON);
         assert!(only_panel(media, PanelId::MediaBrowser));
         assert!(only_panel(presets, PanelId::Presets));
         let (axis, queue_ratio, queue_watch, encoding) = split(right).expect("queue and encoding panels are split");
-        assert_eq!(axis, SplitAxis::Vertical);
+        assert_eq!(axis, Axis::Y);
         assert!((queue_ratio - 0.67).abs() < f32::EPSILON);
-        assert!(matches!(queue_watch, Node::Tabs { panels, active: 0 } if panels.as_slice() == [PanelId::Queue, PanelId::WatchFolders]));
+        assert!(matches!(queue_watch, Node::Tabs { panels, active: 0, .. } if panels.as_slice() == [PanelId::Queue, PanelId::WatchFolders]));
         assert!(only_panel(encoding, PanelId::Encoding));
     }
 
@@ -350,7 +344,7 @@ mod tests {
         assert_eq!(WorkspaceSet::from_json(&too_large), WorkspaceSet::default());
         let mut set = WorkspaceSet::default();
         let workspace = set.current_mut().unwrap();
-        workspace.dock.layout.root = Some(Node::Tabs { panels: vec![PanelId::Preview, PanelId::Preview], active: 0 });
+        workspace.dock = DockWorkspace::new(Layout::new(Some(Node::tabs(vec![PanelId::Preview, PanelId::Preview], 0)), Vec::new()));
         set.sanitize();
         assert!(set.current().unwrap().dock.validate().is_ok());
         assert!(set.current().unwrap().is_visible(PanelId::Queue));

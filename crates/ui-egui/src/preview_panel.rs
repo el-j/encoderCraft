@@ -1446,7 +1446,7 @@ mod tests {
 
         let deadline = Instant::now() + std::time::Duration::from_secs(20);
         while Instant::now() < deadline {
-            egui::__run_test_ui(|ui| app.render(ui));
+            crate::run_test_ui(|ui| app.render(ui));
             let completed = queue.list_jobs().iter().any(|job| job.status == encodercraft_core::JobStatus::Completed);
             let preview_ready = app.preview_state.source.texture.is_some();
             if completed && preview_ready {

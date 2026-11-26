@@ -112,7 +112,7 @@ pub fn build_bar(inputs: &MenuInputs<'_>) -> MenuBar {
             Document::new(command, name.clone()).active(*name == inputs.active_workspace)
         })
         .collect();
-    MenuBar { menus, documents }
+    MenuBar::new(menus).documents(documents)
 }
 
 /// Maps a clicked item back to the app's action.

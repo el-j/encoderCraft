@@ -14,7 +14,7 @@ fn test_app_creation_and_frame_render() {
     let mut app = EncoderCraftApp::new(queue_mgr, preset_reg);
 
     // Render a headless frame using egui's test harness
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 
@@ -22,7 +22,7 @@ fn test_app_creation_and_frame_render() {
     app.brightness = Brightness::HighContrast;
     app.tokens = Tokens::for_brightness(app.brightness);
 
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 
@@ -33,8 +33,10 @@ fn test_app_creation_and_frame_render() {
 fn app_renders_at_minimum_size_and_high_dpi_scales() {
     let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
     let ctx = egui::Context::default();
+    encodercraft_ui_egui::install_ui_runtime(&ctx);
     for (width, height, ppp) in [(720.0, 480.0, 1.0), (1120.0, 720.0, 1.5), (1440.0, 960.0, 2.0)] {
         ctx.set_pixels_per_point(ppp);
+        encodercraft_ui_egui::prepare_ui_frame(&ctx);
         let input =
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height))), ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| app.render(ui));
@@ -61,7 +63,7 @@ fn commands_and_workspaces_drive_the_frame() {
 
     for name in app.workspaces.names() {
         app.workspaces.activate(&name);
-        egui::__run_test_ui(|ui| app.render(ui));
+        encodercraft_ui_egui::run_test_ui(|ui| app.render(ui));
     }
     app.workspaces.activate(PREVIEW_WORKSPACE);
     if let Some(w) = app.workspaces.current_mut() {
@@ -71,7 +73,7 @@ fn commands_and_workspaces_drive_the_frame() {
             }
         }
     }
-    egui::__run_test_ui(|ui| app.render(ui));
+    encodercraft_ui_egui::run_test_ui(|ui| app.render(ui));
 }
 
 #[test]
@@ -84,7 +86,7 @@ fn workspace_file_is_written_and_restored() {
         .with_config_dir(dir.path().to_path_buf());
     app.workspaces.save_as("Mine").unwrap();
     app.workspace_shortcuts.set_binding(encodercraft_ui_egui::settings::WorkspaceShortcutAction::FocusNext, "Alt+F8".into()).unwrap();
-    egui::__run_test_ui(|ui| app.render(ui));
+    encodercraft_ui_egui::run_test_ui(|ui| app.render(ui));
     let again = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
         .with_config_dir(dir.path().to_path_buf());
     assert_eq!(again.workspaces.active, "Mine");
@@ -108,7 +110,7 @@ fn preferences_watch_folders_and_favorites_persist() {
     assert_eq!(app.prefs_state.prefs.theme, "Light");
     app.watch_state.configs.push(encodercraft_watch::WatchFolderConfig::new("w1", "/in".into(), "/out".into(), "P"));
     app.media_state.model.toggle_favorite(dir.path());
-    egui::__run_test_ui(|ui| app.render(ui));
+    encodercraft_ui_egui::run_test_ui(|ui| app.render(ui));
     assert!(settings::preferences_path(dir.path()).exists());
     assert_eq!(encodercraft_engine::load_preferences(&settings::preferences_path(dir.path())).unwrap().theme, "Light");
 
@@ -128,6 +130,8 @@ fn app_renders_with_every_title_bar_style() {
         let mut app =
             EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default()))).with_title_bar(style);
         let ctx = egui::Context::default();
+        encodercraft_ui_egui::install_ui_runtime(&ctx);
+        encodercraft_ui_egui::prepare_ui_frame(&ctx);
         let input =
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1120.0, 720.0))), ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| app.render(ui));
