@@ -201,6 +201,8 @@ fn the_in_window_menu_bar_runs_the_chosen_command() {
     let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
         .with_config_dir(dir.path().to_path_buf());
     app.run_command(encodercraft_ui_egui::commands::AppCommand::ThemeDark);
+    // The rows are found by their English labels, whatever the machine's language and the embedded catalogs.
+    app.prefs_state.prefs.language = "en".into();
     let ctx = egui::Context::default();
     encodercraft_ui_egui::install_ui_runtime(&ctx);
     ctx.enable_accesskit();

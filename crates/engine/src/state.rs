@@ -99,6 +99,10 @@ pub struct AppPreferences {
     pub max_parallel_jobs: usize,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Interface language: `"auto"` follows the operating system's, otherwise a craft-i18n locale code (`"ja"`).
+    /// A code the build doesn't offer also follows the system's.
+    #[serde(default = "default_language")]
+    pub language: String,
     /// Shut the computer down after the queue has finished, after a cancellable countdown.
     #[serde(default)]
     pub auto_shutdown: bool,
@@ -150,6 +154,11 @@ fn default_parallelism() -> usize {
 
 fn default_idle_timeout_minutes() -> u32 {
     2
+}
+
+/// Follow the operating system's language.
+fn default_language() -> String {
+    "auto".into()
 }
 
 /// Follow the operating system's light or dark mode.
@@ -224,6 +233,7 @@ impl Default for AppPreferences {
             default_output_dir: None,
             max_parallel_jobs: 2,
             theme: default_theme(),
+            language: default_language(),
             auto_shutdown: false,
             auto_start_on_idle: false,
             idle_timeout_minutes: 2,
@@ -356,6 +366,7 @@ mod prefs_tests {
         assert_eq!(p.schema_version, PREFERENCES_SCHEMA_VERSION);
         assert_eq!(p.max_parallel_jobs, 16);
         assert_eq!(p.theme, "System");
+        assert_eq!(p.language, "auto", "a file from before the language setting follows the system language");
         assert!(!p.auto_start_queue);
         assert!(p.lossy_conversion_decisions.is_empty());
     }

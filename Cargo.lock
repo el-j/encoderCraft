@@ -2687,6 +2687,7 @@ dependencies = [
  "craft-audio",
  "craft-behavior",
  "craft-host",
+ "craft-i18n",
  "craft-keymap",
  "craft-menu",
  "craft-mesh",

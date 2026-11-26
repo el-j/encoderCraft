@@ -81,7 +81,8 @@ pub struct EncoderCraftApp {
     last_saved_favorites: Option<Vec<std::path::PathBuf>>,
     workspace_name_input: String,
     last_saved_workspaces: Option<crate::workspace::WorkspaceSet>,
-    fonts_installed: bool,
+    /// Whether the installed fonts put a Japanese face first; `None` until the first frame installs them.
+    fonts_for_japanese: Option<bool>,
     pending_conversion_approvals: VecDeque<PendingConversionApproval>,
     conversion_status: Option<String>,
 }
@@ -148,7 +149,7 @@ impl EncoderCraftApp {
             last_saved_favorites: None,
             workspace_name_input: String::new(),
             last_saved_workspaces: None,
-            fonts_installed: false,
+            fonts_for_japanese: None,
             pending_conversion_approvals: VecDeque::new(),
             conversion_status: None,
         }
@@ -764,6 +765,7 @@ impl EncoderCraftApp {
             workspaces,
             active_workspace,
             panels,
+            label: &crate::menus::interface_label,
         })
     }
 
@@ -771,7 +773,7 @@ impl EncoderCraftApp {
     /// eframe creator, on the main thread.
     #[cfg(target_os = "macos")]
     pub fn install_native_menu(&mut self, ctx: &egui::Context) -> bool {
-        let layout = craft_menu::mac_layout(&self.menu_bar(), &craft_menu::LayoutOptions::new("encoderCraft"));
+        let layout = craft_menu::mac_layout(&self.menu_bar(), &craft_menu::LayoutOptions::new("encoderCraft").label(&crate::menus::layout_label));
         self.native_menu = craft_menu::mac::install_with(ctx, &layout.bar, craft_menu::mac::MacOptions::default().window_list(false));
         self.native_menu.is_some()
     }
@@ -827,7 +829,8 @@ impl EncoderCraftApp {
     /// comes back through [`Self::queue_menu_commands`].
     fn menu_bar_ui(&mut self, ui: &mut Ui) {
         let target = craft_menu::Target::current();
-        let bar = craft_menu::layout(&self.menu_bar(), target, &craft_menu::LayoutOptions::new("encoderCraft")).bar;
+        let options = craft_menu::LayoutOptions::new("encoderCraft").label(&crate::menus::layout_label);
+        let bar = craft_menu::layout(&self.menu_bar(), target, &options).bar;
         if *self.window_menu_bar != bar {
             *self.window_menu_bar = bar;
         }
@@ -870,7 +873,8 @@ impl EncoderCraftApp {
                 }
             }
             let bar = self.menu_bar();
-            let _clashes = menu.sync_with(&bar, || craft_menu::mac_layout(&bar, &craft_menu::LayoutOptions::new("encoderCraft")));
+            let _clashes = menu
+                .sync_with(&bar, || craft_menu::mac_layout(&bar, &craft_menu::LayoutOptions::new("encoderCraft").label(&crate::menus::layout_label)));
             self.native_menu = Some(menu);
         }
         #[cfg(not(target_os = "macos"))]
@@ -1031,10 +1035,16 @@ impl EncoderCraftApp {
 
     /// Renders the complete application frame inside an egui Ui.
     pub fn render(&mut self, ui: &mut Ui) {
-        if !self.fonts_installed {
-            crate::fonts::install(ui.ctx());
-            crate::fonts::check_static_glyphs(ui.ctx());
-            self.fonts_installed = true;
+        // The interface language: the `language` preference, `auto` following the operating system's.
+        let lang = crate::i18n::resolve(&self.prefs_state.prefs.language);
+        crate::i18n::set_current(lang);
+        let japanese = crate::i18n::japanese(lang);
+        if self.fonts_for_japanese != Some(japanese) {
+            crate::fonts::install(ui.ctx(), japanese);
+            if self.fonts_for_japanese.is_none() {
+                crate::fonts::check_static_glyphs(ui.ctx());
+            }
+            self.fonts_for_japanese = Some(japanese);
         }
         // A `System` choice follows the OS's light or dark mode, read as the craft-ui runtime reads it, so the
         // app's panels and the runtime's parts always agree.
@@ -1671,7 +1681,7 @@ struct EncoderPanelSpecs;
 
 impl PanelSpecs<crate::workspace::PanelId> for EncoderPanelSpecs {
     fn spec(&self, panel: &crate::workspace::PanelId) -> PanelSpec {
-        PanelSpec::new(panel.label())
+        PanelSpec::new(crate::i18n::tl!(panel.label()))
     }
 }
 

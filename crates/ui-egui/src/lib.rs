@@ -10,6 +10,7 @@ pub mod app;
 pub mod commands;
 pub mod encoding_panel;
 pub mod fonts;
+pub mod i18n;
 pub mod icons;
 pub mod inspector;
 pub mod log_dialog;

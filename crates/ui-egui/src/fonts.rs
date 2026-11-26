@@ -28,8 +28,18 @@ const FALLBACKS: &[(&str, &str)] = &[
     ("system-cjk", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
 ];
 
-/// Appends the first installed face for each fallback slot to every font family.
-pub fn install(ctx: &Context) {
+/// Japanese faces, tried before [`FALLBACKS`]' CJK face when the interface is Japanese, so kanji take their Japanese
+/// forms (the first CJK fallback on Windows is a Simplified Chinese face). Noto Sans CJK's first face is already JP.
+const JAPANESE: &[&str] = &[
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+    "C:\\Windows\\Fonts\\YuGothM.ttc",
+    "C:\\Windows\\Fonts\\meiryo.ttc",
+    "C:\\Windows\\Fonts\\msgothic.ttc",
+];
+
+/// Appends the first installed face for each fallback slot to every font family. With `japanese` (the interface
+/// language draws Japanese kanji forms) a Japanese face takes the CJK slot when one is installed.
+pub fn install(ctx: &Context, japanese: bool) {
     let mut defs = FontDefinitions::default();
     for (index, font) in CRAFT_FONTS.iter().enumerate() {
         let name = format!("craft-font-{}-{}-{}-{index}", font.family, font.style, font.scripts.join("-"));
@@ -39,14 +49,15 @@ pub fn install(ctx: &Context) {
         }
     }
     let mut added: Vec<&str> = Vec::new();
-    for (slot, path) in FALLBACKS {
-        if added.contains(slot) {
+    let japanese = JAPANESE.iter().filter(|_| japanese).map(|path| ("system-cjk", *path));
+    for (slot, path) in japanese.chain(FALLBACKS.iter().copied()) {
+        if added.contains(&slot) {
             continue;
         }
         let Ok(bytes) = std::fs::read(path) else { continue };
-        defs.font_data.insert((*slot).to_owned(), Arc::new(FontData::from_owned(bytes)));
+        defs.font_data.insert(slot.to_owned(), Arc::new(FontData::from_owned(bytes)));
         for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            defs.families.entry(family).or_default().push((*slot).to_owned());
+            defs.families.entry(family).or_default().push(slot.to_owned());
         }
         added.push(slot);
     }
@@ -93,7 +104,9 @@ mod tests {
     #[test]
     fn install_never_fails_without_system_fonts() {
         let ctx = Context::default();
-        install(&ctx);
+        for japanese in [false, true] {
+            install(&ctx, japanese);
+        }
     }
 
     #[test]
@@ -102,7 +115,7 @@ mod tests {
             return;
         }
         let ctx = Context::default();
-        install(&ctx);
+        install(&ctx, false);
         let mut output = ctx.run_ui(Default::default(), |ui| {
             ui.label("日本語 한국어 עברית العربية ไทย ქართული हिन्दी ✕◀✓");
         });
