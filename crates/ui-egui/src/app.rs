@@ -316,6 +316,7 @@ impl EncoderCraftApp {
                 }
                 self.prefs_state.is_open = !self.prefs_state.is_open;
             }
+            C::ThemeSystem => self.set_theme(C::ThemeSystem, "System", Brightness::System),
             C::ThemeDark => self.set_theme(C::ThemeDark, "Dark", Brightness::Dark),
             C::ThemeLight => self.set_theme(C::ThemeLight, "Light", Brightness::Light),
             C::ThemeHighContrast => self.set_theme(C::ThemeHighContrast, "High Contrast", Brightness::HighContrast),
@@ -607,6 +608,7 @@ impl EncoderCraftApp {
             Brightness::MediumDark => "Medium Dark",
             Brightness::Light => "Light",
             Brightness::HighContrast => "High Contrast",
+            Brightness::System => "System",
         }
         .into();
         self.brightness = brightness;
@@ -625,6 +627,7 @@ impl EncoderCraftApp {
             "mediumdark" => Brightness::MediumDark,
             "light" => Brightness::Light,
             "highcontrast" => Brightness::HighContrast,
+            "system" => Brightness::System,
             _ => Brightness::MediumDark,
         }
     }
@@ -776,6 +779,14 @@ impl EncoderCraftApp {
         {
             false
         }
+    }
+
+    /// The craft-ui runtime's root values for this frame: its parts take the app's theme choice, a `System` choice
+    /// included, instead of the runtime's default light mode. Pass it to [`crate::prepare_ui_frame`].
+    pub fn root_env(&self) -> craft_ui::runtime::env::RootEnv {
+        let mut root = craft_ui::runtime::env::RootEnv::new().mode(self.brightness.mode());
+        root.contrast = self.brightness.contrast();
+        root
     }
 
     /// Feeds native menu key equivalents to egui; call from `eframe::App::raw_input_hook`.
@@ -1037,6 +1048,9 @@ impl EncoderCraftApp {
             crate::fonts::check_static_glyphs(ui.ctx());
             self.fonts_installed = true;
         }
+        // A `System` choice follows the OS's light or dark mode, read as the craft-ui runtime reads it, so the
+        // app's panels and the runtime's parts always agree.
+        self.tokens = Tokens::for_brightness(self.brightness.resolve(crate::theme::system_is_dark(ui.ctx())));
         apply_theme(ui.ctx(), &self.tokens);
 
         let ctx = ui.ctx().clone();
@@ -1835,6 +1849,20 @@ mod tests {
     }
 
     #[test]
+    fn craft_ui_root_follows_the_theme_choice_not_the_runtime_default() {
+        let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+        let runtime_default = craft_ui::runtime::env::RootEnv::default().mode;
+        for (choice, theme) in [(Brightness::Dark, "Dark"), (Brightness::Light, "Light"), (Brightness::System, "System")] {
+            app.set_brightness(choice);
+            assert_eq!(app.root_env().mode, choice.mode(), "{choice:?}");
+            assert_eq!(app.prefs_state.prefs.theme, theme);
+            assert_eq!(EncoderCraftApp::brightness_from_theme(theme), choice, "a saved {theme:?} loads back");
+        }
+        app.set_brightness(Brightness::Dark);
+        assert_ne!(app.root_env().mode, runtime_default, "a dark theme must not leave craft-ui parts in the runtime's light default");
+    }
+
+    #[test]
     fn workspace_commands_cycle_focus_and_toggle_the_focused_panel() {
         let queue_mgr = Arc::new(QueueManager::new_in_memory());
         let preset_registry = Arc::new(Mutex::new(PresetRegistry::default()));
@@ -1919,7 +1947,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::install_ui_runtime(&ctx);
         for _ in 0..20 {
-            crate::prepare_ui_frame(&ctx);
+            crate::prepare_ui_frame(&ctx, app.root_env());
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
             out.textures_delta.clear();
             if matches!(app.updater.status(), craft_update::updater::Status::UpToDate) {

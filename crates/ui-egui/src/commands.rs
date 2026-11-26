@@ -53,6 +53,7 @@ pub enum AppCommand {
     ShowLog,
     Quit,
     Preferences,
+    ThemeSystem,
     ThemeDark,
     ThemeLight,
     ThemeHighContrast,
@@ -222,7 +223,8 @@ pub const COMMANDS: &[CommandInfo] = &[
     ),
     info(AppCommand::Quit, "file.quit", "Quit encoderCraft", Menu::File, Some(Shortcut::cmd(Key::Q)), Some("app.quit"), true),
     info(AppCommand::Preferences, "edit.preferences", "Preferences...", Menu::Edit, Some(Shortcut::cmd(Key::Comma)), Some("preferences.get"), false),
-    info(AppCommand::ThemeDark, "edit.theme_dark", "Theme: Dark", Menu::Edit, None, Some("preferences.set_theme"), true),
+    info(AppCommand::ThemeSystem, "edit.theme_system", "Theme: Match System", Menu::Edit, None, Some("preferences.set_theme"), true),
+    info(AppCommand::ThemeDark, "edit.theme_dark", "Theme: Dark", Menu::Edit, None, Some("preferences.set_theme"), false),
     info(AppCommand::ThemeLight, "edit.theme_light", "Theme: Light", Menu::Edit, None, Some("preferences.set_theme"), false),
     info(AppCommand::ThemeHighContrast, "edit.theme_high_contrast", "Theme: High Contrast", Menu::Edit, None, Some("preferences.set_theme"), false),
     info(AppCommand::StartQueue, "queue.start", "Start Queue", Menu::Queue, Some(Shortcut::plain(Key::Enter)), Some("queue.start"), false),
@@ -398,7 +400,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const ALL: [AppCommand; 50] = [
+    const ALL: [AppCommand; 51] = [
         AppCommand::AddMedia,
         AppCommand::AddFolder,
         AppCommand::AddMediaItem,
@@ -415,6 +417,7 @@ mod tests {
         AppCommand::ShowLog,
         AppCommand::Quit,
         AppCommand::Preferences,
+        AppCommand::ThemeSystem,
         AppCommand::ThemeDark,
         AppCommand::ThemeLight,
         AppCommand::ThemeHighContrast,

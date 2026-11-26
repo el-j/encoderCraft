@@ -801,7 +801,7 @@ impl CommandRegistry {
 
         self.register(CommandSpec::new("preferences.set_theme", "Set Theme", "Persists the selected application theme", |q, params| {
             let theme = required_string(&params, "theme")?;
-            if !matches!(theme.as_str(), "Dark" | "Medium Dark" | "Light" | "High Contrast") {
+            if !matches!(theme.as_str(), "System" | "Dark" | "Medium Dark" | "Light" | "High Contrast") {
                 return Err(EncoderError::InvalidJobSpec(format!("unsupported theme '{theme}'")));
             }
             let mut preferences = q.app_preferences()?;

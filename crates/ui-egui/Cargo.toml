@@ -32,6 +32,7 @@ craft-update = { workspace = true }
 craft-keymap = { workspace = true }
 craft-window = { workspace = true }
 craft-menu = { workspace = true }
+craft-theme = { workspace = true }
 craft-audio = { workspace = true }
 craft-mesh = { workspace = true }
 craft-svg = { workspace = true }
