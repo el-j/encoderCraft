@@ -5,6 +5,7 @@
 mod bench;
 mod ico;
 mod layers;
+mod testrun;
 mod version;
 
 use std::process::{Command, ExitCode};
@@ -14,7 +15,7 @@ usage: cargo xtask <command>
 
 commands:
   layers          enforce the crate dependency layering (docs/architecture.md §2)
-  test            run workspace tests
+  test            run workspace tests (test binaries run in parallel)
   bench           run automated transcoding performance benchmark suite
   version         print the workspace version; `version set <X.Y.Z[-pre]>` changes it
   ico             write a Windows .ico from PNGs (used by packaging/icons.sh)
@@ -65,12 +66,7 @@ fn cmd_layers() -> Result<(), String> {
 
 fn cmd_test() -> Result<(), String> {
     println!("Running workspace tests...");
-    let status = Command::new("cargo").args(["test", "--workspace"]).status().map_err(|e| format!("failed to spawn cargo test: {e}"))?;
-
-    if !status.success() {
-        return Err("cargo test failed".into());
-    }
-    Ok(())
+    testrun::run()
 }
 
 fn cmd_ci() -> Result<(), String> {
