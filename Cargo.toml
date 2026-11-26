@@ -61,45 +61,46 @@ authors = ["el-j", "ArtCraft Contributors"]
 
 [workspace.dependencies]
 # Upstream shared ArtCraft libraries (official storytold/craft-libs repository)
-craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-media = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", default-features = false, features = ["isobmff", "matroska", "bitstream", "avi", "mxf", "mpegts", "ogg"] }
-craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["serde", "native-windows"] }
-craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["egui"] }
-craft-menu = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["egui"] }
-craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["stl", "obj", "ply", "gltf", "fbx", "dae", "abc"] }
-craft-docx = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-wordmodel = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-usd = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-svg = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-markdown = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-html = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-idml = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-epub = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-eps = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-audio = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", default-features = false, features = ["decode", "peaks", "encode", "flac-decode", "flac-encode", "pcm-encode", "ac3-encode", "eac3-encode", "alac-encode", "alac-decode", "aac-encode", "mp3-encode", "opus-encode", "vorbis-encode", "qoa"] }
-craft-audio-dsp = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-image-codecs = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-video = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", default-features = false, features = ["h264", "hevc", "prores", "dnx", "av1", "vp9", "vp8", "apv", "mpeg2", "mpeg4", "ffv1", "hap"] }
-craft-captions = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-cms = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-gainmap = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-timeline = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["xml", "otio", "serde"] }
-craft-aaf = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-time = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-mcp-server = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-jsonrpc = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-docpath = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5" }
-craft-update = { git = "https://github.com/storytold/craft-libs", rev = "fab457094ad7dd7e078780f53ed9285a2d194be5", features = ["egui"] }
+craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-media = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", default-features = false, features = ["isobmff", "matroska", "bitstream", "avi", "mxf", "mpegts", "ogg"] }
+craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", features = ["ui"] }
+craft-menu = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-keymap = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", features = ["egui"] }
+craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", features = ["stl", "obj", "ply", "gltf", "fbx", "dae", "abc"] }
+craft-docx = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-wordmodel = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-usd = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-svg = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-markdown = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-html = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-idml = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-epub = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-eps = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-audio = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", default-features = false, features = ["decode", "peaks", "encode", "flac-decode", "flac-encode", "pcm-encode", "ac3-encode", "eac3-encode", "alac-encode", "alac-decode", "aac-encode", "mp3-encode", "opus-encode", "vorbis-encode", "qoa"] }
+craft-audio-dsp = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-image-codecs = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-video = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", default-features = false, features = ["h264", "hevc", "prores", "dnx", "av1", "vp9", "vp8", "apv", "mpeg2", "mpeg4", "ffv1", "hap"] }
+craft-captions = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-cms = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-gainmap = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-timeline = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", features = ["xml", "otio"] }
+craft-aaf = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-time = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-mcp-server = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-jsonrpc = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-docpath = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-behavior = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-host = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-update = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", features = ["ui"] }
 
 # Official ArtCraft repositories remaining prior to upstream consolidation
-filmcraft-scopes = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-time = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-media = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-codecs = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-color = { git = "https://github.com/storytold/filmcraft" }
-filmcraft-frame = { git = "https://github.com/storytold/filmcraft" }
+filmcraft-scopes = { git = "https://github.com/storytold/filmcraft", rev = "2d1d1b6920cf14c166e1b2bc73ba8208def150c9" }
+filmcraft-media = { git = "https://github.com/storytold/filmcraft", rev = "2d1d1b6920cf14c166e1b2bc73ba8208def150c9" }
+filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "2d1d1b6920cf14c166e1b2bc73ba8208def150c9" }
+filmcraft-color = { git = "https://github.com/storytold/filmcraft", rev = "2d1d1b6920cf14c166e1b2bc73ba8208def150c9" }
+filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "2d1d1b6920cf14c166e1b2bc73ba8208def150c9" }
 
 # Internal workspace crates (encodercraft-*)
 encodercraft-core = { path = "crates/core" }
@@ -159,20 +160,20 @@ todo = "warn"
 type_complexity = "allow"
 
 [patch.crates-io]
-ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_extras = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui_extras = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
+egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "f5025284445ea19c35f746d96fc0b75468b3f560" }
 winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
 
 [profile.dev.package."*"]

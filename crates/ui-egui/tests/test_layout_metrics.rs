@@ -99,6 +99,8 @@ fn test_headless_frame_renders_without_margin_overflow() {
     let mut app = EncoderCraftApp::new(queue_mgr, preset_reg);
 
     let ctx = egui::Context::default();
+    encodercraft_ui_egui::install_ui_runtime(&ctx);
+    encodercraft_ui_egui::prepare_ui_frame(&ctx);
     let width = 1280.0;
     let height = 800.0;
     let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height))), ..Default::default() };

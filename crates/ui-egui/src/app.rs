@@ -3,7 +3,10 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use craft_ui::docking::{Action as DockAction, DockArea, DockContent, DockStyle};
+use craft_behavior::dock::{Action as DockAction, Workspace as DockWorkspace};
+use craft_ui::contract::{Bind, BodyCx, PlainData, Tracked};
+use craft_ui::docking::{DockConfig, DockPanels, PanelSpec, PanelSpecs};
+use craft_ui::patterns::dock::DockArea;
 use egui::{RichText, Ui};
 use encodercraft_core::CraftJobSpec;
 use encodercraft_engine::{LossyConversion, LossyConversionKey, QueueManager};
@@ -61,6 +64,7 @@ pub struct EncoderCraftApp {
     pub completion_banner_timer: Option<std::time::Instant>,
     pub last_user_interaction: std::time::Instant,
     pub workspaces: crate::workspace::WorkspaceSet,
+    panel_specs: Arc<Tracked<EncoderPanelSpecs>>,
     pub workspace_shortcuts: crate::settings::WorkspaceShortcuts,
     pub focused_panel: crate::workspace::PanelId,
     config_dir: Option<std::path::PathBuf>,
@@ -125,6 +129,7 @@ impl EncoderCraftApp {
             completion_banner_timer: None,
             last_user_interaction: std::time::Instant::now(),
             workspaces: crate::workspace::WorkspaceSet::default(),
+            panel_specs: Arc::new(Tracked::new(EncoderPanelSpecs)),
             workspace_shortcuts: crate::settings::WorkspaceShortcuts::default(),
             focused_panel: crate::workspace::PanelId::Queue,
             config_dir: None,
@@ -774,13 +779,13 @@ impl EncoderCraftApp {
     }
 
     /// Feeds native menu key equivalents to egui; call from `eframe::App::raw_input_hook`.
-    pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+    pub fn raw_input_hook(&mut self, ctx: &egui::Context, _raw: &mut egui::RawInput) {
         #[cfg(target_os = "macos")]
         if let Some(menu) = self.native_menu.as_mut() {
-            menu.raw_input(raw);
+            menu.poll(ctx);
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = raw;
+        let _ = ctx;
     }
 
     /// Runs the native menu's clicks and brings its items up to date.
@@ -788,24 +793,27 @@ impl EncoderCraftApp {
         #[cfg(target_os = "macos")]
         {
             let Some(mut menu) = self.native_menu.take() else { return };
-            menu.set_gate(craft_menu::Gate {
-                modal: self.prefs_state.is_open
-                    || self.show_about_dialog
-                    || self.show_update_result_dialog
-                    || self.updater.prompt_open()
-                    || self.name_dialog.is_some()
-                    || !self.pending_conversion_approvals.is_empty(),
-                recording_shortcut: self.prefs_state.shortcut_recording.is_some(),
-                text_editing: ctx.egui_wants_keyboard_input(),
-            });
+            menu.set_gate(
+                craft_menu::Gate::default()
+                    .modal(
+                        self.prefs_state.is_open
+                            || self.show_about_dialog
+                            || self.show_update_result_dialog
+                            || self.updater.prompt_open()
+                            || self.name_dialog.is_some()
+                            || !self.pending_conversion_approvals.is_empty(),
+                    )
+                    .recording_shortcut(self.prefs_state.shortcut_recording.is_some())
+                    .text_editing(ctx.egui_wants_keyboard_input()),
+            );
             for click in menu.take_clicks(ctx) {
                 match crate::menus::resolve(&click) {
                     Some(action) => self.run_menu_action(action),
                     None => log::warn!("unknown menu command {}", click.id),
                 }
             }
-            let layout = craft_menu::mac_layout(&self.menu_bar(), &craft_menu::LayoutOptions::new("encoderCraft"));
-            menu.sync(layout);
+            let bar = self.menu_bar();
+            let _clashes = menu.sync_with(&bar, || craft_menu::mac_layout(&bar, &craft_menu::LayoutOptions::new("encoderCraft")));
             self.native_menu = Some(menu);
         }
         #[cfg(not(target_os = "macos"))]
@@ -1296,27 +1304,108 @@ impl EncoderCraftApp {
 
     fn drive_updater(&mut self, ctx: &egui::Context) {
         if std::mem::take(&mut self.check_updates_requested) {
-            self.updater.check_now(ctx);
+            self.updater.check_now();
         }
         self.updater.tick(ctx);
-        if self.updater.prompt_open() {
+        if self.updater.take_close(true) {
+            self.quit_requested = true;
+        }
+        if self.updater.available().is_some() {
             self.show_update_result_dialog = false;
         }
-        if self.show_update_result_dialog {
-            match craft_update::CheckResultDialog::new(&ENCODERCRAFT_APP, env!("CARGO_PKG_VERSION")).show(ctx, self.updater.status()) {
-                craft_update::CheckResultResponse::None => {}
-                craft_update::CheckResultResponse::Close => {
-                    self.updater.dismiss_status();
-                    self.show_update_result_dialog = false;
-                }
-                craft_update::CheckResultResponse::CheckAgain => self.updater.check_now(ctx),
-                craft_update::CheckResultResponse::RestartToUpdate => self.updater.restart_to_update(),
-            }
+        if self.show_update_result_dialog || self.updater.available().is_some() {
+            self.render_update_dialog(ctx);
         }
-        match self.updater.show(ctx) {
-            craft_update::updater::Action::None => {}
-            craft_update::updater::Action::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
-            craft_update::updater::Action::Close => self.quit_requested = true,
+    }
+
+    fn render_update_dialog(&mut self, ctx: &egui::Context) {
+        use craft_update::updater::Status;
+
+        let mut close = false;
+        let mut check_again = false;
+        let mut install_now = false;
+        let mut restart_now = false;
+        let mut open_url: Option<String> = None;
+
+        egui::Window::new("Software Update").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+            if let Some(release) = self.updater.available().cloned() {
+                ui.label(format!("{} {} is available (you have {}).", ENCODERCRAFT_APP.name, release.tag, env!("CARGO_PKG_VERSION")));
+                ui.horizontal(|ui| {
+                    if ui.button("Update and Restart").clicked() {
+                        install_now = true;
+                    }
+                    if ui.button("Download").clicked()
+                        && let craft_update::updater::Action::OpenUrl(url) = craft_update::updater::download_action(&ENCODERCRAFT_APP, &release)
+                    {
+                        open_url = Some(url);
+                        close = true;
+                    }
+                    if ui.button("Later").clicked() {
+                        close = true;
+                    }
+                });
+                return;
+            }
+            match self.updater.status() {
+                Status::Checking => {
+                    ui.label("Checking for updates…");
+                }
+                Status::UpToDate => {
+                    ui.label(format!("{} {} is the newest version available.", ENCODERCRAFT_APP.name, env!("CARGO_PKG_VERSION")));
+                }
+                Status::Failed(reason) => {
+                    ui.label(format!("Could not check for updates: {reason}"));
+                    if ui.button("Check Again").clicked() {
+                        check_again = true;
+                    }
+                }
+                Status::RateLimited => {
+                    ui.label("GitHub's request limit was reached.");
+                    if ui.button("Check Again").clicked() {
+                        check_again = true;
+                    }
+                }
+                Status::Installing => {
+                    ui.label("Installing update…");
+                }
+                Status::Ready => {
+                    ui.label("Update ready to install on exit.");
+                    if ui.button("Restart to Update").clicked() {
+                        restart_now = true;
+                    }
+                }
+                Status::Managed => {
+                    ui.label(format!("{} follows the version chosen in the launcher.", ENCODERCRAFT_APP.name));
+                }
+                Status::Updated(ver) => {
+                    ui.label(format!("{} updated to {ver}.", ENCODERCRAFT_APP.name));
+                }
+                Status::InstallFailed(reason) => {
+                    ui.label(format!("The update could not be installed: {reason}"));
+                }
+                Status::Idle => {}
+                _ => {}
+            }
+            if ui.button("OK").clicked() {
+                close = true;
+            }
+        });
+
+        if install_now {
+            self.updater.request_install(true);
+        }
+        if restart_now {
+            self.updater.restart_to_update();
+        }
+        if check_again {
+            self.updater.check_now();
+        }
+        if let Some(url) = open_url {
+            ctx.open_url(egui::OpenUrl::new_tab(url));
+        }
+        if close {
+            self.updater.dismiss_status();
+            self.show_update_result_dialog = false;
         }
     }
 
@@ -1350,35 +1439,23 @@ impl EncoderCraftApp {
             ui.label(RichText::new("No workspace is available.").color(self.tokens.status_failed));
             return;
         };
-        let layout = workspace.dock.layout.clone();
-        let visible_panels = layout.panels().into_iter().copied().collect();
-        let mut style = DockStyle::from_ui(ui);
-        style.tab_height = 24.0;
-        style.gap = 2.0;
-        style.min_pane = 120.0;
-        style.background = self.tokens.bg_panel;
-        style.tab_background = self.tokens.bg_panel_darker;
-        style.active_background = self.tokens.bg_surface_active;
-        style.text = self.tokens.text_primary;
-        style.inactive_text = self.tokens.text_secondary;
-        style.border = egui::Stroke::new(1.0, self.tokens.border_subtle);
-        style.accent = self.tokens.accent_primary;
-        style.font = egui::FontId::proportional(11.0);
+        let dock_arc: Arc<DockWorkspace<crate::workspace::PanelId>> = Arc::new(workspace.dock.clone());
+        let visible_panels = dock_arc.layout().panels().into_iter().copied().collect();
+        let specs = Arc::clone(&self.panel_specs);
 
         let mut content = EncoderDockContent { app: self, inspect_job, selected_job, output_ready, visible_panels, visibility_changes: Vec::new() };
-        let output =
-            DockArea::new(egui::Id::unique("encodercraft-dock-area")).float_bounds(ui.max_rect()).show_content(ui, &layout, &style, &mut content);
+        let output = DockArea::new("Panels", Bind::given(dock_arc), specs.as_ref(), &mut content, DockConfig::default()).show(ui);
         let visibility_changes = std::mem::take(&mut content.visibility_changes);
         drop(content);
 
         if let Some(error) = output.error {
-            self.conversion_status = Some(format!("Workspace layout could not be rendered: {error}"));
+            self.conversion_status = Some(format!("Workspace layout could not be rendered: {:?}", error.error));
         }
         let mut focused_panel_closed = false;
         for action in &output.actions {
             match action {
-                DockAction::Activate { panel } => self.focused_panel = *panel,
-                DockAction::Close { panel } if *panel == self.focused_panel => focused_panel_closed = true,
+                DockAction::Activate { panel, .. } => self.focused_panel = *panel,
+                DockAction::Close { panel, .. } if *panel == self.focused_panel => focused_panel_closed = true,
                 _ => {}
             }
         }
@@ -1402,12 +1479,11 @@ impl EncoderCraftApp {
         if focused_panel_closed {
             self.reconcile_focused_panel();
         }
-        for window in output.window_files {
-            for dropped in window.dropped {
-                let path = dropped.path().to_path_buf();
-                if !path.as_os_str().is_empty() {
-                    self.add_file_job(path);
-                }
+        for dropped in output.window_files {
+            if let Some(path) = dropped.path
+                && !path.as_os_str().is_empty()
+            {
+                self.add_file_job(path);
             }
         }
     }
@@ -1612,6 +1688,15 @@ impl EncoderCraftApp {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PlainData)]
+struct EncoderPanelSpecs;
+
+impl PanelSpecs<crate::workspace::PanelId> for EncoderPanelSpecs {
+    fn spec(&self, panel: &crate::workspace::PanelId) -> PanelSpec {
+        PanelSpec::new(panel.label())
+    }
+}
+
 struct EncoderDockContent<'a, 'b> {
     app: &'a mut EncoderCraftApp,
     inspect_job: &'b mut Option<CraftJobSpec>,
@@ -1621,8 +1706,8 @@ struct EncoderDockContent<'a, 'b> {
     visibility_changes: Vec<(crate::workspace::PanelId, bool)>,
 }
 
-impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
-    fn body(&mut self, ui: &mut Ui, panel: &crate::workspace::PanelId) {
+impl DockPanels<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
+    fn body(&mut self, panel: &crate::workspace::PanelId, ui: &mut Ui, _cx: &mut BodyCx<'_>) {
         use crate::workspace::PanelId;
 
         ui.push_id(*panel, |ui| {
@@ -1716,33 +1801,7 @@ impl DockContent<crate::workspace::PanelId> for EncoderDockContent<'_, '_> {
         });
     }
 
-    fn logical_label(&self, panel: &crate::workspace::PanelId) -> String {
-        panel.label().into()
-    }
-
-    fn paint_icon(&mut self, painter: &egui::Painter, rect: egui::Rect, panel: &crate::workspace::PanelId, color: egui::Color32) -> bool {
-        let icon = match panel {
-            crate::workspace::PanelId::MediaBrowser | crate::workspace::PanelId::WatchFolders => icons::Icon::Folder,
-            crate::workspace::PanelId::Presets => icons::Icon::Preset,
-            crate::workspace::PanelId::Queue => icons::Icon::ListView,
-            crate::workspace::PanelId::Preview => icons::Icon::Info,
-            crate::workspace::PanelId::Encoding => icons::Icon::Sliders,
-        };
-        icons::paint(painter, rect, icon, color);
-        true
-    }
-
-    fn group_header_width(
-        &self,
-        _panels: &[crate::workspace::PanelId],
-        _active: &crate::workspace::PanelId,
-        _floating: bool,
-        _strip_width: f32,
-    ) -> f32 {
-        28.0
-    }
-
-    fn group_header(&mut self, ui: &mut Ui, _panels: &[crate::workspace::PanelId], _active: &crate::workspace::PanelId, _floating: bool) {
+    fn group_header(&mut self, _panels: &[crate::workspace::PanelId], _active: usize, ui: &mut Ui, _cx: &mut BodyCx<'_>) {
         ui.menu_button("☰", |ui| {
             for panel in crate::workspace::PanelId::ALL {
                 let mut visible = self.visible_panels.contains(&panel);
@@ -1858,7 +1917,9 @@ mod tests {
         assert!(app.check_updates_requested);
 
         let ctx = egui::Context::default();
+        crate::install_ui_runtime(&ctx);
         for _ in 0..20 {
+            crate::prepare_ui_frame(&ctx);
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
             out.textures_delta.clear();
             if matches!(app.updater.status(), craft_update::updater::Status::UpToDate) {

@@ -50,7 +50,7 @@ fn test_queue_and_preset_column_resizing() {
     assert_eq!(p_cols.format, initial_p_format_w + 40.0);
 
     // Render frame to ensure layout geometry remains valid
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 }
@@ -82,7 +82,7 @@ fn test_all_toolbar_and_action_buttons() {
 
     for cmd in commands_to_exercise {
         app.run_command(cmd);
-        egui::__run_test_ui(|ui| {
+        encodercraft_ui_egui::run_test_ui(|ui| {
             app.render(ui);
         });
     }
@@ -194,7 +194,7 @@ fn test_all_inspector_tabs_cycle_without_panic() {
 
     for tab in all_tabs {
         app.inspector_state.active_tab = tab;
-        egui::__run_test_ui(|ui| {
+        encodercraft_ui_egui::run_test_ui(|ui| {
             app.render(ui);
         });
     }
@@ -342,19 +342,19 @@ fn test_full_ui_e2e_blackbox_workflow() {
 
     // 2. Select different jobs and render UI
     app.queue_state.selected_job_ids.insert("img-job-1".into());
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 
     app.queue_state.selected_job_ids.clear();
     app.queue_state.selected_job_ids.insert("aud-job-1".into());
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 
     app.queue_state.selected_job_ids.clear();
     app.queue_state.selected_job_ids.insert("doc-job-1".into());
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 
@@ -364,13 +364,13 @@ fn test_full_ui_e2e_blackbox_workflow() {
     app.preview_state.transport.toggle_mute();
     app.preview_state.transport.in_point = Some(10);
     app.preview_state.transport.out_point = Some(90);
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 
     // 4. Test preset browser category filter and search
     app.preset_state.search_query = "YouTube".into();
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
     app.preset_state.search_query.clear();
@@ -384,7 +384,7 @@ fn test_full_ui_e2e_blackbox_workflow() {
     app.run_command(AppCommand::StopQueue);
     app.run_command(AppCommand::ResetSelected);
 
-    egui::__run_test_ui(|ui| {
+    encodercraft_ui_egui::run_test_ui(|ui| {
         app.render(ui);
     });
 }
