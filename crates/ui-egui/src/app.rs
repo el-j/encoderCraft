@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use craft_behavior::dock::{Action as DockAction, Workspace as DockWorkspace};
-use craft_ui::contract::{Bind, BodyCx, PlainData, ShowContainer, Tracked};
+use craft_ui::contract::{Bind, BodyCx, PlainData, Show as _, ShowContainer, Tracked};
 use craft_ui::docking::{DockConfig, DockPanels, PanelSpec, PanelSpecs};
 use craft_ui::patterns::dock::DockArea;
 use egui::{RichText, Ui};
@@ -24,6 +24,9 @@ use crate::watch_panel::{WatchPanelState, render_watch_panel, trigger_watch_scan
 
 static ENCODERCRAFT_APP: craft_update::App =
     craft_update::App::new("encodercraft", "EncoderCraft", "Media transcoding and batch queue", "el-j/encoderCraft");
+
+/// The app icon (`assets/app-icon/`, see its README) at the left of the in-window menu bar.
+const APP_ICON_SVG: &[u8] = include_bytes!("../../../assets/app-icon/icon.svg");
 
 /// The root egui application for encoderCraft.
 pub struct EncoderCraftApp {
@@ -819,8 +822,9 @@ impl EncoderCraftApp {
     }
 
     /// The menus drawn in the window (Windows and Linux; macOS shows them in the system menu bar): the same craft-menu
-    /// tree as the native bar, laid out for the platform, as the classic text-only bar the other Craft apps show. A
-    /// chosen item fires through the craft-ui runtime and comes back through [`Self::queue_menu_commands`].
+    /// tree as the native bar, laid out for the platform, as the classic text-only bar the other Craft apps show,
+    /// led by the app icon as theirs is by their brand mark. A chosen item fires through the craft-ui runtime and
+    /// comes back through [`Self::queue_menu_commands`].
     fn menu_bar_ui(&mut self, ui: &mut Ui) {
         let target = craft_menu::Target::current();
         let bar = craft_menu::layout(&self.menu_bar(), target, &craft_menu::LayoutOptions::new("encoderCraft")).bar;
@@ -829,6 +833,10 @@ impl EncoderCraftApp {
         }
         let keyboard = !self.modal_open() && self.prefs_state.shortcut_recording.is_none();
         let bar = &self.window_menu_bar;
+        // In the bar's own flow, so the bar centres it as it does the menus; a craft row would hang it from the top.
+        // Decorative: the empty label keeps a screen reader from announcing it.
+        ui.add_space(ui.spacing().item_spacing.x);
+        craft_ui::display::Picture::svg("", APP_ICON_SVG).show(ui);
         craft_ui::layout_components::Row::new().show(ui, |ui, _| {
             craft_menu::MenuBarUi::new(bar).target(target).keyboard(keyboard).icons(false).compact(true).show(ui);
         });
@@ -1891,6 +1899,45 @@ mod tests {
 
         let jobs = app.queue_mgr.list_jobs();
         assert_eq!(jobs.len(), 2, "Should have queued both clip1.mp3 and track1.wav, ignoring notes.txt");
+    }
+
+    #[test]
+    fn the_window_menu_bar_leads_with_the_app_icon() {
+        fn walk(shape: &egui::Shape, pictures: &mut Vec<egui::Rect>, labels: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, pictures, labels)),
+                egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => pictures.push(mesh.calc_bounds()),
+                // The label's line box, which the menu centres in the bar.
+                egui::Shape::Text(text) => labels.push(text.galley.rect.translate(text.pos.to_vec2())),
+                _ => {}
+            }
+        }
+        let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())));
+        let ctx = egui::Context::default();
+        crate::install_ui_runtime(&ctx);
+        let (mut pictures, mut labels) = (Vec::new(), Vec::new());
+        // The first frame lays the bar out; the second paints the rasterised icon.
+        for _ in 0..2 {
+            crate::prepare_ui_frame(&ctx, app.root_env());
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                // As the window's top bar holds it.
+                ui.allocate_ui(egui::vec2(800.0, crate::titlebar::BAR_HEIGHT), |ui| ui.horizontal_centered(|ui| app.menu_bar_ui(ui)));
+            });
+            out.textures_delta.clear();
+            (pictures, labels) = (Vec::new(), Vec::new());
+            for clipped in &out.shapes {
+                walk(&clipped.shape, &mut pictures, &mut labels);
+            }
+        }
+        let [icon] = pictures[..] else { panic!("the bar paints one picture, the app icon: {pictures:?}") };
+        assert!(icon.width() > 8.0 && (icon.width() - icon.height()).abs() < 0.5, "the icon is a square tile: {icon:?}");
+        assert!(icon.min.x >= 4.0, "the icon keeps clear of the window's edge: {icon:?}");
+        assert!(!labels.is_empty(), "the bar shows its menus");
+        for label in &labels {
+            assert!(label.min.x >= icon.max.x, "the menus follow the icon: {label:?} starts left of {icon:?}");
+            let off = (label.center().y - icon.center().y).abs();
+            assert!(off <= 1.0, "the icon sits level with the menus, {off} pt off: {icon:?} beside {label:?}");
+        }
     }
 
     #[test]
