@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use craft_behavior::dock::{Action as DockAction, Workspace as DockWorkspace};
-use craft_ui::contract::{Bind, BodyCx, PlainData, Tracked};
+use craft_ui::contract::{Bind, BodyCx, PlainData, ShowContainer, Tracked};
 use craft_ui::docking::{DockConfig, DockPanels, PanelSpec, PanelSpecs};
 use craft_ui::patterns::dock::DockArea;
 use egui::{RichText, Ui};
@@ -59,6 +59,10 @@ pub struct EncoderCraftApp {
     quit_requested: bool,
     #[cfg(target_os = "macos")]
     native_menu: Option<craft_menu::NativeMenu>,
+    /// The in-window menu bar's laid-out model, replaced only when the menus change so the bar's view stays memoized.
+    window_menu_bar: Tracked<craft_menu::MenuBar>,
+    /// Commands the in-window menus fired, run at the start of the next [`Self::render`].
+    pending_menu_commands: Vec<craft_menu::CommandRef>,
     pub last_watch_tick: Option<std::time::Instant>,
     pub was_worker_running: bool,
     pub completion_banner_timer: Option<std::time::Instant>,
@@ -124,6 +128,8 @@ impl EncoderCraftApp {
             quit_requested: false,
             #[cfg(target_os = "macos")]
             native_menu: None,
+            window_menu_bar: Tracked::default(),
+            pending_menu_commands: Vec::new(),
             last_watch_tick: None,
             was_worker_running: false,
             completion_banner_timer: None,
@@ -738,7 +744,6 @@ impl EncoderCraftApp {
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn menu_inputs_snapshot(&self) -> (Vec<String>, String, Vec<(crate::workspace::PanelId, bool)>) {
         let panels = crate::workspace::PanelId::ALL
             .into_iter()
@@ -747,7 +752,6 @@ impl EncoderCraftApp {
         (self.workspaces.names(), self.workspaces.active.clone(), panels)
     }
 
-    #[cfg(target_os = "macos")]
     fn menu_bar(&self) -> craft_menu::MenuBar {
         let state = self.command_state();
         let (workspaces, active_workspace, panels) = self.menu_inputs_snapshot();
@@ -789,6 +793,47 @@ impl EncoderCraftApp {
         root
     }
 
+    /// Whether a modal dialog is up, so the menus take no commands or keys.
+    fn modal_open(&self) -> bool {
+        self.prefs_state.is_open
+            || self.show_about_dialog
+            || self.show_update_result_dialog
+            || self.updater.prompt_open()
+            || self.name_dialog.is_some()
+            || !self.pending_conversion_approvals.is_empty()
+    }
+
+    /// Takes the commands the in-window menus fired ([`crate::prepare_ui_frame`] returns them); the next
+    /// [`Self::render`] runs them, as the macOS menu bar's clicks are run.
+    pub fn queue_menu_commands(&mut self, commands: impl IntoIterator<Item = craft_menu::CommandRef>) {
+        self.pending_menu_commands.extend(commands);
+    }
+
+    fn run_pending_menu_commands(&mut self) {
+        for command in std::mem::take(&mut self.pending_menu_commands) {
+            match crate::menus::resolve(&command) {
+                Some(action) => self.run_menu_action(action),
+                None => log::warn!("unknown menu command {}", command.id),
+            }
+        }
+    }
+
+    /// The menus drawn in the window (Windows and Linux; macOS shows them in the system menu bar): the same craft-menu
+    /// tree as the native bar, laid out for the platform, as the classic text-only bar the other Craft apps show. A
+    /// chosen item fires through the craft-ui runtime and comes back through [`Self::queue_menu_commands`].
+    fn menu_bar_ui(&mut self, ui: &mut Ui) {
+        let target = craft_menu::Target::current();
+        let bar = craft_menu::layout(&self.menu_bar(), target, &craft_menu::LayoutOptions::new("encoderCraft")).bar;
+        if *self.window_menu_bar != bar {
+            *self.window_menu_bar = bar;
+        }
+        let keyboard = !self.modal_open() && self.prefs_state.shortcut_recording.is_none();
+        let bar = &self.window_menu_bar;
+        craft_ui::layout_components::Row::new().show(ui, |ui, _| {
+            craft_menu::MenuBarUi::new(bar).target(target).keyboard(keyboard).icons(false).compact(true).show(ui);
+        });
+    }
+
     /// Feeds native menu key equivalents to egui; call from `eframe::App::raw_input_hook`.
     pub fn raw_input_hook(&mut self, ctx: &egui::Context, _raw: &mut egui::RawInput) {
         #[cfg(target_os = "macos")]
@@ -806,14 +851,7 @@ impl EncoderCraftApp {
             let Some(mut menu) = self.native_menu.take() else { return };
             menu.set_gate(
                 craft_menu::Gate::default()
-                    .modal(
-                        self.prefs_state.is_open
-                            || self.show_about_dialog
-                            || self.show_update_result_dialog
-                            || self.updater.prompt_open()
-                            || self.name_dialog.is_some()
-                            || !self.pending_conversion_approvals.is_empty(),
-                    )
+                    .modal(self.modal_open())
                     .recording_shortcut(self.prefs_state.shortcut_recording.is_some())
                     .text_editing(ctx.egui_wants_keyboard_input()),
             );
@@ -831,7 +869,6 @@ impl EncoderCraftApp {
         let _ = ctx;
     }
 
-    #[cfg(target_os = "macos")]
     fn run_menu_action(&mut self, action: crate::menus::MenuAction) {
         use crate::commands::AppCommand as C;
         use crate::menus::MenuAction;
@@ -877,63 +914,6 @@ impl EncoderCraftApp {
         } else if cancelled {
             self.name_dialog = None;
             self.workspace_name_input.clear();
-        }
-    }
-
-    fn window_menu(&mut self, ui: &mut Ui) {
-        ui.separator();
-        ui.label(RichText::new("Workspace").small().color(self.tokens.text_dim));
-        for name in self.workspaces.names() {
-            let active = name == self.workspaces.active;
-            if ui.radio(active, &name).clicked()
-                && self.dispatch_workspace_mutation(crate::commands::AppCommand::ActivateWorkspace, serde_json::json!({ "name": name })).is_some()
-            {
-                self.reconcile_focused_panel();
-            }
-        }
-        ui.separator();
-        ui.label(RichText::new("Panels").small().color(self.tokens.text_dim));
-        for panel in crate::workspace::PanelId::ALL {
-            if let Some(ws) = self.workspaces.current() {
-                let mut shown = ws.is_visible(panel);
-                if ui.checkbox(&mut shown, panel.label()).changed() {
-                    self.set_workspace_panel_visible(panel, shown);
-                }
-            }
-        }
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.workspace_name_input).hint_text("Workspace name").desired_width(120.0));
-            if ui.button("Save As").clicked() {
-                let name = self.workspace_name_input.clone();
-                if self.dispatch_workspace_mutation(crate::commands::AppCommand::SaveWorkspaceAs, serde_json::json!({ "name": name })).is_some() {
-                    self.workspace_name_input.clear();
-                    self.reconcile_focused_panel();
-                }
-            }
-        });
-        if ui.button("Rename Active").clicked() {
-            let name = self.workspace_name_input.clone();
-            if self.dispatch_workspace_mutation(crate::commands::AppCommand::RenameWorkspace, serde_json::json!({ "name": name })).is_some() {
-                self.workspace_name_input.clear();
-                self.reconcile_focused_panel();
-            }
-        }
-        if ui.button("Reset Active").clicked()
-            && let Some(default_workspace) = self.default_workspace_for_reset()
-            && self
-                .dispatch_workspace_mutation(
-                    crate::commands::AppCommand::ResetWorkspace,
-                    serde_json::json!({ "defaultWorkspace": default_workspace }),
-                )
-                .is_some()
-        {
-            self.reconcile_focused_panel();
-        }
-        if ui.button("Delete Active").clicked()
-            && self.dispatch_workspace_mutation(crate::commands::AppCommand::DeleteWorkspace, serde_json::json!({})).is_some()
-        {
-            self.reconcile_focused_panel();
         }
     }
 
@@ -1052,6 +1032,7 @@ impl EncoderCraftApp {
         // app's panels and the runtime's parts always agree.
         self.tokens = Tokens::for_brightness(self.brightness.resolve(crate::theme::system_is_dark(ui.ctx())));
         apply_theme(ui.ctx(), &self.tokens);
+        self.run_pending_menu_commands();
 
         let ctx = ui.ctx().clone();
         if self.prefs_state.shortcut_recording.is_none() {
@@ -1095,32 +1076,7 @@ impl EncoderCraftApp {
             }
             ui.horizontal_centered(|ui| {
                 ui.add_space(style.leading_inset());
-                let state = self.command_state();
-                let mut chosen = None;
-                for menu in crate::commands::Menu::ALL {
-                    ui.menu_button(menu.label(), |ui| {
-                        for info in crate::commands::menu_commands(menu) {
-                            if info.separator_before {
-                                ui.separator();
-                            }
-                            let mut button = egui::Button::new(info.label);
-                            let shortcut_text = self.workspace_shortcuts.command_display(info.command);
-                            if let Some(shortcut) = shortcut_text {
-                                button = button.shortcut_text(shortcut);
-                            }
-                            if ui.add_enabled(info.command.enabled(&state), button).clicked() {
-                                chosen = Some(info.command);
-                                ui.close();
-                            }
-                        }
-                        if menu == crate::commands::Menu::Window {
-                            self.window_menu(ui);
-                        }
-                    });
-                }
-                if let Some(cmd) = chosen {
-                    self.run_command(cmd);
-                }
+                self.menu_bar_ui(ui);
             });
             bar_rect
         });
