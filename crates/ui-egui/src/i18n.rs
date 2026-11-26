@@ -76,6 +76,14 @@ pub fn tid<'a>(id: &str, english: &'a str) -> &'a str {
     I18N.tid(current(), id, english)
 }
 
+/// A command's label in the interface language, wherever it is shown (menus, the shortcut list, messages): the
+/// command table's English label with `...` written as `…`, the form the menus show and the catalogs key on, looked
+/// up by the command's id.
+pub fn command_label(id: &str, english: &str) -> String {
+    let english = english.replace("...", "…");
+    tid(id, &english).to_owned()
+}
+
 /// The languages this build offers, English first: each one's `language` preference value and its name in itself.
 pub fn languages() -> Vec<(&'static str, &'static str)> {
     let i18n: &'static I18n = &I18N;
@@ -107,6 +115,14 @@ mod tests {
     fn a_code_this_build_does_not_offer_follows_the_system_like_auto() {
         assert_eq!(resolve("xx-not-a-language"), resolve(SYSTEM));
         assert_eq!(resolve(""), resolve(SYSTEM));
+    }
+
+    #[test]
+    fn command_labels_use_the_catalog_form_of_an_ellipsis() {
+        for info in crate::commands::COMMANDS.iter().filter(|info| info.label.ends_with("...")) {
+            let label = command_label(info.id, info.label);
+            assert!(!label.contains("...") && label.ends_with('…'), "{}: {label:?}", info.id);
+        }
     }
 
     #[test]

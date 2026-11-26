@@ -128,9 +128,9 @@ pub fn render_prefs_dialog(
         } else if let Some(binding) = crate::settings::WorkspaceShortcuts::capture(&event) {
             match shortcuts.set_command_binding(command, binding) {
                 Ok(()) => {
-                    let label = command.info().map_or(tl!("Command"), |info| crate::i18n::tid(info.id, info.label));
+                    let label = command.info().map_or_else(|| tl!("Command").to_owned(), |info| crate::i18n::command_label(info.id, info.label));
                     let shortcut = shortcuts.command_display(command).unwrap_or_else(|| tl!("Not assigned").into());
-                    state.shortcut_message = Some(craft_i18n::fmt(tl!("{label} set to {shortcut}."), &[("label", label), ("shortcut", &shortcut)]));
+                    state.shortcut_message = Some(craft_i18n::fmt(tl!("{label} set to {shortcut}."), &[("label", &label), ("shortcut", &shortcut)]));
                 }
                 Err(error) => state.shortcut_message = Some(error),
             }
@@ -366,7 +366,7 @@ pub fn render_prefs_dialog(
                                             let command = info.command;
                                             let display = shortcuts.command_display(command).unwrap_or_else(|| tl!("Not assigned").into());
                                             ui.horizontal(|ui| {
-                                                ui.label(crate::i18n::tid(info.id, info.label));
+                                                ui.label(crate::i18n::command_label(info.id, info.label));
                                                 ui.label(RichText::new(display).color(tokens.text_secondary));
                                                 if state.shortcut_recording == Some(command) {
                                                     ui.label(RichText::new(tl!("Press a key…")).color(tokens.accent_primary));
