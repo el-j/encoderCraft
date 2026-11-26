@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use encodercraft_color::{ColorSpaceTag, PixelFormat};
 use encodercraft_core::{ClientInfo, CraftJobSpec, JobPriority, Rational64, SourceDescriptor, StartPolicy, VideoFrame};
@@ -17,6 +18,32 @@ use encodercraft_presets::{PresetRegistry, evaluate_preset};
 
 fn tool(name: &str) -> bool {
     Command::new(name).arg("-version").output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Runs `check` for every case on a bounded pool of threads and returns all failures in case order.
+///
+/// Each case is an independent CLI conversion (its own output file; settings are only read), and a
+/// conversion keeps about two cores busy, so the pool uses half of the available cores.
+fn check_in_parallel<T: Sync>(cases: &[T], check: impl Fn(&T) -> Vec<String> + Sync) -> Vec<String> {
+    let workers = std::thread::available_parallelism().map_or(1, |cores| cores.get() / 2).clamp(1, cases.len().max(1));
+    let next = AtomicUsize::new(0);
+    let mut results: Vec<(usize, Vec<String>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(case) = cases.get(index) else { break done };
+                        done.push((index, check(case)));
+                    }
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect()
+    });
+    results.sort_by_key(|(index, _)| *index);
+    results.into_iter().flat_map(|(_, failures)| failures).collect()
 }
 
 fn full_qa_required() -> bool {
@@ -251,81 +278,81 @@ fn video_matrix_outputs_are_judged_by_an_independent_decoder() {
     let config_root = dir.path().join("cli-config");
     let source_paths: Vec<_> = sources.iter().map(|source| dir.path().join(source.file)).collect();
     seed_conversion_approvals(&source_paths, &presets, &config_root, dir.path());
-    let mut failures = Vec::new();
-    for s in &sources {
+    let cases: Vec<_> = sources
+        .iter()
+        .flat_map(|s| {
+            let media_info = encodercraft_source::probe_media_info(&dir.path().join(s.file)).expect("probe QA media source");
+            let high_bit_depth = media_info.video_streams.first().is_some_and(|stream| stream.bit_depth > 8);
+            presets.map(|preset| (s, high_bit_depth, preset))
+        })
+        .collect();
+    let failures = check_in_parallel(&cases, |&(s, high_bit_depth, (preset, ext, codec, size))| {
+        let mut failures = Vec::new();
         let src = dir.path().join(s.file);
-        let media_info = encodercraft_source::probe_media_info(&src).expect("probe QA media source");
-        for (preset, ext, codec, size) in presets {
-            let out: PathBuf = dir.path().join(format!("{}-{}.{ext}", s.file, preset.replace([' ', '/'], "_")));
-            let label = format!("{} -> {preset}", s.file);
-            if let Err(e) = convert(bin, &src, preset, &out, &config_root) {
-                failures.push(format!("{label}: conversion failed: {e}"));
-                continue;
+        let out: PathBuf = dir.path().join(format!("{}-{}.{ext}", s.file, preset.replace([' ', '/'], "_")));
+        let label = format!("{} -> {preset}", s.file);
+        if let Err(e) = convert(bin, &src, preset, &out, &config_root) {
+            failures.push(format!("{label}: conversion failed: {e}"));
+            return failures;
+        }
+        let v = match probe(&out, "stream=codec_name,width,height,r_frame_rate,nb_read_frames", &["-count_frames", "-select_streams", "v"]) {
+            Ok(probe) => probe,
+            Err(error) => {
+                failures.push(format!("{label}: independent video probe failed: {error}"));
+                return failures;
             }
-            let v = match probe(&out, "stream=codec_name,width,height,r_frame_rate,nb_read_frames", &["-count_frames", "-select_streams", "v"]) {
-                Ok(probe) => probe,
-                Err(error) => {
-                    failures.push(format!("{label}: independent video probe failed: {error}"));
-                    continue;
-                }
-            };
-            let v = v.lines().next().unwrap_or_default();
-            let expected_codec =
-                if preset == "Match Source - High Bitrate" && media_info.video_streams.first().is_some_and(|stream| stream.bit_depth > 8) {
-                    "hevc"
-                } else {
-                    codec
-                };
-            if field(v, "codec_name").as_deref() != Some(expected_codec) {
-                failures.push(format!("{label}: codec {:?}, expected {expected_codec}", field(v, "codec_name")));
-            }
-            let frames: u32 = field(v, "nb_read_frames").and_then(|f| f.parse().ok()).unwrap_or(0);
-            if frames != s.frames {
-                failures.push(format!("{label}: {frames} frames, expected {}", s.frames));
-            }
-            if field(v, "r_frame_rate").as_deref() != Some(&format!("{}/1", s.fps)) {
-                failures.push(format!("{label}: frame rate {:?}, expected {}/1", field(v, "r_frame_rate"), s.fps));
-            }
-            if let Some((w, h)) = size
-                && (field(v, "width") != Some(w.to_string()) || field(v, "height") != Some(h.to_string()))
-            {
-                failures.push(format!("{label}: size {:?}x{:?}, expected {w}x{h}", field(v, "width"), field(v, "height")));
-            }
-            if s.audio {
-                match probe(&out, "stream=codec_name,sample_rate,channels", &["-select_streams", "a"]) {
-                    Ok(audio_probe) if !audio_probe.trim().is_empty() => {
-                        let audio_stream = audio_probe.lines().next().unwrap_or_default();
-                        let expected_audio_codec = if matches!(preset, "Apple ProRes 422 HQ" | "Avid DNxHR HQ 1080p") { "pcm_s24le" } else { "aac" };
-                        if field(audio_stream, "codec_name").as_deref() != Some(expected_audio_codec) {
-                            failures.push(format!("{label}: audio codec {:?}, expected {expected_audio_codec}", field(audio_stream, "codec_name")));
-                        }
-                        let expected_rate = if preset == "Match Source - High Bitrate" { "44100" } else { "48000" };
-                        if field(audio_stream, "sample_rate").as_deref() != Some(expected_rate) {
-                            failures.push(format!("{label}: audio sample rate {:?}, expected {expected_rate}", field(audio_stream, "sample_rate")));
-                        }
-                        let expected_channels =
-                            if matches!(preset, "Match Source - High Bitrate" | "Apple ProRes 422 HQ" | "Avid DNxHR HQ 1080p") { "1" } else { "2" };
-                        if field(audio_stream, "channels").as_deref() != Some(expected_channels) {
-                            failures
-                                .push(format!("{label}: audio channel count {:?}, expected {expected_channels}", field(audio_stream, "channels")));
-                        }
+        };
+        let v = v.lines().next().unwrap_or_default();
+        let expected_codec = if preset == "Match Source - High Bitrate" && high_bit_depth { "hevc" } else { codec };
+        if field(v, "codec_name").as_deref() != Some(expected_codec) {
+            failures.push(format!("{label}: codec {:?}, expected {expected_codec}", field(v, "codec_name")));
+        }
+        let frames: u32 = field(v, "nb_read_frames").and_then(|f| f.parse().ok()).unwrap_or(0);
+        if frames != s.frames {
+            failures.push(format!("{label}: {frames} frames, expected {}", s.frames));
+        }
+        if field(v, "r_frame_rate").as_deref() != Some(&format!("{}/1", s.fps)) {
+            failures.push(format!("{label}: frame rate {:?}, expected {}/1", field(v, "r_frame_rate"), s.fps));
+        }
+        if let Some((w, h)) = size
+            && (field(v, "width") != Some(w.to_string()) || field(v, "height") != Some(h.to_string()))
+        {
+            failures.push(format!("{label}: size {:?}x{:?}, expected {w}x{h}", field(v, "width"), field(v, "height")));
+        }
+        if s.audio {
+            match probe(&out, "stream=codec_name,sample_rate,channels", &["-select_streams", "a"]) {
+                Ok(audio_probe) if !audio_probe.trim().is_empty() => {
+                    let audio_stream = audio_probe.lines().next().unwrap_or_default();
+                    let expected_audio_codec = if matches!(preset, "Apple ProRes 422 HQ" | "Avid DNxHR HQ 1080p") { "pcm_s24le" } else { "aac" };
+                    if field(audio_stream, "codec_name").as_deref() != Some(expected_audio_codec) {
+                        failures.push(format!("{label}: audio codec {:?}, expected {expected_audio_codec}", field(audio_stream, "codec_name")));
                     }
-                    Ok(_) => failures.push(format!("{label}: audio stream missing")),
-                    Err(error) => failures.push(format!("{label}: independent audio probe failed: {error}")),
+                    let expected_rate = if preset == "Match Source - High Bitrate" { "44100" } else { "48000" };
+                    if field(audio_stream, "sample_rate").as_deref() != Some(expected_rate) {
+                        failures.push(format!("{label}: audio sample rate {:?}, expected {expected_rate}", field(audio_stream, "sample_rate")));
+                    }
+                    let expected_channels =
+                        if matches!(preset, "Match Source - High Bitrate" | "Apple ProRes 422 HQ" | "Avid DNxHR HQ 1080p") { "1" } else { "2" };
+                    if field(audio_stream, "channels").as_deref() != Some(expected_channels) {
+                        failures.push(format!("{label}: audio channel count {:?}, expected {expected_channels}", field(audio_stream, "channels")));
+                    }
                 }
-            }
-            match psnr(&out, &src) {
-                Ok(p) if p >= 18.0 => {}
-                Ok(p) => failures.push(format!("{label}: picture differs from the source (PSNR {p:.1} dB)")),
-                Err(error) => failures.push(format!("{label}: independent picture comparison failed: {error}")),
-            }
-            match duration_seconds(&out) {
-                Ok(duration) if (duration - 2.0).abs() <= 0.1 => {}
-                Ok(duration) => failures.push(format!("{label}: output duration {duration:.3}s, expected 2.000s")),
-                Err(error) => failures.push(format!("{label}: {error}")),
+                Ok(_) => failures.push(format!("{label}: audio stream missing")),
+                Err(error) => failures.push(format!("{label}: independent audio probe failed: {error}")),
             }
         }
-    }
+        match psnr(&out, &src) {
+            Ok(p) if p >= 18.0 => {}
+            Ok(p) => failures.push(format!("{label}: picture differs from the source (PSNR {p:.1} dB)")),
+            Err(error) => failures.push(format!("{label}: independent picture comparison failed: {error}")),
+        }
+        match duration_seconds(&out) {
+            Ok(duration) if (duration - 2.0).abs() <= 0.1 => {}
+            Ok(duration) => failures.push(format!("{label}: output duration {duration:.3}s, expected 2.000s")),
+            Err(error) => failures.push(format!("{label}: {error}")),
+        }
+        failures
+    });
     assert!(failures.is_empty(), "QA matrix failures:\n{}", failures.join("\n"));
 }
 
@@ -359,47 +386,47 @@ fn audio_matrix_preserves_duration_channels_and_audible_signal() {
     let config_root = dir.path().join("audio-cli-config");
     seed_conversion_approvals(&sources, &presets, &config_root, dir.path());
 
-    let mut failures = Vec::new();
-    for source in &sources {
-        for (preset, ext, expected_codec, _) in presets {
-            let output = dir
-                .path()
-                .join(format!("{}-{preset}.{ext}", source.file_stem().and_then(|stem| stem.to_str()).unwrap_or("source").replace([' ', '/'], "_")));
-            let label = format!("{} -> {preset}", source.display());
-            if let Err(error) = convert(env!("CARGO_BIN_EXE_encodercraft-cli"), source, preset, &output, &config_root) {
-                failures.push(format!("{label}: conversion failed: {error}"));
-                continue;
-            }
-            let audio = match probe(&output, "stream=codec_name,sample_rate,channels", &["-select_streams", "a"]) {
-                Ok(audio) => audio,
-                Err(error) => {
-                    failures.push(format!("{label}: independent audio probe failed: {error}"));
-                    continue;
-                }
-            };
-            let audio = audio.lines().next().unwrap_or_default();
-            if field(audio, "codec_name").as_deref() != Some(expected_codec) {
-                failures.push(format!("{label}: audio codec {:?}, expected {expected_codec}", field(audio, "codec_name")));
-            }
-            if field(audio, "channels").as_deref() != Some("2") {
-                failures.push(format!("{label}: expected stereo audio, got {:?}", field(audio, "channels")));
-            }
-            let expected_rate = if preset.starts_with("Podcast") { "44100" } else { "48000" };
-            if field(audio, "sample_rate").as_deref() != Some(expected_rate) {
-                failures.push(format!("{label}: sample rate {:?}, expected {expected_rate}", field(audio, "sample_rate")));
-            }
-            match duration_seconds(&output) {
-                Ok(duration) if (duration - 2.0).abs() <= 0.1 => {}
-                Ok(duration) => failures.push(format!("{label}: output duration {duration:.3}s, expected 2.000s")),
-                Err(error) => failures.push(format!("{label}: {error}")),
-            }
-            match audio_mean_volume(&output) {
-                Ok(volume) if volume > -60.0 => {}
-                Ok(volume) => failures.push(format!("{label}: output is unexpectedly silent ({volume:.1} dB mean)")),
-                Err(error) => failures.push(format!("{label}: independent audio analysis failed: {error}")),
-            }
+    let cases: Vec<_> = sources.iter().flat_map(|source| presets.map(|preset| (source, preset))).collect();
+    let failures = check_in_parallel(&cases, |&(source, (preset, ext, expected_codec, _))| {
+        let mut failures = Vec::new();
+        let output = dir
+            .path()
+            .join(format!("{}-{preset}.{ext}", source.file_stem().and_then(|stem| stem.to_str()).unwrap_or("source").replace([' ', '/'], "_")));
+        let label = format!("{} -> {preset}", source.display());
+        if let Err(error) = convert(env!("CARGO_BIN_EXE_encodercraft-cli"), source, preset, &output, &config_root) {
+            failures.push(format!("{label}: conversion failed: {error}"));
+            return failures;
         }
-    }
+        let audio = match probe(&output, "stream=codec_name,sample_rate,channels", &["-select_streams", "a"]) {
+            Ok(audio) => audio,
+            Err(error) => {
+                failures.push(format!("{label}: independent audio probe failed: {error}"));
+                return failures;
+            }
+        };
+        let audio = audio.lines().next().unwrap_or_default();
+        if field(audio, "codec_name").as_deref() != Some(expected_codec) {
+            failures.push(format!("{label}: audio codec {:?}, expected {expected_codec}", field(audio, "codec_name")));
+        }
+        if field(audio, "channels").as_deref() != Some("2") {
+            failures.push(format!("{label}: expected stereo audio, got {:?}", field(audio, "channels")));
+        }
+        let expected_rate = if preset.starts_with("Podcast") { "44100" } else { "48000" };
+        if field(audio, "sample_rate").as_deref() != Some(expected_rate) {
+            failures.push(format!("{label}: sample rate {:?}, expected {expected_rate}", field(audio, "sample_rate")));
+        }
+        match duration_seconds(&output) {
+            Ok(duration) if (duration - 2.0).abs() <= 0.1 => {}
+            Ok(duration) => failures.push(format!("{label}: output duration {duration:.3}s, expected 2.000s")),
+            Err(error) => failures.push(format!("{label}: {error}")),
+        }
+        match audio_mean_volume(&output) {
+            Ok(volume) if volume > -60.0 => {}
+            Ok(volume) => failures.push(format!("{label}: output is unexpectedly silent ({volume:.1} dB mean)")),
+            Err(error) => failures.push(format!("{label}: independent audio analysis failed: {error}")),
+        }
+        failures
+    });
     assert!(failures.is_empty(), "audio QA matrix failures:\n{}", failures.join("\n"));
 }
 
@@ -437,40 +464,40 @@ fn still_image_matrix_roundtrips_with_independent_decode_and_similarity() {
     let config_root = dir.path().join("image-cli-config");
     seed_conversion_approvals(&sources, &presets, &config_root, dir.path());
 
-    let mut failures = Vec::new();
-    for source in &sources {
-        for (preset, ext, expected_codec, size) in presets {
-            let output = dir
-                .path()
-                .join(format!("{}-{preset}.{ext}", source.file_stem().and_then(|stem| stem.to_str()).unwrap_or("source").replace([' ', '/'], "_")));
-            let label = format!("{} -> {preset}", source.display());
-            if let Err(error) = convert(env!("CARGO_BIN_EXE_encodercraft-cli"), source, preset, &output, &config_root) {
-                failures.push(format!("{label}: conversion failed: {error}"));
-                continue;
-            }
-            let video = match probe(&output, "stream=codec_name,width,height", &["-select_streams", "v"]) {
-                Ok(video) => video,
-                Err(error) => {
-                    failures.push(format!("{label}: independent image probe failed: {error}"));
-                    continue;
-                }
-            };
-            let video = video.lines().next().unwrap_or_default();
-            if field(video, "codec_name").as_deref() != Some(expected_codec) {
-                failures.push(format!("{label}: image codec {:?}, expected {expected_codec}", field(video, "codec_name")));
-            }
-            if let Some((width, height)) = size
-                && (field(video, "width") != Some(width.to_string()) || field(video, "height") != Some(height.to_string()))
-            {
-                failures.push(format!("{label}: dimensions {:?}x{:?}, expected {width}x{height}", field(video, "width"), field(video, "height")));
-            }
-            match psnr(&output, source) {
-                Ok(value) if value >= 14.0 => {}
-                Ok(value) => failures.push(format!("{label}: image differs from the source (PSNR {value:.1} dB)")),
-                Err(error) => failures.push(format!("{label}: independent image comparison failed: {error}")),
-            }
+    let cases: Vec<_> = sources.iter().flat_map(|source| presets.map(|preset| (source, preset))).collect();
+    let failures = check_in_parallel(&cases, |&(source, (preset, ext, expected_codec, size))| {
+        let mut failures = Vec::new();
+        let output = dir
+            .path()
+            .join(format!("{}-{preset}.{ext}", source.file_stem().and_then(|stem| stem.to_str()).unwrap_or("source").replace([' ', '/'], "_")));
+        let label = format!("{} -> {preset}", source.display());
+        if let Err(error) = convert(env!("CARGO_BIN_EXE_encodercraft-cli"), source, preset, &output, &config_root) {
+            failures.push(format!("{label}: conversion failed: {error}"));
+            return failures;
         }
-    }
+        let video = match probe(&output, "stream=codec_name,width,height", &["-select_streams", "v"]) {
+            Ok(video) => video,
+            Err(error) => {
+                failures.push(format!("{label}: independent image probe failed: {error}"));
+                return failures;
+            }
+        };
+        let video = video.lines().next().unwrap_or_default();
+        if field(video, "codec_name").as_deref() != Some(expected_codec) {
+            failures.push(format!("{label}: image codec {:?}, expected {expected_codec}", field(video, "codec_name")));
+        }
+        if let Some((width, height)) = size
+            && (field(video, "width") != Some(width.to_string()) || field(video, "height") != Some(height.to_string()))
+        {
+            failures.push(format!("{label}: dimensions {:?}x{:?}, expected {width}x{height}", field(video, "width"), field(video, "height")));
+        }
+        match psnr(&output, source) {
+            Ok(value) if value >= 14.0 => {}
+            Ok(value) => failures.push(format!("{label}: image differs from the source (PSNR {value:.1} dB)")),
+            Err(error) => failures.push(format!("{label}: independent image comparison failed: {error}")),
+        }
+        failures
+    });
     assert!(failures.is_empty(), "still-image QA matrix failures:\n{}", failures.join("\n"));
 }
 
