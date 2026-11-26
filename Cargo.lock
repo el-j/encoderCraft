@@ -2686,6 +2686,7 @@ dependencies = [
  "chrono",
  "craft-audio",
  "craft-behavior",
+ "craft-fonts-build",
  "craft-host",
  "craft-i18n",
  "craft-keymap",

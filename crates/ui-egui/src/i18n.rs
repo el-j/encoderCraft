@@ -15,7 +15,7 @@
 use std::cell::Cell;
 use std::sync::LazyLock;
 
-use craft_i18n::{Direction, Han, I18n, Lang};
+use craft_i18n::{Direction, I18n, Lang};
 
 include!(concat!(env!("OUT_DIR"), "/craft_i18n.rs"));
 
@@ -100,11 +100,6 @@ pub fn code(lang: Lang) -> &'static str {
 pub fn name(lang: Lang) -> &'static str {
     let i18n: &'static I18n = &I18N;
     i18n.name(lang)
-}
-
-/// Whether `lang` draws Han characters in their Japanese forms, so the fonts put a Japanese face first.
-pub fn japanese(lang: Lang) -> bool {
-    craft_i18n::han(I18N.code(lang)) == Some(Han::Japanese)
 }
 
 #[cfg(test)]

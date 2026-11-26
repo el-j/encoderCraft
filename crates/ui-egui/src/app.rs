@@ -81,8 +81,8 @@ pub struct EncoderCraftApp {
     last_saved_favorites: Option<Vec<std::path::PathBuf>>,
     workspace_name_input: String,
     last_saved_workspaces: Option<crate::workspace::WorkspaceSet>,
-    /// Whether the installed fonts put a Japanese face first; `None` until the first frame installs them.
-    fonts_for_japanese: Option<bool>,
+    /// The UI language the installed font stack is for; `None` until the first frame installs it.
+    fonts_language: Option<&'static str>,
     pending_conversion_approvals: VecDeque<PendingConversionApproval>,
     conversion_status: Option<String>,
 }
@@ -149,7 +149,7 @@ impl EncoderCraftApp {
             last_saved_favorites: None,
             workspace_name_input: String::new(),
             last_saved_workspaces: None,
-            fonts_for_japanese: None,
+            fonts_language: None,
             pending_conversion_approvals: VecDeque::new(),
             conversion_status: None,
         }
@@ -1038,13 +1038,13 @@ impl EncoderCraftApp {
         // The interface language: the `language` preference, `auto` following the operating system's.
         let lang = crate::i18n::resolve(&self.prefs_state.prefs.language);
         crate::i18n::set_current(lang);
-        let japanese = crate::i18n::japanese(lang);
-        if self.fonts_for_japanese != Some(japanese) {
-            crate::fonts::install(ui.ctx(), japanese);
-            if self.fonts_for_japanese.is_none() {
+        let code = crate::i18n::code(lang);
+        if self.fonts_language != Some(code) {
+            crate::fonts::install(ui.ctx(), code);
+            if self.fonts_language.is_none() {
                 crate::fonts::check_static_glyphs(ui.ctx());
             }
-            self.fonts_for_japanese = Some(japanese);
+            self.fonts_language = Some(code);
         }
         // A `System` choice follows the OS's light or dark mode, read as the craft-ui runtime reads it, so the
         // app's panels and the runtime's parts always agree.

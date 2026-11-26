@@ -46,3 +46,6 @@ log = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[build-dependencies]
+craft-fonts-build = { workspace = true }
