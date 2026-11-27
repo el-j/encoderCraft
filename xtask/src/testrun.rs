@@ -2,9 +2,10 @@
 //! by side.
 //!
 //! `cargo test --workspace` runs one test binary at a time, so a few binaries that mostly wait
-//! (real-media QA conversions, watch-folder settle probes) set the pace for the whole suite. Each
-//! binary still runs its own tests on several threads, as under `cargo test`; this only overlaps
-//! the binaries, except the shared-memory ones in [`ONE_AT_A_TIME`]. A binary runs from its package
+//! (real-media QA conversions, watch-folder settle probes) set the pace for the whole suite. This
+//! overlaps the binaries, except the shared-memory ones in [`ONE_AT_A_TIME`], and runs each one's
+//! tests on fewer threads than `cargo test` would ([`test_threads`]), so the suite as a whole keeps
+//! about one test thread per core instead of one per core in every binary. A binary runs from its package
 //! directory with `CARGO_MANIFEST_DIR` set, as `cargo test` does, and its output is printed in one
 //! block when it finishes. Every binary runs even after one fails, and the failures are listed at
 //! the end.
@@ -35,16 +36,34 @@ impl Job {
         }
     }
 
-    fn run(&self) -> std::io::Result<Output> {
+    fn run(&self, test_threads: usize) -> std::io::Result<Output> {
+        let threads = format!("--test-threads={test_threads}");
         match self {
             Self::Binary(binary) => Command::new(&binary.executable)
+                .arg(threads)
                 .current_dir(&binary.package_dir)
                 .env("CARGO_MANIFEST_DIR", &binary.package_dir)
                 .stdin(Stdio::null())
                 .output(),
-            Self::DocTests => Command::new("cargo").args(["test", "--workspace", "--doc"]).stdin(Stdio::null()).output(),
+            Self::DocTests => Command::new("cargo").args(["test", "--workspace", "--doc", "--"]).arg(threads).stdin(Stdio::null()).output(),
         }
     }
+}
+
+/// The threads each test binary runs its tests on, given `RUST_TEST_THREADS` (`set`) if any: the cores are split
+/// evenly between the binaries running side by side and the tests inside each, so a binary of a few long tests
+/// (the real-media QA matrix) still runs them together on a large machine. At least two, so a binary's waits
+/// (settle timers, child processes) overlap.
+fn test_threads(cores: usize, set: Option<usize>) -> usize {
+    set.filter(|&n| n > 0).unwrap_or_else(|| cores.isqrt().max(2))
+}
+
+/// How many binaries run side by side on `cores` when each runs `test_threads` threads: enough to fill the cores,
+/// at least one, and no more than there are `jobs`. The one-at-a-time lane runs next to them, so the suite runs
+/// about `cores + test_threads` test threads: six on a 4-core CI runner, where each of the binaries running side by
+/// side would otherwise have started four.
+fn side_by_side_workers(cores: usize, test_threads: usize, jobs: usize) -> usize {
+    (cores / test_threads.max(1)).max(1).min(jobs)
 }
 
 /// Test binaries that open shared-memory streams (iceoryx2), directly or through CLI processes they
@@ -75,9 +94,11 @@ pub fn run() -> Result<(), String> {
     // First, so compiling the doc tests overlaps the binaries even when there are few cores.
     side_by_side.push_front(Job::DocTests);
 
-    let workers = std::thread::available_parallelism().map_or(1, usize::from).min(side_by_side.len());
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    let test_threads = test_threads(cores, std::env::var("RUST_TEST_THREADS").ok().and_then(|n| n.parse().ok()));
+    let workers = side_by_side_workers(cores, test_threads, side_by_side.len());
     println!(
-        "Running {binary_count} test binaries and the doc tests: {} shared-memory binaries one at a time, the rest {workers} at a time...",
+        "Running {binary_count} test binaries and the doc tests on {cores} cores: {} shared-memory binaries one at a time, the rest {workers} at a time, {test_threads} test threads each...",
         one_at_a_time.len()
     );
     let started = Instant::now();
@@ -86,7 +107,7 @@ pub fn run() -> Result<(), String> {
         // Take the job in its own statement: a guard in the `while let` condition would stay locked
         // for the whole loop body and run the jobs one at a time.
         while let Some(job) = next_job(queue) {
-            if !run_and_report(&job) {
+            if !run_and_report(&job, test_threads) {
                 failed.lock().unwrap_or_else(PoisonError::into_inner).push(job.label().to_owned());
             }
         }
@@ -146,9 +167,9 @@ fn test_binary(line: &str, workspace: &Path) -> Option<TestBinary> {
 }
 
 /// Runs one job and prints its output as a single block; `true` when it passed.
-fn run_and_report(job: &Job) -> bool {
+fn run_and_report(job: &Job, test_threads: usize) -> bool {
     let started = Instant::now();
-    let result = job.run();
+    let result = job.run(test_threads);
     let elapsed = started.elapsed().as_secs_f64();
     let (passed, body) = match result {
         Ok(output) => {
@@ -161,4 +182,24 @@ fn run_and_report(job: &Job) -> bool {
     // One `print!` per job, so blocks from parallel jobs never interleave.
     print!("\n     Running {} ({verdict}, {elapsed:.2}s)\n{}\n", job.label(), body.trim_end_matches('\n'));
     passed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The test threads the whole suite runs: the side-by-side binaries plus the one-at-a-time lane.
+    fn suite_threads(cores: usize) -> usize {
+        let threads = test_threads(cores, None);
+        (side_by_side_workers(cores, threads, 60) + 1) * threads
+    }
+
+    #[test]
+    fn the_suite_keeps_about_one_test_thread_per_core() {
+        assert_eq!(suite_threads(4), 6, "a 4-core CI runner: two binaries side by side and the shared-memory lane, two threads each");
+        assert_eq!(suite_threads(32), 35, "32 cores: six binaries side by side and the lane, five threads each");
+        assert_eq!(side_by_side_workers(1, test_threads(1, None), 60), 1, "one core still runs the binaries");
+        assert_eq!(side_by_side_workers(32, test_threads(32, None), 3), 3, "no more workers than jobs");
+        assert_eq!(test_threads(32, Some(1)), 1, "RUST_TEST_THREADS wins");
+    }
 }
