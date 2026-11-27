@@ -220,6 +220,9 @@ impl AppPreferences {
         if !matches!(self.theme.as_str(), "System" | "Dark" | "Medium Dark" | "Light" | "High Contrast") {
             self.theme = default_theme();
         }
+        if self.language.trim().is_empty() {
+            self.language = default_language();
+        }
     }
 }
 
@@ -390,6 +393,18 @@ mod prefs_tests {
             assert_eq!(preferences.theme, theme);
             assert_eq!(preferences.schema_version, PREFERENCES_SCHEMA_VERSION);
         }
+    }
+
+    #[test]
+    fn preference_migration_turns_an_empty_language_back_into_auto() {
+        for blank in ["", "  "] {
+            let mut p = AppPreferences { language: blank.into(), ..AppPreferences::default() };
+            p.migrate();
+            assert_eq!(p.language, "auto", "{blank:?} follows the system language");
+        }
+        let mut p = AppPreferences { language: "ja".into(), ..AppPreferences::default() };
+        p.migrate();
+        assert_eq!(p.language, "ja", "a chosen language is kept");
     }
 
     #[test]
