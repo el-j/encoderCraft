@@ -250,7 +250,7 @@ pub fn render_prefs_dialog(
                                         ui.label(RichText::new(path_str).color(tokens.text_secondary));
 
                                         if ui.button(tl!("Browse…")).clicked()
-                                            && let Some(folder) = rfd::FileDialog::new().set_title("Select Default Output Directory").pick_folder()
+                                            && let Some(folder) = rfd::FileDialog::new().set_title(tl!("Select Default Output Directory")).pick_folder()
                                         {
                                             state.prefs.default_output_dir = Some(folder);
                                         }
@@ -340,7 +340,7 @@ pub fn render_prefs_dialog(
                                         ui.label(tl!("Default Channels:"));
                                         let current_ch = match state.prefs.default_audio_channels {
                                             1 => tl!("Mono (1 Channel)"),
-                                            6 => "5.1 Surround (6 Channels)",
+                                            6 => tl!("5.1 Surround (6 Channels)"),
                                             _ => tl!("Stereo (2 Channels)"),
                                         };
                                         egui::ComboBox::from_id_salt("prefs_audio_ch_combo").selected_text(current_ch).show_ui(ui, |ui| {
