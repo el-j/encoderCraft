@@ -49,9 +49,16 @@ pub fn install_ui_runtime(ctx: &egui::Context) {
 }
 
 /// Feeds the per-frame `craft-ui` runtime input hook before an `egui` frame begins, with the app's root values
-/// ([`EncoderCraftApp::root_env`]).
-pub fn prepare_ui_frame(ctx: &egui::Context, root: craft_ui::runtime::env::RootEnv) {
-    craft_ui::shell::embed::before_input(ctx, |_| craft_ui::runtime::frame::FrameInput::new(root));
+/// ([`EncoderCraftApp::root_env`]). Returns the commands the in-window menus fired in the frame before, for
+/// [`EncoderCraftApp::queue_menu_commands`].
+pub fn prepare_ui_frame(ctx: &egui::Context, root: craft_ui::runtime::env::RootEnv) -> Vec<craft_menu::CommandRef> {
+    let mut fired = Vec::new();
+    craft_ui::shell::embed::before_input(ctx, |output| {
+        // Only the menu bar's rows are encoderCraft commands; other craft-ui parts keep their own handling.
+        fired.extend(output.fired.iter().filter(|f| f.source == craft_ui::runtime::commands::FireSource::Menu).map(|f| f.command.clone()));
+        craft_ui::runtime::frame::FrameInput::new(root)
+    });
+    fired
 }
 
 /// Renders one headless test frame with the `craft-ui` runtime installed.

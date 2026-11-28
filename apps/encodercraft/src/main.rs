@@ -32,7 +32,8 @@ impl eframe::App for DesktopApp {
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         self.inner.raw_input_hook(ctx, raw_input);
-        encodercraft_ui_egui::prepare_ui_frame(ctx, self.inner.root_env());
+        let fired = encodercraft_ui_egui::prepare_ui_frame(ctx, self.inner.root_env());
+        self.inner.queue_menu_commands(fired);
     }
 
     fn on_exit(&mut self) {
