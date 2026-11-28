@@ -22,7 +22,7 @@ use crate::queue_panel::{QueuePanelState, render_queue_panel};
 use crate::theme::{Brightness, Tokens, apply_theme};
 use crate::watch_panel::{WatchPanelState, render_watch_panel, trigger_watch_scan};
 
-static ENCODERCRAFT_APP: craft_update::App =
+pub(crate) static ENCODERCRAFT_APP: craft_update::App =
     craft_update::App::new("encodercraft", "EncoderCraft", "Media transcoding and batch queue", "el-j/encoderCraft");
 
 /// The app icon (`assets/app-icon/`, see its README) at the left of the in-window menu bar.
@@ -53,13 +53,19 @@ pub struct EncoderCraftApp {
     pub stitch_state: crate::stitch_dialog::StitchDialogState,
     pub pending_source_properties: Option<std::path::PathBuf>,
     pub show_about_dialog: bool,
-    updater: craft_update::updater::Updater,
-    check_updates_requested: bool,
-    show_update_result_dialog: bool,
+    pub(crate) updater: craft_update::updater::Updater,
+    pub(crate) check_updates_requested: bool,
+    /// Whether the app asks for a newer release when it starts: the desktop app turns it on, tests leave it off.
+    pub(crate) startup_update_check: bool,
+    /// craft-ui's dialogs, run after the app's own UI: the update prompt and the update check's result window.
+    pub(crate) dialogs: craft_ui::dialog::DialogHost,
+    /// The craft-ui host for the interface language: the app's name, and the catalogs craft-ui's own parts word their
+    /// text with. Made again only when the language changes.
+    ui_host: Option<(craft_i18n::Lang, Arc<craft_host::Host>)>,
     /// The workspace name dialog (Save As or Rename) is open for this command.
     name_dialog: Option<crate::commands::AppCommand>,
     /// Set by the Quit command; the next frame asks the window to close.
-    quit_requested: bool,
+    pub(crate) quit_requested: bool,
     #[cfg(target_os = "macos")]
     native_menu: Option<craft_menu::NativeMenu>,
     /// The in-window menu bar's laid-out model, replaced only when the menus change so the bar's view stays memoized.
@@ -125,9 +131,11 @@ impl EncoderCraftApp {
             stitch_state: crate::stitch_dialog::StitchDialogState::default(),
             pending_source_properties: None,
             show_about_dialog: false,
-            updater: craft_update::updater::Updater::new(&ENCODERCRAFT_APP, env!("CARGO_PKG_VERSION")),
+            updater: craft_update::updater::Updater::new(&ENCODERCRAFT_APP, env!("CARGO_PKG_VERSION")).with_translator(crate::i18n::fill),
             check_updates_requested: false,
-            show_update_result_dialog: false,
+            startup_update_check: false,
+            dialogs: craft_ui::dialog::DialogHost::new(),
+            ui_host: None,
             name_dialog: None,
             quit_requested: false,
             #[cfg(target_os = "macos")]
@@ -166,6 +174,34 @@ impl EncoderCraftApp {
         let placeholder = craft_update::updater::Updater::new(&ENCODERCRAFT_APP, env!("CARGO_PKG_VERSION"));
         self.updater = std::mem::replace(&mut self.updater, placeholder).with_source(source);
         self
+    }
+
+    /// Whether the app asks for a newer release when it starts and offers it, as the other Craft apps do. The desktop
+    /// app turns it on; it is off by default so tests and embedders never reach the network.
+    pub fn set_startup_update_check(&mut self, on: bool) {
+        self.startup_update_check = on;
+    }
+
+    /// The craft-ui host for `lang`: the app's name, which the update dialogs show, and the interface catalogs, which
+    /// word craft-ui's own text. The same `Arc` while the language stays, as craft-ui asks.
+    fn ui_host(&mut self, lang: craft_i18n::Lang) -> Arc<craft_host::Host> {
+        match &self.ui_host {
+            Some((current, host)) if *current == lang => Arc::clone(host),
+            _ => {
+                let app = craft_host::AppInfo { id: ENCODERCRAFT_APP.id, name: "encoderCraft", version: env!("CARGO_PKG_VERSION") };
+                let host = Arc::new(craft_host::Host::builder(app).i18n(crate::i18n::shared()).lang(lang).build());
+                self.ui_host = Some((lang, Arc::clone(&host)));
+                host
+            }
+        }
+    }
+
+    /// Feeds craft-ui's frame input (the root values and the host for the interface language) before an egui frame
+    /// begins, and queues the commands the in-window menus fired in the frame before.
+    pub fn prepare_frame(&mut self, ctx: &egui::Context) {
+        let host = self.ui_host(crate::i18n::resolve(&self.prefs_state.prefs.language));
+        let fired = crate::prepare_ui_frame_with_host(ctx, self.root_env(), Some(host));
+        self.queue_menu_commands(fired);
     }
 
     /// Loads preferences, watch folders and workspaces from `dir` and keeps saving changes back.
@@ -401,7 +437,6 @@ impl EncoderCraftApp {
             C::CheckForUpdates => {
                 if self.dispatch_app_command_value(C::CheckForUpdates, serde_json::json!({})).is_some() {
                     self.check_updates_requested = true;
-                    self.show_update_result_dialog = true;
                 }
             }
             C::About => {
@@ -802,8 +837,7 @@ impl EncoderCraftApp {
     fn modal_open(&self) -> bool {
         self.prefs_state.is_open
             || self.show_about_dialog
-            || self.show_update_result_dialog
-            || self.updater.prompt_open()
+            || crate::updates_ui::blocks_input(self)
             || self.name_dialog.is_some()
             || !self.pending_conversion_approvals.is_empty()
     }
@@ -1286,115 +1320,10 @@ impl EncoderCraftApp {
             });
         }
 
-        // 8. In-App Updater (`craft-update`)
-        self.drive_updater(&ctx);
-    }
-
-    fn drive_updater(&mut self, ctx: &egui::Context) {
-        if std::mem::take(&mut self.check_updates_requested) {
-            self.updater.check_now();
-        }
-        self.updater.tick(ctx);
-        if self.updater.take_close(true) {
-            self.quit_requested = true;
-        }
-        if self.updater.available().is_some() {
-            self.show_update_result_dialog = false;
-        }
-        if self.show_update_result_dialog || self.updater.available().is_some() {
-            self.render_update_dialog(ctx);
-        }
-    }
-
-    fn render_update_dialog(&mut self, ctx: &egui::Context) {
-        use craft_update::updater::Status;
-
-        let mut close = false;
-        let mut check_again = false;
-        let mut install_now = false;
-        let mut restart_now = false;
-        let mut open_url: Option<String> = None;
-
-        egui::Window::new("Software Update").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-            if let Some(release) = self.updater.available().cloned() {
-                ui.label(format!("{} {} is available (you have {}).", ENCODERCRAFT_APP.name, release.tag, env!("CARGO_PKG_VERSION")));
-                ui.horizontal(|ui| {
-                    if ui.button("Update and Restart").clicked() {
-                        install_now = true;
-                    }
-                    if ui.button("Download").clicked()
-                        && let craft_update::updater::Action::OpenUrl(url) = craft_update::updater::download_action(&ENCODERCRAFT_APP, &release)
-                    {
-                        open_url = Some(url);
-                        close = true;
-                    }
-                    if ui.button("Later").clicked() {
-                        close = true;
-                    }
-                });
-                return;
-            }
-            match self.updater.status() {
-                Status::Checking => {
-                    ui.label("Checking for updates…");
-                }
-                Status::UpToDate => {
-                    ui.label(format!("{} {} is the newest version available.", ENCODERCRAFT_APP.name, env!("CARGO_PKG_VERSION")));
-                }
-                Status::Failed(reason) => {
-                    ui.label(format!("Could not check for updates: {reason}"));
-                    if ui.button("Check Again").clicked() {
-                        check_again = true;
-                    }
-                }
-                Status::RateLimited => {
-                    ui.label("GitHub's request limit was reached.");
-                    if ui.button("Check Again").clicked() {
-                        check_again = true;
-                    }
-                }
-                Status::Installing => {
-                    ui.label("Installing update…");
-                }
-                Status::Ready => {
-                    ui.label("Update ready to install on exit.");
-                    if ui.button("Restart to Update").clicked() {
-                        restart_now = true;
-                    }
-                }
-                Status::Managed => {
-                    ui.label(format!("{} follows the version chosen in the launcher.", ENCODERCRAFT_APP.name));
-                }
-                Status::Updated(ver) => {
-                    ui.label(format!("{} updated to {ver}.", ENCODERCRAFT_APP.name));
-                }
-                Status::InstallFailed(reason) => {
-                    ui.label(format!("The update could not be installed: {reason}"));
-                }
-                Status::Idle => {}
-                _ => {}
-            }
-            if ui.button("OK").clicked() {
-                close = true;
-            }
-        });
-
-        if install_now {
-            self.updater.request_install(true);
-        }
-        if restart_now {
-            self.updater.restart_to_update();
-        }
-        if check_again {
-            self.updater.check_now();
-        }
-        if let Some(url) = open_url {
-            ctx.open_url(egui::OpenUrl::new_tab(url));
-        }
-        if close {
-            self.updater.dismiss_status();
-            self.show_update_result_dialog = false;
-        }
+        // 8. In-App Updater (`craft-update`): its dialogs run on craft-ui's dialog host, after the app's own UI.
+        crate::updates_ui::tick(self, &ctx);
+        crate::updates_ui::show(self, &ctx);
+        self.dialogs.run(ui);
     }
 
     fn render_dock_area(
@@ -1959,15 +1888,20 @@ mod tests {
 
         let ctx = egui::Context::default();
         crate::install_ui_runtime(&ctx);
-        for _ in 0..20 {
-            crate::prepare_ui_frame(&ctx, app.root_env());
+        // The check runs on a thread: give it up to five seconds, so a loaded machine doesn't fail the test.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            app.prepare_frame(&ctx);
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
             out.textures_delta.clear();
-            if matches!(app.updater.status(), craft_update::updater::Status::UpToDate) {
+            let done = matches!(app.updater.status(), craft_update::updater::Status::UpToDate)
+                && app.dialogs.is_open::<craft_update::stack_dialogs::UpdateCheckDialog>();
+            if done || std::time::Instant::now() > deadline {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert_eq!(app.updater.status(), &craft_update::updater::Status::UpToDate);
+        assert!(app.dialogs.is_open::<craft_update::stack_dialogs::UpdateCheckDialog>(), "the outcome shows in craft-update's window");
     }
 }

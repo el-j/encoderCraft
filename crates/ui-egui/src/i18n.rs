@@ -13,7 +13,7 @@
 //! - [`tid`]: a command's label, keyed by its command id with the English label as fallback.
 
 use std::cell::Cell;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use craft_i18n::{Direction, I18n, Lang};
 
@@ -24,14 +24,14 @@ pub const SYSTEM: &str = "auto";
 
 /// The embedded catalogs. English and every embedded language written left to right are offered: encoderCraft's layout
 /// is not mirrored for right-to-left languages yet. A locale is parsed on its first lookup.
-static I18N: LazyLock<I18n> = LazyLock::new(|| {
+static I18N: LazyLock<Arc<I18n>> = LazyLock::new(|| {
     let mut offered = vec!["en"];
     offered.extend(CRAFT_I18N.iter().map(|(code, ..)| *code).filter(|code| craft_i18n::direction(code) == Direction::Ltr));
     let (i18n, problems) = I18n::new(CRAFT_I18N, &offered);
     for problem in problems {
         log::warn!("interface catalogs: {problem}");
     }
-    i18n
+    Arc::new(i18n)
 });
 
 thread_local! {
@@ -69,6 +69,19 @@ pub fn current() -> Lang {
 /// `source` in the language the interface is drawn in; `source` itself when there is no translation.
 pub fn t(source: &str) -> &str {
     I18N.t(current(), source)
+}
+
+/// `template` in the interface language with its `{name}` placeholders filled from `args`: the [`Translate`] that
+/// craft-update's updater words its messages with.
+///
+/// [`Translate`]: craft_update::translate::Translate
+pub fn fill(template: &str, args: &[(&str, &str)]) -> String {
+    craft_i18n::fmt(t(template), args)
+}
+
+/// The embedded catalogs, shared: what the craft-ui host words its built-in text with.
+pub fn shared() -> Arc<I18n> {
+    Arc::clone(&I18N)
 }
 
 /// The label of the command `id` in the language the interface is drawn in; `english` when there is no translation.

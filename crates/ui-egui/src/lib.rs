@@ -33,6 +33,7 @@ pub mod stitch_dialog;
 pub mod theme;
 pub mod titlebar;
 pub mod transport;
+mod updates_ui;
 pub mod watch_panel;
 pub mod workspace;
 
@@ -53,11 +54,23 @@ pub fn install_ui_runtime(ctx: &egui::Context) {
 /// ([`EncoderCraftApp::root_env`]). Returns the commands the in-window menus fired in the frame before, for
 /// [`EncoderCraftApp::queue_menu_commands`].
 pub fn prepare_ui_frame(ctx: &egui::Context, root: craft_ui::runtime::env::RootEnv) -> Vec<craft_menu::CommandRef> {
+    prepare_ui_frame_with_host(ctx, root, None)
+}
+
+/// [`prepare_ui_frame`] with the app's craft-ui `host` (its name and catalogs), as
+/// [`EncoderCraftApp::prepare_frame`] passes it.
+pub fn prepare_ui_frame_with_host(
+    ctx: &egui::Context,
+    root: craft_ui::runtime::env::RootEnv,
+    mut host: Option<std::sync::Arc<craft_host::Host>>,
+) -> Vec<craft_menu::CommandRef> {
     let mut fired = Vec::new();
     craft_ui::shell::embed::before_input(ctx, |output| {
         // Only the menu bar's rows are encoderCraft commands; other craft-ui parts keep their own handling.
         fired.extend(output.fired.iter().filter(|f| f.source == craft_ui::runtime::commands::FireSource::Menu).map(|f| f.command.clone()));
-        craft_ui::runtime::frame::FrameInput::new(root)
+        let mut input = craft_ui::runtime::frame::FrameInput::new(root);
+        input.host = host.take();
+        input
     });
     fired
 }
