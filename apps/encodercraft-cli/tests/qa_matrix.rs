@@ -3,7 +3,10 @@
 //! frame count, frame rate, size, audio presence and picture similarity.
 //!
 //! This is not a substitute for checking actual phone or screen recordings. The matrix needs
-//! `ffmpeg` and `ffprobe` on `PATH`; it is skipped (loudly) when they are absent.
+//! `ffmpeg` and `ffprobe`, found as craft-media-testkit finds them for the Craft media crates:
+//! `CRAFT_MEDIA_FFMPEG` / `CRAFT_MEDIA_FFPROBE`, then `PATH`, then the usual install folders. It is
+//! skipped (loudly) when they are absent, and fails instead when `ENCODERCRAFT_REQUIRE_FULL_QA` or
+//! `CRAFT_MEDIA_REQUIRE_ORACLES=1` is set.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,8 +19,17 @@ use encodercraft_geom::Dimensions;
 use encodercraft_image_codecs::{StillFormat, StillOptions, encode_still};
 use encodercraft_presets::{PresetRegistry, evaluate_preset};
 
-fn tool(name: &str) -> bool {
-    Command::new(name).arg("-version").output().map(|o| o.status.success()).unwrap_or(false)
+/// `name` (ffmpeg or ffprobe) where craft-media-testkit finds it; the bare name, for `PATH`, when it finds none.
+fn tool(name: &str) -> PathBuf {
+    craft_media_testkit::tool(name).unwrap_or_else(|| PathBuf::from(name))
+}
+
+fn ffmpeg() -> Command {
+    Command::new(tool("ffmpeg"))
+}
+
+fn ffprobe() -> Command {
+    Command::new(tool("ffprobe"))
 }
 
 /// Runs `check` for every case on a bounded pool of threads and returns all failures in case order.
@@ -47,14 +59,17 @@ fn check_in_parallel<T: Sync>(cases: &[T], check: impl Fn(&T) -> Vec<String> + S
 }
 
 fn full_qa_required() -> bool {
-    std::env::var_os("ENCODERCRAFT_REQUIRE_FULL_QA").is_some()
+    std::env::var_os("ENCODERCRAFT_REQUIRE_FULL_QA").is_some() || craft_media_testkit::oracles_required()
 }
 
 fn require_media_tools() -> bool {
-    let available = tool("ffmpeg") && tool("ffprobe");
-    assert!(available || !full_qa_required(), "full real-media QA requires ffmpeg and ffprobe on PATH");
+    let available = craft_media_testkit::tool("ffmpeg").is_some() && craft_media_testkit::tool("ffprobe").is_some();
+    assert!(
+        available || !full_qa_required(),
+        "full real-media QA requires ffmpeg and ffprobe: set CRAFT_MEDIA_FFMPEG / CRAFT_MEDIA_FFPROBE or put them on PATH"
+    );
     if !available {
-        eprintln!("SKIPPED: ffmpeg/ffprobe not available");
+        eprintln!("SKIPPED: ffmpeg/ffprobe not found (set CRAFT_MEDIA_FFMPEG / CRAFT_MEDIA_FFPROBE or put them on PATH)");
     }
     available
 }
@@ -69,7 +84,7 @@ struct Source {
 /// Creates one 2 s 320x180 source; `None` when this ffmpeg build lacks the encoder.
 fn make_source(dir: &Path, file: &'static str, fps: u32, args: &[&str], audio: bool) -> Option<Source> {
     let path = dir.join(file);
-    let mut cmd = Command::new("ffmpeg");
+    let mut cmd = ffmpeg();
     cmd.args(["-v", "error", "-y", "-f", "lavfi", "-i"]).arg(format!("testsrc2=size=320x180:rate={fps}:duration=2"));
     if audio {
         cmd.args(["-f", "lavfi", "-i", "sine=frequency=440:duration=2"]);
@@ -80,7 +95,7 @@ fn make_source(dir: &Path, file: &'static str, fps: u32, args: &[&str], audio: b
 }
 
 fn probe(path: &Path, entries: &str, extra: &[&str]) -> Result<String, String> {
-    let out = Command::new("ffprobe")
+    let out = ffprobe()
         .args(["-v", "error"])
         .args(extra)
         .args(["-show_entries", entries, "-of", "compact=p=0"])
@@ -99,7 +114,7 @@ fn field(line: &str, key: &str) -> Option<String> {
 
 /// Mean PSNR between two videos after scaling both to 160x90.
 fn psnr(a: &Path, b: &Path) -> Result<f64, String> {
-    let out = Command::new("ffmpeg")
+    let out = ffmpeg()
         .args(["-v", "info", "-i"])
         .arg(a)
         .arg("-i")
@@ -119,7 +134,7 @@ fn psnr(a: &Path, b: &Path) -> Result<f64, String> {
 }
 
 fn audio_mean_volume(path: &Path) -> Result<f64, String> {
-    let out = Command::new("ffmpeg")
+    let out = ffmpeg()
         .args(["-v", "info", "-i"])
         .arg(path)
         .args(["-af", "volumedetect", "-f", "null", "-"])
@@ -186,7 +201,7 @@ fn seed_conversion_approvals(sources: &[PathBuf], presets: &[(&str, &str, &str, 
 
 fn make_audio_source(dir: &Path, file: &'static str, codec: &str) -> Option<PathBuf> {
     let path = dir.join(file);
-    let ok = Command::new("ffmpeg")
+    let ok = ffmpeg()
         .args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2", "-ac", "2", "-c:a", codec])
         .arg(&path)
         .output()
@@ -197,7 +212,7 @@ fn make_audio_source(dir: &Path, file: &'static str, codec: &str) -> Option<Path
 
 fn make_image_source(dir: &Path, file: &'static str, codec: &str) -> Option<PathBuf> {
     let path = dir.join(file);
-    let ok = Command::new("ffmpeg")
+    let ok = ffmpeg()
         .args([
             "-v",
             "error",
