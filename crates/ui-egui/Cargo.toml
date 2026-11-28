@@ -33,6 +33,7 @@ craft-keymap = { workspace = true }
 craft-window = { workspace = true }
 craft-menu = { workspace = true }
 craft-theme = { workspace = true }
+craft-i18n = { workspace = true }
 craft-audio = { workspace = true }
 craft-mesh = { workspace = true }
 craft-svg = { workspace = true }
@@ -45,3 +46,6 @@ log = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[build-dependencies]
+craft-fonts-build = { workspace = true }

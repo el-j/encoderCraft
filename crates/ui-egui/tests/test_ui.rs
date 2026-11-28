@@ -186,3 +186,48 @@ fn system_theme_follows_the_os_mode_live() {
         assert_eq!(ctx.theme(), os, "egui's widgets after the OS switched to {os:?}");
     }
 }
+
+/// The centre of the widget labelled `label` in the frame's accessibility tree.
+fn centre_of(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+    let update = output.platform_output.accesskit_update.as_ref()?;
+    let (_, node) = update.nodes.iter().find(|(_, node)| node.label() == Some(label))?;
+    let r = node.bounds()?;
+    Some(egui::pos2(((r.x0 + r.x1) / 2.0) as f32, ((r.y0 + r.y1) / 2.0) as f32))
+}
+
+#[test]
+fn the_in_window_menu_bar_runs_the_chosen_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
+        .with_config_dir(dir.path().to_path_buf());
+    app.run_command(encodercraft_ui_egui::commands::AppCommand::ThemeDark);
+    // The rows are found by their English labels, whatever the machine's language and the embedded catalogs.
+    app.prefs_state.prefs.language = "en".into();
+    let ctx = egui::Context::default();
+    encodercraft_ui_egui::install_ui_runtime(&ctx);
+    ctx.enable_accesskit();
+    // One frame as the app's shell runs it: the runtime hands back what the menus fired, then the app draws.
+    let frame = |app: &mut EncoderCraftApp, events: Vec<egui::Event>| {
+        let fired = encodercraft_ui_egui::prepare_ui_frame(&ctx, app.root_env());
+        app.queue_menu_commands(fired);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| app.render(ui));
+        output.textures_delta.clear();
+        output
+    };
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let click = |app: &mut EncoderCraftApp, pos: egui::Pos2| {
+        frame(app, vec![egui::Event::PointerMoved(pos)]);
+        frame(app, vec![press(pos, true)]);
+        frame(app, vec![press(pos, false)])
+    };
+
+    let shown = frame(&mut app, Vec::new());
+    let edit = centre_of(&shown, "Edit").expect("the bar shows Edit");
+    click(&mut app, edit);
+    let open = frame(&mut app, Vec::new());
+    let light = centre_of(&open, "Theme: Light").expect("Edit shows Theme: Light");
+    click(&mut app, light);
+    frame(&mut app, Vec::new());
+    assert_eq!(app.brightness, Brightness::Light, "the chosen row ran its command");
+}
