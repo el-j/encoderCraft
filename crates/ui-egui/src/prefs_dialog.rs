@@ -4,6 +4,7 @@ use egui::RichText;
 use encodercraft_engine::AppPreferences;
 use encodercraft_platform::{HardwareBackend, HardwareCapabilities};
 
+use crate::i18n::tl;
 use crate::icons;
 use crate::theme::Tokens;
 
@@ -77,6 +78,26 @@ fn renderer_options(backend: HardwareBackend) -> Vec<&'static str> {
     options
 }
 
+/// The interface language: "Match System" (the `auto` preference, naming the language it resolves to) or one this build
+/// offers, each by its name in itself. A build without craft-i18n catalogs offers English only and says so.
+fn language_picker(ui: &mut egui::Ui, language: &mut String, tokens: &Tokens) {
+    let languages = crate::i18n::languages();
+    let system = craft_i18n::fmt(tl!("Match System ({language})"), &[("language", crate::i18n::name(crate::i18n::resolve(crate::i18n::SYSTEM)))]);
+    let selected = languages.iter().find(|(code, _)| *code == language.as_str()).map_or(system.clone(), |(_, name)| (*name).to_owned());
+    ui.horizontal(|ui| {
+        ui.label(tl!("Language:"));
+        egui::ComboBox::from_id_salt("prefs_language").selected_text(selected).show_ui(ui, |ui| {
+            ui.selectable_value(language, crate::i18n::SYSTEM.to_owned(), system);
+            for (code, name) in &languages {
+                ui.selectable_value(language, (*code).to_owned(), *name);
+            }
+        });
+    });
+    if languages.len() < 2 {
+        ui.label(RichText::new(tl!("This build includes English only.")).small().color(tokens.text_dim));
+    }
+}
+
 /// Renders the Preferences modal window.
 pub fn render_prefs_dialog(
     ctx: &egui::Context,
@@ -103,32 +124,33 @@ pub fn render_prefs_dialog(
         });
         state.shortcut_recording = None;
         if key == egui::Key::Escape && !modifiers.any() {
-            state.shortcut_message = Some("Shortcut recording cancelled.".into());
+            state.shortcut_message = Some(tl!("Shortcut recording cancelled.").into());
         } else if let Some(binding) = crate::settings::WorkspaceShortcuts::capture(&event) {
             match shortcuts.set_command_binding(command, binding) {
                 Ok(()) => {
-                    let label = command.info().map_or("Command", |info| info.label);
-                    let shortcut = shortcuts.command_display(command).unwrap_or_else(|| "Not assigned".into());
-                    state.shortcut_message = Some(format!("{label} set to {shortcut}."));
+                    let label = command.info().map_or_else(|| tl!("Command").to_owned(), |info| crate::i18n::command_label(info.id, info.label));
+                    let shortcut = shortcuts.command_display(command).unwrap_or_else(|| tl!("Not assigned").into());
+                    state.shortcut_message = Some(craft_i18n::fmt(tl!("{label} set to {shortcut}."), &[("label", &label), ("shortcut", &shortcut)]));
                 }
                 Err(error) => state.shortcut_message = Some(error),
             }
         } else {
-            state.shortcut_message = Some("That key cannot be used as a shortcut.".into());
+            state.shortcut_message = Some(tl!("That key cannot be used as a shortcut.").into());
         }
     }
 
     let mut is_open = state.is_open;
     let mut close_requested = false;
 
-    egui::Window::new("Preferences")
+    egui::Window::new(tl!("Preferences"))
+        .id(egui::Id::NULL.with("preferences_dialog"))
         .open(&mut is_open)
         .resizable(true)
         .default_size(egui::vec2(720.0, 520.0))
         .min_size(egui::vec2(600.0, 360.0))
         .collapsible(false)
         .show(ctx, |ui| {
-            ui.heading(RichText::new("encoderCraft Preferences").size(16.0));
+            ui.heading(RichText::new(tl!("encoderCraft Preferences")).size(16.0));
             ui.add_space(8.0);
 
             let available_h = (ui.available_height() - 48.0).max(260.0);
@@ -151,7 +173,7 @@ pub fn render_prefs_dialog(
                         ];
                         for cat in categories {
                             let is_selected = state.selected_category == cat;
-                            if ui.selectable_label(is_selected, cat.label()).clicked() {
+                            if ui.selectable_label(is_selected, tl!(cat.label())).clicked() {
                                 state.selected_category = cat;
                             }
                         }
@@ -170,77 +192,80 @@ pub fn render_prefs_dialog(
                         ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| match state.selected_category {
                             PrefsCategory::General => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
-                                    ui.label(RichText::new("General Options").strong());
+                                    ui.label(RichText::new(tl!("General Options")).strong());
                                     ui.add_space(6.0);
 
-                                    ui.checkbox(&mut state.prefs.play_completion_sound, "Play chime when finished encoding");
-                                    ui.checkbox(&mut state.prefs.auto_start_queue, "Auto-start queue when media is added");
-                                    ui.checkbox(&mut state.prefs.auto_start_on_idle, "Start queue automatically when idle for");
+                                    ui.checkbox(&mut state.prefs.play_completion_sound, tl!("Play chime when finished encoding"));
+                                    ui.checkbox(&mut state.prefs.auto_start_queue, tl!("Auto-start queue when media is added"));
+                                    ui.checkbox(&mut state.prefs.auto_start_on_idle, tl!("Start queue automatically when idle for"));
                                     if state.prefs.auto_start_on_idle {
                                         ui.horizontal(|ui| {
                                             ui.add_space(20.0);
-                                            ui.add(egui::Slider::new(&mut state.prefs.idle_timeout_minutes, 1..=60).text("minutes"));
+                                            ui.add(egui::Slider::new(&mut state.prefs.idle_timeout_minutes, 1..=60).text(tl!("minutes")));
                                         });
                                     }
-                                    ui.checkbox(&mut state.prefs.increment_output_filename, "Increment output file names if file exists");
-                                    ui.checkbox(&mut state.prefs.remove_finished_on_exit, "Remove completed items from queue on exit");
-                                    ui.checkbox(&mut state.prefs.auto_encode_watch_folders, "Automatically encode watch folders");
-                                    ui.checkbox(&mut state.prefs.auto_shutdown, "Shut down the computer when the queue finishes");
+                                    ui.checkbox(&mut state.prefs.increment_output_filename, tl!("Increment output file names if file exists"));
+                                    ui.checkbox(&mut state.prefs.remove_finished_on_exit, tl!("Remove completed items from queue on exit"));
+                                    ui.checkbox(&mut state.prefs.auto_encode_watch_folders, tl!("Automatically encode watch folders"));
+                                    ui.checkbox(&mut state.prefs.auto_shutdown, tl!("Shut down the computer when the queue finishes"));
                                 });
                             }
                             PrefsCategory::Appearance => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
-                                    ui.label(RichText::new("Appearance & Theme").strong());
+                                    ui.label(RichText::new(tl!("Appearance & Theme")).strong());
                                     ui.add_space(6.0);
 
+                                    language_picker(ui, &mut state.prefs.language, tokens);
+                                    ui.add_space(4.0);
+
                                     ui.horizontal(|ui| {
-                                        ui.label("Interface Theme:");
+                                        ui.label(tl!("Interface Theme:"));
                                         // "System" follows the OS's light or dark mode.
                                         for (theme, label) in
                                             [("System", "Match System"), ("Dark", "Dark"), ("Light", "Light"), ("High Contrast", "High Contrast")]
                                         {
-                                            if ui.selectable_label(state.prefs.theme == theme, label).clicked() {
+                                            if ui.selectable_label(state.prefs.theme == theme, tl!(label)).clicked() {
                                                 state.prefs.theme = theme.into();
                                                 *on_theme_change = Some(theme.into());
                                             }
                                         }
                                     });
                                     ui.add_space(4.0);
-                                    ui.checkbox(&mut state.prefs.system_title_bar, "Use the system title bar (applies after restart)");
+                                    ui.checkbox(&mut state.prefs.system_title_bar, tl!("Use the system title bar (applies after restart)"));
                                 });
                             }
                             PrefsCategory::Media => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
-                                    ui.label(RichText::new("Media & Storage").strong());
+                                    ui.label(RichText::new(tl!("Media & Storage")).strong());
                                     ui.add_space(6.0);
 
-                                    ui.label("Default Output Directory:");
+                                    ui.label(tl!("Default Output Directory:"));
                                     ui.horizontal(|ui| {
                                         let path_str = state
                                             .prefs
                                             .default_output_dir
                                             .as_ref()
                                             .map(|p| p.display().to_string())
-                                            .unwrap_or_else(|| "Same as source directory".into());
+                                            .unwrap_or_else(|| tl!("Same as source directory").into());
                                         ui.label(RichText::new(path_str).color(tokens.text_secondary));
 
-                                        if ui.button("Browse...").clicked()
-                                            && let Some(folder) = rfd::FileDialog::new().set_title("Select Default Output Directory").pick_folder()
+                                        if ui.button(tl!("Browse…")).clicked()
+                                            && let Some(folder) = rfd::FileDialog::new().set_title(tl!("Select Default Output Directory")).pick_folder()
                                         {
                                             state.prefs.default_output_dir = Some(folder);
                                         }
 
-                                        if state.prefs.default_output_dir.is_some() && ui.small_button("Clear").clicked() {
+                                        if state.prefs.default_output_dir.is_some() && ui.small_button(tl!("Clear")).clicked() {
                                             state.prefs.default_output_dir = None;
                                         }
                                     });
                                     ui.add_space(6.0);
-                                    ui.checkbox(&mut state.prefs.increment_output_filename, "Prevent overwriting by appending incremental suffix");
+                                    ui.checkbox(&mut state.prefs.increment_output_filename, tl!("Prevent overwriting by appending incremental suffix"));
                                 });
                             }
                             PrefsCategory::Performance => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
-                                    ui.label(RichText::new("Rendering & Hardware Acceleration").strong());
+                                    ui.label(RichText::new(tl!("Rendering & Hardware Acceleration")).strong());
                                     ui.add_space(6.0);
 
                                     let detected = cached_hardware(&mut state.hardware, encodercraft_platform::detect_hardware);
@@ -254,7 +279,7 @@ pub fn render_prefs_dialog(
                                     }
 
                                     ui.horizontal(|ui| {
-                                        ui.label("Renderer Backend:");
+                                        ui.label(tl!("Renderer Backend:"));
                                         let current = if state.prefs.selected_renderer.is_empty() {
                                             "Pure-Rust Software (CPU)"
                                         } else {
@@ -273,7 +298,7 @@ pub fn render_prefs_dialog(
                                     ui.horizontal(|ui| {
                                         icons::icon_label(ui, icons::Icon::Info, 13.0, tokens.text_dim);
                                         ui.label(
-                                            RichText::new(format!("Detected Device: {}", detected.capabilities.device_name))
+                                            RichText::new(craft_i18n::fmt(tl!("Detected Device: {device}"), &[("device", &detected.capabilities.device_name)]))
                                                 .small()
                                                 .color(tokens.text_dim),
                                         );
@@ -281,24 +306,24 @@ pub fn render_prefs_dialog(
 
                                     ui.add_space(4.0);
                                     ui.horizontal(|ui| {
-                                        ui.label("Parallel render concurrency:");
-                                        ui.add(egui::Slider::new(&mut state.prefs.max_parallel_jobs, 1..=16).text("workers"));
+                                        ui.label(tl!("Parallel render concurrency:"));
+                                        ui.add(egui::Slider::new(&mut state.prefs.max_parallel_jobs, 1..=16).text(tl!("workers")));
                                     });
 
                                     ui.add_space(4.0);
                                     ui.horizontal(|ui| {
-                                        ui.label("GPU Memory / VRAM Budget:");
+                                        ui.label(tl!("GPU Memory / VRAM Budget:"));
                                         ui.add(egui::Slider::new(&mut state.prefs.vram_budget_percent, 10..=100).text("%"));
                                     });
                                 });
                             }
                             PrefsCategory::Audio => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
-                                    ui.label(RichText::new("Audio Master Clock & Channels").strong());
+                                    ui.label(RichText::new(tl!("Audio Master Clock & Channels")).strong());
                                     ui.add_space(6.0);
 
                                     ui.horizontal(|ui| {
-                                        ui.label("Default Sample Rate:");
+                                        ui.label(tl!("Default Sample Rate:"));
                                         let current_rate = format!("{} Hz", state.prefs.default_audio_sample_rate);
                                         egui::ComboBox::from_id_salt("prefs_audio_rate_combo").selected_text(current_rate).show_ui(ui, |ui| {
                                             for rate in [44_100, 48_000, 88_200, 96_000, 192_000] {
@@ -312,20 +337,20 @@ pub fn render_prefs_dialog(
 
                                     ui.add_space(4.0);
                                     ui.horizontal(|ui| {
-                                        ui.label("Default Channels:");
+                                        ui.label(tl!("Default Channels:"));
                                         let current_ch = match state.prefs.default_audio_channels {
-                                            1 => "Mono (1 Channel)",
-                                            6 => "5.1 Surround (6 Channels)",
-                                            _ => "Stereo (2 Channels)",
+                                            1 => tl!("Mono (1 Channel)"),
+                                            6 => tl!("5.1 Surround (6 Channels)"),
+                                            _ => tl!("Stereo (2 Channels)"),
                                         };
                                         egui::ComboBox::from_id_salt("prefs_audio_ch_combo").selected_text(current_ch).show_ui(ui, |ui| {
-                                            if ui.selectable_label(state.prefs.default_audio_channels == 1, "Mono (1 Channel)").clicked() {
+                                            if ui.selectable_label(state.prefs.default_audio_channels == 1, tl!("Mono (1 Channel)")).clicked() {
                                                 state.prefs.default_audio_channels = 1;
                                             }
-                                            if ui.selectable_label(state.prefs.default_audio_channels == 2, "Stereo (2 Channels)").clicked() {
+                                            if ui.selectable_label(state.prefs.default_audio_channels == 2, tl!("Stereo (2 Channels)")).clicked() {
                                                 state.prefs.default_audio_channels = 2;
                                             }
-                                            if ui.selectable_label(state.prefs.default_audio_channels == 6, "5.1 Surround (6 Channels)").clicked() {
+                                            if ui.selectable_label(state.prefs.default_audio_channels == 6, tl!("5.1 Surround (6 Channels)")).clicked() {
                                                 state.prefs.default_audio_channels = 6;
                                             }
                                         });
@@ -334,28 +359,28 @@ pub fn render_prefs_dialog(
                             }
                             PrefsCategory::Shortcuts => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
-                                    ui.label(RichText::new("Keyboard Shortcuts").strong());
-                                    ui.label(RichText::new("Select Change, then press the shortcut you want.").small().color(tokens.text_secondary));
+                                    ui.label(RichText::new(tl!("Keyboard Shortcuts")).strong());
+                                    ui.label(RichText::new(tl!("Select Change, then press the shortcut you want.")).small().color(tokens.text_secondary));
                                     egui::ScrollArea::vertical().id_salt("prefs_shortcuts_scroll_area").max_height(280.0).show(ui, |ui| {
                                         for info in crate::commands::COMMANDS.iter().filter(|info| info.shortcut_configurable) {
                                             let command = info.command;
-                                            let display = shortcuts.command_display(command).unwrap_or_else(|| "Not assigned".into());
+                                            let display = shortcuts.command_display(command).unwrap_or_else(|| tl!("Not assigned").into());
                                             ui.horizontal(|ui| {
-                                                ui.label(info.label);
+                                                ui.label(crate::i18n::command_label(info.id, info.label));
                                                 ui.label(RichText::new(display).color(tokens.text_secondary));
                                                 if state.shortcut_recording == Some(command) {
-                                                    ui.label(RichText::new("Press a key...").color(tokens.accent_primary));
-                                                } else if ui.button("Change").clicked() {
+                                                    ui.label(RichText::new(tl!("Press a key…")).color(tokens.accent_primary));
+                                                } else if ui.button(tl!("Change")).clicked() {
                                                     state.shortcut_recording = Some(command);
                                                     state.shortcut_message = None;
                                                 }
                                             });
                                         }
                                     });
-                                    if ui.button("Reset Keyboard Shortcuts").clicked() {
+                                    if ui.button(tl!("Reset Keyboard Shortcuts")).clicked() {
                                         *shortcuts = crate::settings::WorkspaceShortcuts::default();
                                         state.shortcut_recording = None;
-                                        state.shortcut_message = Some("Keyboard shortcuts restored to defaults.".into());
+                                        state.shortcut_message = Some(tl!("Keyboard shortcuts restored to defaults.").into());
                                     }
                                     if let Some(message) = &state.shortcut_message {
                                         ui.label(RichText::new(message).small().color(tokens.text_secondary));
@@ -364,19 +389,19 @@ pub fn render_prefs_dialog(
                             }
                             PrefsCategory::CodecProviders => {
                                 egui::Frame::new().fill(tokens.bg_surface).corner_radius(4).inner_margin(10.0).show(ui, |ui| {
-                                    ui.label(RichText::new("User-Installable Codec Providers").strong());
-                                    ui.label(RichText::new("External out-of-process codec engines. Providers run in isolated processes with explicit user enablement (ADR 0002).").weak().size(11.0));
+                                    ui.label(RichText::new(tl!("User-Installable Codec Providers")).strong());
+                                    ui.label(RichText::new(tl!("External out-of-process codec engines. Providers run in isolated processes with explicit user enablement (ADR 0002).")).weak().size(11.0));
                                     ui.add_space(8.0);
 
                                     if state.prefs.enabled_providers.is_empty() {
-                                        ui.label(RichText::new("No external codec providers currently enabled.").italics());
+                                        ui.label(RichText::new(tl!("No external codec providers currently enabled.")).italics());
                                     } else {
-                                        ui.label(RichText::new(format!("Enabled Providers ({}):", state.prefs.enabled_providers.len())).strong());
+                                        ui.label(RichText::new(craft_i18n::fmt(tl!("Enabled Providers ({count}):"), &[("count", &state.prefs.enabled_providers.len().to_string())])).strong());
                                         let mut to_remove = Vec::new();
                                         for id in &state.prefs.enabled_providers {
                                             ui.horizontal(|ui| {
                                                 ui.label(RichText::new(id).monospace());
-                                                if ui.button("Disable").clicked() {
+                                                if ui.button(tl!("Disable")).clicked() {
                                                     to_remove.push(id.clone());
                                                 }
                                             });
@@ -389,8 +414,8 @@ pub fn render_prefs_dialog(
                                     ui.add_space(8.0);
                                     ui.separator();
                                     ui.add_space(4.0);
-                                    ui.label(RichText::new("Provider Directories").strong());
-                                    ui.label(RichText::new("Drop compatible provider bundles into ~/.config/encodercraft/providers/ to install.").weak().size(11.0));
+                                    ui.label(RichText::new(tl!("Provider Directories")).strong());
+                                    ui.label(RichText::new(tl!("Drop compatible provider bundles into ~/.config/encodercraft/providers/ to install.")).weak().size(11.0));
                                 });
                             }
                         });
@@ -403,13 +428,13 @@ pub fn render_prefs_dialog(
 
             // Actions
             ui.horizontal(|ui| {
-                if ui.button("Reset to Defaults").clicked() {
+                if ui.button(tl!("Reset to Defaults")).clicked() {
                     state.prefs = AppPreferences::default();
                     *on_theme_change = Some(state.prefs.theme.clone());
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Done").clicked() {
+                    if ui.button(tl!("Done")).clicked() {
                         close_requested = true;
                     }
                 });

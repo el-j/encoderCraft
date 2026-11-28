@@ -87,6 +87,12 @@ pub enum AppCommand {
     ResetWorkspace,
     DeleteWorkspace,
     SetPanelVisibility,
+    JoinDiscord,
+    ArtCraftWebsite,
+    OpenGitHub,
+    ReportIssue,
+    RevealLogFiles,
+    SystemReport,
     CheckForUpdates,
     About,
 }
@@ -296,8 +302,22 @@ pub const COMMANDS: &[CommandInfo] = &[
     context_info(AppCommand::ResetWorkspace, "workspace.reset", "Reset Workspace", Menu::Window, Some("workspace.reset")),
     context_info(AppCommand::DeleteWorkspace, "workspace.delete", "Delete Workspace", Menu::Window, Some("workspace.delete")),
     context_info(AppCommand::SetPanelVisibility, "workspace.set_visibility", "Set Panel Visibility", Menu::Window, Some("workspace.set_visibility")),
-    info(AppCommand::CheckForUpdates, "help.check_for_updates", "Check for Updates...", Menu::Help, None, Some("app.check_for_updates"), false),
-    info(AppCommand::About, "help.about", "About encoderCraft", Menu::Help, None, Some("app.about"), false),
+    info(AppCommand::JoinDiscord, "help.discord", "Join the ArtCraft Discord...", Menu::Help, None, Some("app.help_link"), false),
+    info(AppCommand::ArtCraftWebsite, "help.website", "ArtCraft Website", Menu::Help, None, Some("app.help_link"), false),
+    info(AppCommand::OpenGitHub, "help.github", "encoderCraft on GitHub", Menu::Help, None, Some("app.help_link"), false),
+    info(AppCommand::ReportIssue, "help.report_issue", "Report an Issue...", Menu::Help, None, Some("app.help_link"), false),
+    info(AppCommand::RevealLogFiles, "help.reveal_log_files", "Reveal Log Files...", Menu::Help, None, Some("app.log_files"), true),
+    info(
+        AppCommand::SystemReport,
+        "help.system_compatibility_report",
+        "System Compatibility Report...",
+        Menu::Help,
+        None,
+        Some("app.system_report"),
+        false,
+    ),
+    info(AppCommand::CheckForUpdates, "help.check_for_updates", "Check for Updates...", Menu::Help, None, Some("app.check_for_updates"), true),
+    info(AppCommand::About, "help.about", "About encoderCraft", Menu::Help, None, Some("app.about"), true),
 ];
 
 impl AppCommand {
@@ -400,7 +420,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const ALL: [AppCommand; 51] = [
+    const ALL: [AppCommand; 57] = [
         AppCommand::AddMedia,
         AppCommand::AddFolder,
         AppCommand::AddMediaItem,
@@ -450,6 +470,12 @@ mod tests {
         AppCommand::ResetWorkspace,
         AppCommand::DeleteWorkspace,
         AppCommand::SetPanelVisibility,
+        AppCommand::JoinDiscord,
+        AppCommand::ArtCraftWebsite,
+        AppCommand::OpenGitHub,
+        AppCommand::ReportIssue,
+        AppCommand::RevealLogFiles,
+        AppCommand::SystemReport,
         AppCommand::CheckForUpdates,
         AppCommand::About,
     ];

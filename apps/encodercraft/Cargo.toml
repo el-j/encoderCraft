@@ -22,7 +22,7 @@ craft-window = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 egui = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
+craft-platform = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

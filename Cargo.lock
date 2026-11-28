@@ -2361,6 +2361,7 @@ checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 name = "encodercraft"
 version = "0.1.0-beta.2"
 dependencies = [
+ "craft-platform",
  "craft-window",
  "eframe",
  "egui",
@@ -2371,7 +2372,6 @@ dependencies = [
  "encodercraft-ipc",
  "encodercraft-presets",
  "encodercraft-ui-egui",
- "env_logger",
  "log",
  "serde",
  "serde_json",
@@ -2490,6 +2490,7 @@ dependencies = [
  "encodercraft-ipc",
  "encodercraft-muxers",
  "encodercraft-pipeline",
+ "encodercraft-platform",
  "encodercraft-presets",
  "encodercraft-source",
  "encodercraft-video-codecs",
@@ -2686,10 +2687,13 @@ dependencies = [
  "chrono",
  "craft-audio",
  "craft-behavior",
+ "craft-fonts-build",
  "craft-host",
+ "craft-i18n",
  "craft-keymap",
  "craft-menu",
  "craft-mesh",
+ "craft-platform",
  "craft-svg",
  "craft-theme",
  "craft-ui",

@@ -13,6 +13,7 @@ pub mod ipc;
 pub mod provider;
 pub mod queue;
 pub mod state;
+pub mod system;
 
 pub use automation::{play_completion_chime, resolve_unique_output_path, should_idle_auto_start};
 pub use cmd::{CommandRegistry, CommandSpec};

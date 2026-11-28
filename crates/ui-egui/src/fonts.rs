@@ -1,56 +1,35 @@
-//! UI font setup. Font binaries are never committed (they live in `storytold/craft-fonts`), so the
-//! bundled egui faces cover the Latin UI and installed system faces are appended as a fallback
-//! chain for symbols and CJK text found in file and preset names.
+//! UI fonts: the font stack every Craft app installs, craft-ui's [`UiFonts`]. Font binaries are never committed (they
+//! live in `storytold/craft-fonts`): `build.rs` embeds craft-fonts' faces from `CRAFT_FONTS_DIR` with craft-fonts-build,
+//! and characters no embedded face covers come from the installed system fonts, loaded per script when text first needs
+//! them. The stack orders the faces for the interface language, so a Japanese interface draws kanji in their Japanese
+//! forms, and CJK faces sit on the Latin face's baseline in rows of its height.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use egui::{Context, FontData, FontDefinitions, FontFamily, FontId};
+use craft_ui::fonts::{EmbeddedFace, Family, I18nScripts, UiFonts};
+use egui::{Context, FontId};
 
-struct CraftFont {
-    family: &'static str,
-    style: &'static str,
-    scripts: &'static [&'static str],
-    bytes: &'static [u8],
-}
-
-include!(concat!(env!("OUT_DIR"), "/craft_fonts.rs"));
+/// craft-fonts faces; empty unless built with `CRAFT_FONTS_DIR`.
+pub static CRAFT_FONTS: &[EmbeddedFace] = include!(concat!(env!("OUT_DIR"), "/craft_fonts.rs"));
 
 /// Every non-ASCII character the UI itself draws. Each must be covered by the default faces.
 pub const UI_GLYPHS: &str = "·…©";
 
-const FALLBACKS: &[(&str, &str)] = &[
-    ("system-symbols", "/System/Library/Fonts/Apple Symbols.ttf"),
-    ("system-cjk", "/System/Library/Fonts/PingFang.ttc"),
-    ("system-symbols", "C:\\Windows\\Fonts\\seguisym.ttf"),
-    ("system-cjk", "C:\\Windows\\Fonts\\msyh.ttc"),
-    ("system-symbols", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    ("system-cjk", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-    ("system-cjk", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
-];
+/// Every language the interface offers, which the stack also keeps faces for.
+static LANGUAGES: LazyLock<Vec<&'static str>> = LazyLock::new(|| crate::i18n::languages().into_iter().map(|(code, _)| code).collect());
 
-/// Appends the first installed face for each fallback slot to every font family.
-pub fn install(ctx: &Context) {
-    let mut defs = FontDefinitions::default();
-    for (index, font) in CRAFT_FONTS.iter().enumerate() {
-        let name = format!("craft-font-{}-{}-{}-{index}", font.family, font.style, font.scripts.join("-"));
-        defs.font_data.insert(name.clone(), Arc::new(FontData::from_static(font.bytes)));
-        for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            defs.families.entry(family).or_default().push(name.clone());
-        }
-    }
-    let mut added: Vec<&str> = Vec::new();
-    for (slot, path) in FALLBACKS {
-        if added.contains(slot) {
-            continue;
-        }
-        let Ok(bytes) = std::fs::read(path) else { continue };
-        defs.font_data.insert((*slot).to_owned(), Arc::new(FontData::from_owned(bytes)));
-        for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            defs.families.entry(family).or_default().push((*slot).to_owned());
-        }
-        added.push(slot);
-    }
-    ctx.set_fonts(defs);
+/// The interface font stack for the UI language `language` (a craft-i18n code such as `ja`).
+pub fn ui_fonts(language: &str) -> UiFonts<'static> {
+    let fonts = UiFonts::new(&I18nScripts).craft_faces(CRAFT_FONTS).family(Family::monospace()).languages(&LANGUAGES).ui_language(language);
+    // The web has no installed fonts to read.
+    #[cfg(not(target_arch = "wasm32"))]
+    let fonts = fonts.on_demand(Arc::new(craft_ui::fonts::SystemCandidates));
+    fonts
+}
+
+/// Installs the interface fonts for the UI language `language`; install again when it changes.
+pub fn install(ctx: &Context, language: &str) {
+    ui_fonts(language).install(ctx);
 }
 
 pub fn check_static_glyphs(ctx: &Context) {
@@ -93,7 +72,44 @@ mod tests {
     #[test]
     fn install_never_fails_without_system_fonts() {
         let ctx = Context::default();
-        install(&ctx);
+        for language in ["en", "ja", "not-a-language"] {
+            install(&ctx, language);
+        }
+    }
+
+    #[test]
+    fn a_japanese_interface_draws_japanese_with_the_craft_faces() {
+        // Builds without craft-fonts take Japanese from the installed fonts, which differ per machine.
+        if !CRAFT_FONTS.iter().any(|face| face.has_script("Jpan")) {
+            return;
+        }
+        let sample = craft_ui::fonts::Sample::new("ja", "japanese", "メディアファイルを追加… 環境設定");
+        craft_ui::fonts::assert_covers(&ui_fonts("ja").stack(), [sample]);
+    }
+
+    #[test]
+    fn a_menu_mnemonic_sits_on_the_baseline_of_its_japanese_label() {
+        // Japanese from the installed fonts grows the row, and epaint moves only the sections that hold it.
+        if !CRAFT_FONTS.iter().any(|face| face.has_script("Jpan")) {
+            return;
+        }
+        let ctx = Context::default();
+        install(&ctx, "ja");
+        let mut output = ctx.run_ui(Default::default(), |_| {});
+        output.textures_delta.clear();
+        // craft-menu draws "テーマ: ダーク(D)" as three sections: the label, the underlined letter, the rest.
+        let mut job = egui::text::LayoutJob::default();
+        let format = egui::TextFormat::simple(FontId::proportional(12.5), egui::Color32::WHITE);
+        for (part, underline) in [("テーマ: ダーク(", 0.0), ("D", 1.0), (")", 0.0)] {
+            job.append(part, 0.0, egui::TextFormat { underline: egui::Stroke::new(underline, egui::Color32::WHITE), ..format.clone() });
+        }
+        let galley = ctx.fonts_mut(|fonts| fonts.layout_job(job));
+        let baselines: Vec<(char, f32)> = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| (glyph.chr, glyph.pos.y))).collect();
+        assert_eq!(baselines.len(), 11, "every character of the label is laid out: {baselines:?}");
+        let first = baselines[0].1;
+        for (character, baseline) in &baselines {
+            assert!((baseline - first).abs() <= 0.5, "{character:?} is drawn on {baseline}, the row's baseline is {first}: {baselines:?}");
+        }
     }
 
     #[test]
@@ -102,7 +118,7 @@ mod tests {
             return;
         }
         let ctx = Context::default();
-        install(&ctx);
+        install(&ctx, "en");
         let mut output = ctx.run_ui(Default::default(), |ui| {
             ui.label("日本語 한국어 עברית العربية ไทย ქართული हिन्दी ✕◀✓");
         });
