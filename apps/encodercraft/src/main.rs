@@ -53,7 +53,8 @@ fn main() -> Result<(), eframe::Error> {
         );
         return Ok(());
     }
-    env_logger::init();
+    // Standard error and a log file in the settings folder (attached below), as the other Craft apps log.
+    let logger = craft_platform::logs::install(craft_platform::logs::LogNames::new("encodercraft"));
     let in_window_menus = args.iter().any(|a| a == "--in-window-menus");
 
     let app_dir = get_app_data_dir();
@@ -61,6 +62,14 @@ fn main() -> Result<(), eframe::Error> {
     let journal_file = app_dir.join("queue-state.json");
     let config_dir = encodercraft_engine::default_config_dir().unwrap_or_else(|| app_dir.clone());
     let prefs_file = config_dir.join("preferences.json");
+    let logs = encodercraft_ui_egui::help::log_folder(&config_dir);
+    if let Some(logger) = logger {
+        match logger.attach_dir(&logs) {
+            Ok(path) => log::info!("encoderCraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),
+            Err(error) => log::warn!("no log file: {error}"),
+        }
+    }
+    craft_platform::logs::crash::install("encoderCraft", env!("CARGO_PKG_VERSION"), Some(logs));
 
     let queue_mgr = Arc::new(QueueManager::new_persisted(journal_file).unwrap_or_else(|_| QueueManager::new_in_memory()));
     queue_mgr.set_conversion_preferences_path(prefs_file.clone());

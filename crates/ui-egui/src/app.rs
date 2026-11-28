@@ -66,6 +66,10 @@ pub struct EncoderCraftApp {
     name_dialog: Option<crate::commands::AppCommand>,
     /// Set by the Quit command; the next frame asks the window to close.
     pub(crate) quit_requested: bool,
+    /// Help ▸ System Compatibility Report's window shows this report while it is set.
+    system_report: Option<serde_json::Value>,
+    /// The outcome of Help ▸ Reveal Log Files, which the file manager answers on a thread.
+    log_reveal: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
     #[cfg(target_os = "macos")]
     native_menu: Option<craft_menu::NativeMenu>,
     /// The in-window menu bar's laid-out model, replaced only when the menus change so the bar's view stays memoized.
@@ -138,6 +142,8 @@ impl EncoderCraftApp {
             ui_host: None,
             name_dialog: None,
             quit_requested: false,
+            system_report: None,
+            log_reveal: None,
             #[cfg(target_os = "macos")]
             native_menu: None,
             window_menu_bar: Tracked::default(),
@@ -442,6 +448,28 @@ impl EncoderCraftApp {
             C::About => {
                 if self.dispatch_app_command_value(C::About, serde_json::json!({})).is_some() {
                     self.show_about_dialog = true;
+                }
+            }
+            C::JoinDiscord | C::ArtCraftWebsite | C::OpenGitHub | C::ReportIssue => {
+                let link = crate::help::link_name(cmd).unwrap_or_default();
+                if let Some(answer) = self.dispatch_app_command_value(cmd, serde_json::json!({ "link": link }))
+                    && let Some(url) = answer["url"].as_str()
+                    && let Err(error) = craft_platform::open::open_external(url)
+                {
+                    self.conversion_status = Some(crate::i18n::fill("Could not open {url}: {error}", &[("url", url), ("error", &error)]));
+                }
+            }
+            C::RevealLogFiles => {
+                if let Some(files) = self.dispatch_app_command_value(C::RevealLogFiles, serde_json::json!({})) {
+                    match crate::help::log_to_reveal(&files) {
+                        Ok(path) => self.log_reveal = Some(crate::help::reveal_in_background(path)),
+                        Err(reason) => self.conversion_status = Some(reason),
+                    }
+                }
+            }
+            C::SystemReport => {
+                if let Some(report) = self.dispatch_app_command_value(C::SystemReport, serde_json::json!({})) {
+                    self.system_report = Some(report);
                 }
             }
             C::RevealOutput | C::CopyOutputPath | C::RevealSource | C::CopySourcePath | C::ExportSettings => {
@@ -838,6 +866,7 @@ impl EncoderCraftApp {
         self.prefs_state.is_open
             || self.show_about_dialog
             || crate::updates_ui::blocks_input(self)
+            || self.system_report.is_some()
             || self.name_dialog.is_some()
             || !self.pending_conversion_approvals.is_empty()
     }
@@ -1320,10 +1349,23 @@ impl EncoderCraftApp {
             });
         }
 
+        self.render_help_windows(&ctx);
+
         // 8. In-App Updater (`craft-update`): its dialogs run on craft-ui's dialog host, after the app's own UI.
         crate::updates_ui::tick(self, &ctx);
         crate::updates_ui::show(self, &ctx);
         self.dialogs.run(ui);
+    }
+
+    /// Help ▸ System Compatibility Report's window, and what came of Help ▸ Reveal Log Files.
+    fn render_help_windows(&mut self, ctx: &egui::Context) {
+        crate::help::render_system_report(ctx, &mut self.system_report);
+        if let Some(outcome) = self.log_reveal.as_ref().and_then(|receiver| receiver.try_recv().ok()) {
+            self.log_reveal = None;
+            if let Err(error) = outcome {
+                self.conversion_status = Some(crate::i18n::fill("Could not show the log files: {error}", &[("error", &error)]));
+            }
+        }
     }
 
     fn render_dock_area(

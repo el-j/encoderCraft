@@ -1121,6 +1121,32 @@ impl CommandRegistry {
             },
         ));
 
+        self.register(CommandSpec::new(
+            "app.help_link",
+            "Help Link",
+            "Returns the page a Help link opens: `link` is discord, website, github or issues",
+            |_, params| {
+                let link = params.get("link").and_then(serde_json::Value::as_str).unwrap_or_default();
+                crate::system::help_link(link)
+                    .map(|url| serde_json::json!({ "url": url }))
+                    .ok_or_else(|| EncoderError::InvalidJobSpec(format!("unknown help link '{link}': expected discord, website, github or issues")))
+            },
+        ));
+
+        self.register(CommandSpec::new(
+            "app.log_files",
+            "Log Files",
+            "Returns the folder the desktop app writes its log files to, and the current log file when there is one",
+            |_, _| Ok(crate::system::log_files(crate::system::log_folder())),
+        ));
+
+        self.register(CommandSpec::new(
+            "app.system_report",
+            "System Compatibility Report",
+            "Returns what encoderCraft found on this machine: its version, the operating system, the CPU threads, the hardware encoder and the log folder",
+            |_, _| Ok(crate::system::system_report()),
+        ));
+
         self.register(CommandSpec::new("app.about", "About encoderCraft", "Returns application identity and version information", |_, _| {
             Ok(serde_json::json!({
                 "name": "encoderCraft",
@@ -1445,6 +1471,41 @@ mod tests {
                 ..Default::default()
             }],
         }
+    }
+
+    #[test]
+    fn the_help_links_open_https_pages_and_the_issues_belong_to_the_repository() {
+        let registry = CommandRegistry::new();
+        let queue = Arc::new(QueueManager::new_in_memory());
+        let url = |link: &str| registry.dispatch(&queue, "app.help_link", serde_json::json!({ "link": link })).map(|value| value["url"].to_string());
+        for link in ["discord", "website", "github", "issues"] {
+            assert!(url(link).unwrap().starts_with("\"https://"), "{link}");
+        }
+        assert!(url("issues").unwrap().trim_matches('"').starts_with(url("github").unwrap().trim_matches('"')));
+        assert!(url("nowhere").is_err(), "an unknown link is an error, not an empty page");
+    }
+
+    #[test]
+    fn the_log_files_name_the_current_log_only_once_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("logs");
+        assert!(crate::system::log_files(Some(folder.clone()))["current"].is_null());
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("encodercraft.log"), "started").unwrap();
+        let files = crate::system::log_files(Some(folder.clone()));
+        assert_eq!(files["current"], folder.join("encodercraft.log").display().to_string());
+        assert!(crate::system::log_files(None)["folder"].is_null());
+    }
+
+    #[test]
+    fn the_system_report_reaches_automation_with_the_hardware_encoder() {
+        let registry = CommandRegistry::new();
+        let queue = Arc::new(QueueManager::new_in_memory());
+        let report = registry.dispatch(&queue, "app.system_report", serde_json::json!({})).unwrap();
+        let detected = encodercraft_platform::detect_hardware();
+        assert_eq!(report["hardware"]["backend"], detected.backend.display_name(), "{report}");
+        assert_eq!(report["os"]["name"], std::env::consts::OS);
+        assert!(report["cpuThreads"].as_u64().is_some_and(|n| n >= 1), "{report}");
     }
 
     #[test]

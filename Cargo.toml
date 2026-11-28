@@ -96,6 +96,7 @@ craft-jsonrpc = { git = "https://github.com/storytold/craft-libs", rev = "a4db79
 craft-docpath = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
 craft-behavior = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
 craft-host = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
+craft-platform = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248" }
 craft-update = { git = "https://github.com/storytold/craft-libs", rev = "a4db799563c9ccd7217e1731ec34c58f6ba57248", features = ["ui"] }
 
 # Official ArtCraft repositories remaining prior to upstream consolidation
