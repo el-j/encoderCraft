@@ -2440,6 +2440,7 @@ dependencies = [
  "bytemuck",
  "chrono",
  "craft-docpath",
+ "craft-time",
  "encodercraft-color",
  "encodercraft-geom",
  "proptest",

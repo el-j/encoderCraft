@@ -2975,15 +2975,9 @@ mod staged_output_tests {
     }
 }
 
-/// SMPTE-style timecode for output frame `f`, counting nominal (rounded) frames per second.
+/// SMPTE-style timecode for output frame `f`, counting nominal frames per second (non-drop).
 pub(crate) fn timecode_for_frame(f: u64, fps: Rational64) -> encodercraft_core::MediaTimecode {
-    let nominal = (fps.as_f64().round() as u64).max(1);
-    let total_seconds = f / nominal;
-    let frames = (f % nominal) as u8;
-    let seconds = (total_seconds % 60) as u8;
-    let minutes = ((total_seconds / 60) % 60) as u8;
-    let hours = ((total_seconds / 3600) % 100) as u8;
-    encodercraft_core::MediaTimecode::new(hours, minutes, seconds, frames, false, fps)
+    encodercraft_core::MediaTimecode::from_frame_index(f, fps, false)
 }
 
 /// Picks the video codec: an explicit target codec wins over the preset-name heuristic, and the
