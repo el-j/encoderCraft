@@ -32,7 +32,7 @@ impl eframe::App for DesktopApp {
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         self.inner.raw_input_hook(ctx, raw_input);
-        encodercraft_ui_egui::prepare_ui_frame(ctx, self.inner.root_env());
+        self.inner.prepare_frame(ctx);
     }
 
     fn on_exit(&mut self) {
@@ -95,6 +95,7 @@ fn main() -> Result<(), eframe::Error> {
                 let mut app = EncoderCraftApp::new(queue_mgr, preset_registry);
                 app = app.with_config_dir(config_dir).with_title_bar(title_bar);
                 app.prefs_state.prefs = prefs;
+                app.set_startup_update_check(true);
                 #[cfg(target_os = "macos")]
                 if !in_window_menus {
                     app.install_native_menu(&cc.egui_ctx);

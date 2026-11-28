@@ -25,6 +25,20 @@ pub struct MenuInputs<'a> {
     pub active_workspace: String,
     /// Every panel with whether the active workspace shows it.
     pub panels: Vec<(PanelId, bool)>,
+    /// The label to show for English text: a command's label (its id, then the English label) or other menu text (an
+    /// empty id). [`interface_label`] in the app; command ids and parameters stay English whatever it returns.
+    pub label: &'a dyn Fn(&str, &str) -> String,
+}
+
+/// The labels a craft-menu layout writes itself (Exit, Preferences…, About {app}, …) in the interface language, for
+/// [`craft_menu::LayoutOptions::label`].
+pub fn layout_label(english: &'static str) -> String {
+    crate::i18n::t(english).to_owned()
+}
+
+/// [`MenuInputs::label`] in the interface language: a command's label by its id, other text by itself.
+pub fn interface_label(id: &str, english: &str) -> String {
+    if id.is_empty() { crate::i18n::t(english).to_owned() } else { crate::i18n::tid(id, english).to_owned() }
 }
 
 /// What a clicked menu item asks the app to do.
@@ -56,7 +70,8 @@ fn item_role(command: AppCommand) -> Option<ItemRole> {
 
 fn command_item(inputs: &MenuInputs<'_>, command: AppCommand) -> Option<Item> {
     let info = command.info()?;
-    let mut item = Item::new(CommandRef::new(info.id), info.label.replace("...", "…")).enabled(command.enabled(inputs.state));
+    let english = info.label.replace("...", "…");
+    let mut item = Item::new(CommandRef::new(info.id), (inputs.label)(info.id, &english)).english(english).enabled(command.enabled(inputs.state));
     if let Some(chord) = inputs.shortcuts.command_chord(command) {
         item = item.shortcut(chord);
     }
@@ -72,13 +87,13 @@ fn window_extras(inputs: &MenuInputs<'_>) -> Vec<Node> {
         .iter()
         .map(|(panel, shown)| {
             let command = CommandRef::with_params(PANEL_TOGGLE, serde_json::json!({ "panel": panel.label() }));
-            Node::Item(Item::new(command, panel.label()).check(*shown))
+            Node::Item(Item::new(command, (inputs.label)("", panel.label())).english(panel.label()).check(*shown))
         })
         .collect();
-    let workspace = |id: &str, label: &str| Node::Item(Item::new(CommandRef::new(id), label));
+    let workspace = |id: &str, label: &str| Node::Item(Item::new(CommandRef::new(id), (inputs.label)("", label)).english(label));
     vec![
         Node::Separator,
-        Node::submenu("Panels", panels),
+        Node::submenu((inputs.label)("", "Panels"), panels).english("Panels"),
         Node::Separator,
         workspace(WORKSPACE_SAVE_AS, "Save Workspace As…"),
         workspace(WORKSPACE_RENAME, "Rename Workspace…"),
@@ -102,7 +117,7 @@ pub fn build_bar(inputs: &MenuInputs<'_>) -> MenuBar {
         if menu == AppMenu::Window {
             children.extend(window_extras(inputs));
         }
-        menus.push(Menu::new(menu.label(), children).role(menu_role(menu)));
+        menus.push(Menu::new((inputs.label)("", menu.label()), children).english(menu.label()).role(menu_role(menu)));
     }
     let documents = inputs
         .workspaces
@@ -145,6 +160,7 @@ mod tests {
             workspaces: vec!["Default".into(), "Review".into()],
             active_workspace: "Review".into(),
             panels: PanelId::ALL.into_iter().map(|p| (p, true)).collect(),
+            label: &|_, english| english.to_owned(),
         }
     }
 
@@ -191,6 +207,28 @@ mod tests {
         assert_eq!(resolve(&CommandRef::new("nope")), None);
         let bad = CommandRef::with_params(PANEL_TOGGLE, serde_json::json!({ "panel": 3 }));
         assert_eq!(resolve(&bad), None);
+    }
+
+    #[test]
+    fn translated_labels_keep_english_ids_parameters_and_mnemonic_labels() {
+        let shortcuts = WorkspaceShortcuts::default();
+        let state = CommandState::default();
+        let translate = |_: &str, english: &str| format!("«{english}»");
+        let bar = build_bar(&MenuInputs { label: &translate, ..inputs(&shortcuts, &state) });
+        for menu in &bar.menus {
+            assert!(menu.title.starts_with('«'), "menu title {} is translated", menu.title);
+            assert!(menu.english.as_deref().is_some_and(|english| !english.starts_with('«')), "{} keeps its English title", menu.title);
+        }
+        for menu in AppMenu::ALL {
+            for info in menu_commands(menu) {
+                let item = bar.find(&CommandRef::new(info.id));
+                assert!(item.is_some_and(|item| item.label.starts_with('«')), "{} shows a translated label", info.id);
+                assert_eq!(resolve(&CommandRef::new(info.id)), Some(MenuAction::Command(info.command)), "{} still resolves", info.id);
+            }
+        }
+        let toggle = CommandRef::with_params(PANEL_TOGGLE, serde_json::json!({ "panel": PanelId::Queue.label() }));
+        assert!(bar.find(&toggle).is_some(), "panel toggles keep the English panel name as their parameter");
+        assert_eq!(resolve(&toggle), Some(MenuAction::TogglePanel(PanelId::Queue)));
     }
 
     #[test]
