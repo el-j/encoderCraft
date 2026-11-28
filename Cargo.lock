@@ -2691,6 +2691,7 @@ dependencies = [
  "craft-menu",
  "craft-mesh",
  "craft-svg",
+ "craft-theme",
  "craft-ui",
  "craft-update",
  "craft-window",

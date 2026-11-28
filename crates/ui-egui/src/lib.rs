@@ -48,16 +48,17 @@ pub fn install_ui_runtime(ctx: &egui::Context) {
     let _ = craft_ui::install(ctx, spec);
 }
 
-/// Feeds the per-frame `craft-ui` runtime input hook before an `egui` frame begins.
-pub fn prepare_ui_frame(ctx: &egui::Context) {
-    craft_ui::shell::embed::before_input(ctx, |_| craft_ui::runtime::frame::FrameInput::new(craft_ui::runtime::env::RootEnv::default()));
+/// Feeds the per-frame `craft-ui` runtime input hook before an `egui` frame begins, with the app's root values
+/// ([`EncoderCraftApp::root_env`]).
+pub fn prepare_ui_frame(ctx: &egui::Context, root: craft_ui::runtime::env::RootEnv) {
+    craft_ui::shell::embed::before_input(ctx, |_| craft_ui::runtime::frame::FrameInput::new(root));
 }
 
 /// Renders one headless test frame with the `craft-ui` runtime installed.
 pub fn run_test_ui(mut f: impl FnMut(&mut egui::Ui)) {
     let ctx = egui::Context::default();
     install_ui_runtime(&ctx);
-    prepare_ui_frame(&ctx);
+    prepare_ui_frame(&ctx, craft_ui::runtime::env::RootEnv::default());
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| f(ui));
     output.textures_delta.clear();
 }

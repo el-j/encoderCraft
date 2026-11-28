@@ -1,6 +1,7 @@
 //! Theme design tokens and egui visual styling for encoderCraft.
 
-use egui::{Color32, CornerRadius, FontId, Stroke, TextStyle, Visuals};
+use craft_theme::{ContrastChoice, ModeChoice};
+use egui::{Color32, CornerRadius, FontId, Stroke, TextStyle, Theme, Visuals};
 use serde::{Deserialize, Serialize};
 
 /// Supported UI brightness levels.
@@ -11,6 +12,40 @@ pub enum Brightness {
     MediumDark,
     Light,
     HighContrast,
+    /// The operating system's light or dark mode: [`Brightness::Light`] or [`Brightness::Dark`].
+    System,
+}
+
+impl Brightness {
+    /// The palette this choice shows when the system is in dark mode (`system_dark`) or not. Only
+    /// [`Brightness::System`] depends on the system.
+    pub fn resolve(self, system_dark: bool) -> Brightness {
+        match self {
+            Brightness::System if system_dark => Brightness::Dark,
+            Brightness::System => Brightness::Light,
+            fixed => fixed,
+        }
+    }
+
+    /// The mode the craft-ui runtime draws its parts in, so they match encoderCraft's own panels.
+    pub fn mode(self) -> ModeChoice {
+        match self {
+            Brightness::System => ModeChoice::System,
+            Brightness::Light => ModeChoice::Light,
+            Brightness::Dark | Brightness::MediumDark | Brightness::HighContrast => ModeChoice::Dark,
+        }
+    }
+
+    /// The contrast the craft-ui runtime draws its parts in.
+    pub fn contrast(self) -> ContrastChoice {
+        if self == Brightness::HighContrast { ContrastChoice::High } else { ContrastChoice::Standard }
+    }
+}
+
+/// Whether the operating system is in dark mode, as the craft-ui runtime reads it on `ctx` (the windowing
+/// integration's report, updated when the user switches). Light when the system gives no answer.
+pub fn system_is_dark(ctx: &egui::Context) -> bool {
+    craft_ui::runtime::env::RootEnv::new().mode(ModeChoice::System).resolved(ctx).mode == craft_theme::Mode::Dark
 }
 
 /// Color tokens used throughout all encoderCraft UI panels.
@@ -179,12 +214,20 @@ impl Tokens {
             Brightness::MediumDark => Self::medium_dark(),
             Brightness::Light => Self::light(),
             Brightness::HighContrast => Self::high_contrast(),
+            // Resolve a `System` choice first (`Brightness::resolve`); unresolved it shows the default palette.
+            Brightness::System => Self::dark(),
         }
     }
 }
 
 /// Applies theme tokens to the egui Context.
 pub fn apply_theme(ctx: &egui::Context, tokens: &Tokens) {
+    // egui keeps one style per theme and otherwise follows the system's: show the theme the tokens are for, so
+    // these visuals are the ones in use and `dark_mode` agrees with the palette.
+    let theme = if tokens.dark { Theme::Dark } else { Theme::Light };
+    if ctx.theme() != theme {
+        ctx.set_theme(theme);
+    }
     let mut v = if tokens.dark { Visuals::dark() } else { Visuals::light() };
     let r = CornerRadius::same(4);
 
@@ -251,6 +294,29 @@ mod tests {
             }
             assert!(t.bg_panel_darker.r() > 16 && t.bg_panel.r() < 60);
             assert_ne!(t.accent_primary, Color32::YELLOW);
+        }
+    }
+
+    #[test]
+    fn craft_ui_parts_use_the_same_mode_as_the_palette() {
+        for choice in [Brightness::Dark, Brightness::MediumDark, Brightness::Light, Brightness::HighContrast, Brightness::System] {
+            for system_dark in [false, true] {
+                let shown = choice.resolve(system_dark);
+                let palette_dark = Tokens::for_brightness(shown).dark;
+                let parts_dark = match choice.mode() {
+                    ModeChoice::System => system_dark,
+                    mode => mode == ModeChoice::Dark,
+                };
+                assert_eq!(palette_dark, parts_dark, "{choice:?} with a {} system", if system_dark { "dark" } else { "light" });
+            }
+        }
+    }
+
+    #[test]
+    fn only_the_system_choice_follows_the_system() {
+        assert_ne!(Brightness::System.resolve(true), Brightness::System.resolve(false));
+        for fixed in [Brightness::Dark, Brightness::MediumDark, Brightness::Light, Brightness::HighContrast] {
+            assert_eq!(fixed.resolve(true), fixed.resolve(false), "{fixed:?}");
         }
     }
 

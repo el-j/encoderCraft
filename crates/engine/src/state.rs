@@ -152,8 +152,9 @@ fn default_idle_timeout_minutes() -> u32 {
     2
 }
 
+/// Follow the operating system's light or dark mode.
 fn default_theme() -> String {
-    "Dark".into()
+    "System".into()
 }
 
 fn default_vram_budget_percent() -> u8 {
@@ -207,7 +208,7 @@ impl AppPreferences {
         self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 16);
         self.vram_budget_percent = self.vram_budget_percent.clamp(10, 100);
         self.idle_timeout_minutes = self.idle_timeout_minutes.clamp(1, 60);
-        if !matches!(self.theme.as_str(), "Dark" | "Medium Dark" | "Light" | "High Contrast") {
+        if !matches!(self.theme.as_str(), "System" | "Dark" | "Medium Dark" | "Light" | "High Contrast") {
             self.theme = default_theme();
         }
     }
@@ -222,7 +223,7 @@ impl Default for AppPreferences {
             remove_finished_on_exit: false,
             default_output_dir: None,
             max_parallel_jobs: 2,
-            theme: "Dark".into(),
+            theme: default_theme(),
             auto_shutdown: false,
             auto_start_on_idle: false,
             idle_timeout_minutes: 2,
@@ -354,7 +355,7 @@ mod prefs_tests {
         let p = load_preferences(&path).unwrap();
         assert_eq!(p.schema_version, PREFERENCES_SCHEMA_VERSION);
         assert_eq!(p.max_parallel_jobs, 16);
-        assert_eq!(p.theme, "Dark");
+        assert_eq!(p.theme, "System");
         assert!(!p.auto_start_queue);
         assert!(p.lossy_conversion_decisions.is_empty());
     }
@@ -372,7 +373,7 @@ mod prefs_tests {
 
     #[test]
     fn preference_migration_preserves_supported_themes() {
-        for theme in ["Dark", "Medium Dark", "Light", "High Contrast"] {
+        for theme in ["System", "Dark", "Medium Dark", "Light", "High Contrast"] {
             let mut preferences = AppPreferences { theme: theme.into(), schema_version: 1, ..AppPreferences::default() };
             preferences.migrate();
             assert_eq!(preferences.theme, theme);

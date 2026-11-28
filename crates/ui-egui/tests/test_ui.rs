@@ -36,7 +36,7 @@ fn app_renders_at_minimum_size_and_high_dpi_scales() {
     encodercraft_ui_egui::install_ui_runtime(&ctx);
     for (width, height, ppp) in [(720.0, 480.0, 1.0), (1120.0, 720.0, 1.5), (1440.0, 960.0, 2.0)] {
         ctx.set_pixels_per_point(ppp);
-        encodercraft_ui_egui::prepare_ui_frame(&ctx);
+        encodercraft_ui_egui::prepare_ui_frame(&ctx, app.root_env());
         let input =
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height))), ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| app.render(ui));
@@ -131,7 +131,7 @@ fn app_renders_with_every_title_bar_style() {
             EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default()))).with_title_bar(style);
         let ctx = egui::Context::default();
         encodercraft_ui_egui::install_ui_runtime(&ctx);
-        encodercraft_ui_egui::prepare_ui_frame(&ctx);
+        encodercraft_ui_egui::prepare_ui_frame(&ctx, app.root_env());
         let input =
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1120.0, 720.0))), ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| app.render(ui));
@@ -165,4 +165,24 @@ fn app_on_exit_removes_finished_jobs_when_preference_enabled() {
     app.prefs_state.prefs.remove_finished_on_exit = true;
     app.on_exit();
     assert!(queue.list_jobs().is_empty());
+}
+
+#[test]
+fn system_theme_follows_the_os_mode_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = EncoderCraftApp::new(Arc::new(QueueManager::new_in_memory()), Arc::new(Mutex::new(PresetRegistry::default())))
+        .with_config_dir(dir.path().to_path_buf());
+    app.run_command(encodercraft_ui_egui::commands::AppCommand::ThemeSystem);
+    assert_eq!(app.brightness, Brightness::System);
+    let ctx = egui::Context::default();
+    encodercraft_ui_egui::install_ui_runtime(&ctx);
+    // The windowing integration reports the OS's mode at start and again whenever the user switches it.
+    for os in [egui::Theme::Dark, egui::Theme::Light, egui::Theme::Dark] {
+        encodercraft_ui_egui::prepare_ui_frame(&ctx, app.root_env());
+        let input = egui::RawInput { events: vec![egui::Event::SystemTheme(os)], ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert_eq!(app.tokens.dark, os == egui::Theme::Dark, "palette after the OS switched to {os:?}");
+        assert_eq!(ctx.theme(), os, "egui's widgets after the OS switched to {os:?}");
+    }
 }

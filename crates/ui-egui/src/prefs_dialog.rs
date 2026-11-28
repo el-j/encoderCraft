@@ -195,21 +195,14 @@ pub fn render_prefs_dialog(
 
                                     ui.horizontal(|ui| {
                                         ui.label("Interface Theme:");
-                                        let is_dark = state.prefs.theme == "Dark";
-                                        let is_light = state.prefs.theme == "Light";
-                                        let is_hc = state.prefs.theme == "High Contrast";
-
-                                        if ui.selectable_label(is_dark, "Dark").clicked() {
-                                            state.prefs.theme = "Dark".into();
-                                            *on_theme_change = Some("Dark".into());
-                                        }
-                                        if ui.selectable_label(is_light, "Light").clicked() {
-                                            state.prefs.theme = "Light".into();
-                                            *on_theme_change = Some("Light".into());
-                                        }
-                                        if ui.selectable_label(is_hc, "High Contrast").clicked() {
-                                            state.prefs.theme = "High Contrast".into();
-                                            *on_theme_change = Some("High Contrast".into());
+                                        // "System" follows the OS's light or dark mode.
+                                        for (theme, label) in
+                                            [("System", "Match System"), ("Dark", "Dark"), ("Light", "Light"), ("High Contrast", "High Contrast")]
+                                        {
+                                            if ui.selectable_label(state.prefs.theme == theme, label).clicked() {
+                                                state.prefs.theme = theme.into();
+                                                *on_theme_change = Some(theme.into());
+                                            }
                                         }
                                     });
                                     ui.add_space(4.0);
@@ -412,7 +405,7 @@ pub fn render_prefs_dialog(
             ui.horizontal(|ui| {
                 if ui.button("Reset to Defaults").clicked() {
                     state.prefs = AppPreferences::default();
-                    *on_theme_change = Some("Dark".into());
+                    *on_theme_change = Some(state.prefs.theme.clone());
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
