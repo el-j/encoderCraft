@@ -1,6 +1,10 @@
 //! Rapid magic-byte container sniffer for multi-media files.
 //!
-//! Inspects only the initial header bytes without decoding or allocating large buffers.
+//! Inspects only the initial header bytes without decoding or allocating large buffers. The common media formats come
+//! from craft-libs' `craft-sniff`, which every Craft app shares; this module keeps encoderCraft's own kinds: the ones
+//! that refine a format craft-sniff names (an Illustrator file is a PDF, a PSB a PSD, an After Effects project a RIFX
+//! file, a package a ZIP), and the formats it doesn't name (MXF, RF64, DDS, Radiance HDR, EPS, InDesign, the ArtCraft
+//! files, CAD, USD and the text formats).
 
 use serde::{Deserialize, Serialize};
 
@@ -254,36 +258,6 @@ fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 fn sniff_image_and_raw(bytes: &[u8]) -> Option<ContainerKind> {
-    // 1. PNG: 89 50 4E 47 0D 0A 1A 0A
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Some(ContainerKind::Png);
-    }
-
-    // 2. JPEG: FF D8 FF
-    if bytes.starts_with(b"\xFF\xD8\xFF") {
-        return Some(ContainerKind::Jpeg);
-    }
-
-    // 3. GIF: GIF87a or GIF89a
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        return Some(ContainerKind::Gif);
-    }
-
-    // 4. OpenEXR: 76 2F 31 01
-    if bytes.starts_with(b"\x76\x2F\x31\x01") {
-        return Some(ContainerKind::OpenExr);
-    }
-
-    // 5. TIFF: 'II*\x00' (little-endian) or 'MM\x00*' (big-endian)
-    if bytes.starts_with(b"II*\x00") || bytes.starts_with(b"MM\x00*") {
-        return Some(ContainerKind::Tiff);
-    }
-
-    // Windows Bitmap: 'BM'
-    if bytes.starts_with(b"BM") && bytes.len() >= 14 {
-        return Some(ContainerKind::Bmp);
-    }
-
     // DDS: 'DDS '
     if bytes.starts_with(b"DDS ") {
         return Some(ContainerKind::Dds);
@@ -297,44 +271,65 @@ fn sniff_image_and_raw(bytes: &[u8]) -> Option<ContainerKind> {
     None
 }
 
-fn sniff_riff_family(bytes: &[u8]) -> Option<ContainerKind> {
+/// encoderCraft's kinds that refine a format craft-sniff names, so they are asked first: an Illustrator file is a PDF
+/// with Illustrator's private data, a PSB a PSD of version 2, and an After Effects project a RIFF or RIFX file.
+fn sniff_refinements(bytes: &[u8]) -> Option<ContainerKind> {
+    if bytes.starts_with(b"%PDF-") {
+        let inspect_len = bytes.len().min(4096);
+        if let Some(sub) = bytes.get(0..inspect_len)
+            && (contains_subslice(sub, b"/AIPrivateData") || contains_subslice(sub, b"AdobeIllustrat"))
+        {
+            return Some(ContainerKind::IllustratorAi);
+        }
+    }
+    if bytes.starts_with(b"8BPS") && bytes.get(4..6) == Some(&[0, 2]) {
+        return Some(ContainerKind::Psb);
+    }
     if (bytes.starts_with(b"RIFX") || bytes.starts_with(b"RIFF")) && bytes.len() >= 12 && matches!(bytes.get(8..12), Some(b"Egg!" | b"EggP")) {
         return Some(ContainerKind::AdobeAfterEffectsAep);
     }
+    None
+}
 
-    if bytes.starts_with(b"RIFF") && bytes.len() >= 12 {
-        match bytes.get(8..12) {
-            Some(b"WAVE") => return Some(ContainerKind::Wav),
-            Some(b"WEBP") => return Some(ContainerKind::WebP),
-            Some(b"AVI " | b"AVIX") => return Some(ContainerKind::Avi),
-            _ => {}
-        }
-    }
+/// The kind craft-sniff names, where encoderCraft reads it. HEIF, AVIF and JPEG XL inside ISO base media stay MP4, and
+/// ADTS AAC stays MP3, as encoderCraft has always named them; the other kinds it names (archives, executables, FLV, …)
+/// go on to this module's own checks, so detection never claims a format the pipeline can't open.
+fn from_craft_sniff(kind: craft_sniff::Kind) -> Option<ContainerKind> {
+    use craft_sniff::Kind as K;
+    Some(match kind {
+        K::Png => ContainerKind::Png,
+        K::Jpeg => ContainerKind::Jpeg,
+        K::Gif => ContainerKind::Gif,
+        K::WebP => ContainerKind::WebP,
+        K::Bmp => ContainerKind::Bmp,
+        K::Tiff => ContainerKind::Tiff,
+        K::OpenExr => ContainerKind::OpenExr,
+        K::Psd => ContainerKind::Psd,
+        K::Wav => ContainerKind::Wav,
+        K::Aiff => ContainerKind::Aiff,
+        K::Flac => ContainerKind::Flac,
+        // An ADTS AAC stream has always shared MP3's kind here: both are audio elementary streams that start with a
+        // frame sync.
+        K::Mp3 | K::Aac => ContainerKind::Mp3,
+        K::Ogg | K::Opus | K::OggVideo => ContainerKind::Ogg,
+        K::Mp4 | K::M4a | K::ThreeGp | K::Heif | K::Avif | K::Jxl => ContainerKind::IsoBmffMp4,
+        K::QuickTime => ContainerKind::QuickTimeMov,
+        K::Matroska => ContainerKind::Matroska,
+        K::WebM => ContainerKind::WebM,
+        K::Avi => ContainerKind::Avi,
+        K::MpegTs => ContainerKind::MpegTs,
+        K::Glb => ContainerKind::GltfBinary,
+        K::Ply => ContainerKind::Ply,
+        K::Pdf => ContainerKind::Pdf,
+        _ => return None,
+    })
+}
 
+fn sniff_riff_family(bytes: &[u8]) -> Option<ContainerKind> {
     if bytes.starts_with(b"RF64") && bytes.len() >= 12 && bytes.get(8..12) == Some(b"WAVE") {
         return Some(ContainerKind::Rf64Wav);
     }
 
-    if bytes.starts_with(b"FORM") && bytes.len() >= 12 && matches!(bytes.get(8..12), Some(b"AIFF" | b"AIFC")) {
-        return Some(ContainerKind::Aiff);
-    }
-
-    None
-}
-
-fn sniff_audio_streams(bytes: &[u8]) -> Option<ContainerKind> {
-    if bytes.starts_with(b"fLaC") {
-        return Some(ContainerKind::Flac);
-    }
-    if bytes.starts_with(b"OggS") {
-        return Some(ContainerKind::Ogg);
-    }
-    if bytes.starts_with(b"ID3") {
-        return Some(ContainerKind::Mp3);
-    }
-    if bytes.len() >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0 {
-        return Some(ContainerKind::Mp3);
-    }
     None
 }
 
@@ -343,27 +338,10 @@ fn sniff_video_containers(bytes: &[u8]) -> Option<ContainerKind> {
         return Some(ContainerKind::Mxf);
     }
 
-    if bytes.starts_with(b"\x1A\x45\xDF\xA3") {
-        let slice_len = bytes.len().min(128);
-        if bytes.get(0..slice_len).is_some_and(|sub| sub.windows(4).any(|w| w == b"webm")) {
-            return Some(ContainerKind::WebM);
-        }
-        return Some(ContainerKind::Matroska);
-    }
-
+    // encoderCraft opens every ISO base media file as MP4, whatever brand it lists: craft-sniff names only the
+    // brands it knows.
     if bytes.len() >= 12 && bytes.get(4..8) == Some(b"ftyp") {
-        if bytes.get(8..12) == Some(b"qt  ") {
-            return Some(ContainerKind::QuickTimeMov);
-        }
         return Some(ContainerKind::IsoBmffMp4);
-    }
-
-    if bytes.len() >= 8 && matches!(bytes.get(4..8), Some(b"moov" | b"wide")) {
-        return Some(ContainerKind::QuickTimeMov);
-    }
-
-    if bytes.len() >= 377 && bytes.first() == Some(&0x47) && bytes.get(188) == Some(&0x47) && bytes.get(376) == Some(&0x47) {
-        return Some(ContainerKind::MpegTs);
     }
 
     None
@@ -419,28 +397,8 @@ fn sniff_zip_package(sub: &[u8]) -> ContainerKind {
 }
 
 fn sniff_adobe_cad_and_packages(bytes: &[u8]) -> Option<ContainerKind> {
-    if bytes.starts_with(b"%PDF-") {
-        let inspect_len = bytes.len().min(4096);
-        if let Some(sub) = bytes.get(0..inspect_len)
-            && (contains_subslice(sub, b"/AIPrivateData") || contains_subslice(sub, b"AdobeIllustrat"))
-        {
-            return Some(ContainerKind::IllustratorAi);
-        }
-        return Some(ContainerKind::Pdf);
-    }
-
     if bytes.starts_with(b"%!PS-Adobe") {
         return Some(ContainerKind::Eps);
-    }
-
-    if bytes.starts_with(b"8BPS") {
-        if bytes.len() >= 6 {
-            let version = u16::from_be_bytes([bytes[4], bytes[5]]);
-            if version == 2 {
-                return Some(ContainerKind::Psb);
-            }
-        }
-        return Some(ContainerKind::Psd);
     }
 
     if bytes.starts_with(b"\x06\x06\xED\xF5\xD8\x1D\x46\xE5\xBD\x31\xEF\xE7\xFE\x74\xB7\x1D") {
@@ -488,17 +446,11 @@ fn sniff_adobe_cad_and_packages(bytes: &[u8]) -> Option<ContainerKind> {
 }
 
 fn sniff_3d(bytes: &[u8]) -> Option<ContainerKind> {
-    if bytes.starts_with(b"glTF") {
-        return Some(ContainerKind::GltfBinary);
-    }
     if bytes.starts_with(b"PXR-USDC") {
         return Some(ContainerKind::UsdBinary);
     }
     if bytes.starts_with(b"#usda") {
         return Some(ContainerKind::UsdAscii);
-    }
-    if bytes.starts_with(b"ply\n") || bytes.starts_with(b"ply\r\n") {
-        return Some(ContainerKind::Ply);
     }
     None
 }
@@ -544,13 +496,16 @@ pub fn sniff_container(bytes: &[u8]) -> Option<ContainerKind> {
         return None;
     }
 
+    if let Some(kind) = sniff_refinements(bytes) {
+        return Some(kind);
+    }
+    if let Some(kind) = craft_sniff::identify(bytes).and_then(from_craft_sniff) {
+        return Some(kind);
+    }
     if let Some(kind) = sniff_image_and_raw(bytes) {
         return Some(kind);
     }
     if let Some(kind) = sniff_riff_family(bytes) {
-        return Some(kind);
-    }
-    if let Some(kind) = sniff_audio_streams(bytes) {
         return Some(kind);
     }
     if let Some(kind) = sniff_video_containers(bytes) {
@@ -627,7 +582,10 @@ mod tests {
     #[test]
     fn test_sniff_audio_formats() {
         assert_eq!(sniff_container(b"fLaC\x00\x00\x00\x22"), Some(ContainerKind::Flac));
-        assert_eq!(sniff_container(b"OggS\x00\x02\x00\x00"), Some(ContainerKind::Ogg));
+        let ogg_page = b"OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x1E\x01vorbis";
+        assert_eq!(sniff_container(ogg_page), Some(ContainerKind::Ogg));
+        // An Ogg page needs its 27-byte header: eight bytes of "OggS" are no longer taken for one.
+        assert_eq!(sniff_container(b"OggS\x00\x02\x00\x00"), None);
         assert_eq!(sniff_container(b"ID3\x04\x00\x00\x00\x00"), Some(ContainerKind::Mp3));
         assert_eq!(sniff_container(b"\xFF\xFB\x90\x64\x00\x00"), Some(ContainerKind::Mp3));
     }
@@ -639,7 +597,12 @@ mod tests {
         assert_eq!(sniff_container(b"%!PS-Adobe-3.0 EPSF-3.0\n"), Some(ContainerKind::Eps));
         assert_eq!(sniff_container(b"8BPS\x00\x01\x00\x00"), Some(ContainerKind::Psd));
         assert_eq!(sniff_container(b"8BPS\x00\x02\x00\x00"), Some(ContainerKind::Psb));
-        assert_eq!(sniff_container(b"BM\x36\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00"), Some(ContainerKind::Bmp));
+        assert_eq!(
+            sniff_container(b"BM\x36\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00\x28\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00"),
+            Some(ContainerKind::Bmp)
+        );
+        // A BMP needs zero reserved fields and a known DIB header size: text that starts with "BM" is not one.
+        assert_eq!(sniff_container(b"BMW service record, 2026\n"), None);
         assert_eq!(sniff_container(b"\x06\x06\xED\xF5\xD8\x1D\x46\xE5\xBD\x31\xEF\xE7\xFE\x74\xB7\x1D\x00\x00"), Some(ContainerKind::Indd));
         assert_eq!(sniff_container(b"PK\x03\x04\x14\x00\x00\x00\x08\x00word/document.xml"), Some(ContainerKind::Docx));
         assert_eq!(sniff_container(b"PK\x03\x04\x14\x00\x00\x00\x08\x00designmap.xml"), Some(ContainerKind::Idml));
@@ -695,5 +658,80 @@ mod tests {
         assert_eq!(sniff_container(&craft_zip), Some(ContainerKind::ArtcraftCadcraft));
         craft_zip = b"PK\x03\x04\x14\x00\x00\x00\x08\x00mimetypeapplication/x-designcraft".to_vec();
         assert_eq!(sniff_container(&craft_zip), Some(ContainerKind::ArtcraftDesigncraft));
+    }
+    /// Realistic leading bytes of each kind the media formats share with craft-sniff, and the kinds that refine one
+    /// of them, with the kind the sniffer has always named. A change of signature source must keep every row.
+    #[test]
+    fn every_kind_keeps_its_name_from_realistic_headers() {
+        fn with(prefix: &[u8], len: usize) -> Vec<u8> {
+            let mut bytes = prefix.to_vec();
+            bytes.resize(len.max(prefix.len()), 0);
+            bytes
+        }
+        let mut ts = vec![0u8; 564];
+        for packet in 0..3 {
+            ts[packet * 188] = 0x47;
+            ts[packet * 188 + 1] = 0x40;
+            ts[packet * 188 + 3] = 0x10;
+        }
+        let mkv = b"\x1A\x45\xDF\xA3\x9F\x42\x86\x81\x01\x42\xF7\x81\x01\x42\xF2\x81\x04\x42\xF3\x81\x08\x42\x82\x88matroska\x42\x87\x81\x04\x42\x85\x81\x02";
+        let webm =
+            b"\x1A\x45\xDF\xA3\x9F\x42\x86\x81\x01\x42\xF7\x81\x01\x42\xF2\x81\x04\x42\xF3\x81\x08\x42\x82\x84webm\x42\x87\x81\x04\x42\x85\x81\x02";
+        let bmp = b"BM\x46\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00\x28\x00\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x01\x00\x18\x00";
+        let cases: Vec<(&str, Vec<u8>, ContainerKind)> = vec![
+            ("png", with(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x02\x00\x00\x00", 64), ContainerKind::Png),
+            ("jpeg jfif", with(b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00", 64), ContainerKind::Jpeg),
+            ("jpeg exif", with(b"\xFF\xD8\xFF\xE1\x00\x18Exif\x00\x00", 64), ContainerKind::Jpeg),
+            ("gif89a", with(b"GIF89a\x10\x00\x10\x00\x80\x00\x00", 64), ContainerKind::Gif),
+            ("gif87a", with(b"GIF87a\x10\x00\x10\x00\x80\x00\x00", 64), ContainerKind::Gif),
+            ("webp", with(b"RIFF\x24\x00\x00\x00WEBPVP8 \x18\x00\x00\x00", 64), ContainerKind::WebP),
+            ("bmp", with(bmp, 70), ContainerKind::Bmp),
+            ("tiff le", with(b"II*\x00\x08\x00\x00\x00", 64), ContainerKind::Tiff),
+            ("tiff be", with(b"MM\x00*\x00\x00\x00\x08", 64), ContainerKind::Tiff),
+            ("openexr", with(b"\x76\x2F\x31\x01\x02\x00\x00\x00channels\x00chlist\x00", 64), ContainerKind::OpenExr),
+            ("psd", with(b"8BPS\x00\x01\x00\x00\x00\x00\x00\x00\x00\x03", 64), ContainerKind::Psd),
+            ("psb", with(b"8BPS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x03", 64), ContainerKind::Psb),
+            ("wav", with(b"RIFF\x24\x08\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x02\x00", 64), ContainerKind::Wav),
+            ("rf64", with(b"RF64\xFF\xFF\xFF\xFFWAVEds64", 64), ContainerKind::Rf64Wav),
+            ("aiff", with(b"FORM\x00\x00\x10\x00AIFFCOMM", 64), ContainerKind::Aiff),
+            ("aifc", with(b"FORM\x00\x00\x10\x00AIFCFVER", 64), ContainerKind::Aiff),
+            ("flac", with(b"fLaC\x00\x00\x00\x22", 64), ContainerKind::Flac),
+            ("mp3 id3", with(b"ID3\x03\x00\x00\x00\x00\x00\x21", 64), ContainerKind::Mp3),
+            ("mp3 frame", with(b"\xFF\xFB\x90\x64\x00\x00\x00\x00", 64), ContainerKind::Mp3),
+            (
+                "ogg vorbis",
+                with(b"OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x1E\x01vorbis", 64),
+                ContainerKind::Ogg,
+            ),
+            (
+                "ogg opus",
+                with(b"OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x13OpusHead", 64),
+                ContainerKind::Ogg,
+            ),
+            ("mp4 isom", with(b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41", 64), ContainerKind::IsoBmffMp4),
+            ("mp4 mp42", with(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom", 64), ContainerKind::IsoBmffMp4),
+            ("m4a", with(b"\x00\x00\x00\x20ftypM4A \x00\x00\x02\x00M4A mp42isom\x00\x00\x00\x00", 64), ContainerKind::IsoBmffMp4),
+            ("3gp", with(b"\x00\x00\x00\x14ftyp3gp4\x00\x00\x02\x00isom", 64), ContainerKind::IsoBmffMp4),
+            ("heic", with(b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic", 64), ContainerKind::IsoBmffMp4),
+            ("mov ftyp", with(b"\x00\x00\x00\x14ftypqt  \x00\x00\x02\x00qt  ", 64), ContainerKind::QuickTimeMov),
+            ("mov wide", with(b"\x00\x00\x00\x08wide\x00\x00\x00\x00mdat", 64), ContainerKind::QuickTimeMov),
+            ("mov moov", with(b"\x00\x00\x1F\x3Cmoov\x00\x00\x00\x6Cmvhd", 64), ContainerKind::QuickTimeMov),
+            ("aac adts", with(b"\xFF\xF1\x50\x80\x02\x1F\xFC", 64), ContainerKind::Mp3),
+            ("matroska", with(mkv, 64), ContainerKind::Matroska),
+            ("webm", with(webm, 64), ContainerKind::WebM),
+            ("avi", with(b"RIFF\x00\x10\x00\x00AVI LIST\x00\x01\x00\x00hdrlavih", 64), ContainerKind::Avi),
+            ("mpeg-ts", ts, ContainerKind::MpegTs),
+            ("glb", with(b"glTF\x02\x00\x00\x00\x00\x10\x00\x00", 64), ContainerKind::GltfBinary),
+            ("ply", with(b"ply\nformat binary_little_endian 1.0\n", 64), ContainerKind::Ply),
+            ("pdf", with(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n1 0 obj\n", 64), ContainerKind::Pdf),
+            ("illustrator", with(b"%PDF-1.5\n%\xE2\xE3\xCF\xD3\n1 0 obj\n<</AIPrivateData1 2 0 R>>", 96), ContainerKind::IllustratorAi),
+            ("after effects", with(b"RIFX\x00\x00\x10\x00Egg!head", 64), ContainerKind::AdobeAfterEffectsAep),
+        ];
+        let wrong: Vec<String> = cases
+            .iter()
+            .filter(|(_, bytes, kind)| sniff_container(bytes) != Some(*kind))
+            .map(|(name, bytes, kind)| format!("{name}: {:?}, expected {kind:?}", sniff_container(bytes)))
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 }
