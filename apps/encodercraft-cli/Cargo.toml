@@ -30,6 +30,7 @@ env_logger = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+craft-media-testkit = { workspace = true }
 encodercraft-spatial-io = { workspace = true }
 encodercraft-color = { workspace = true }
 encodercraft-image-codecs = { workspace = true }

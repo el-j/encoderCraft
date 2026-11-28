@@ -232,7 +232,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -1423,6 +1423,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-media-testkit"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=a4db799563c9ccd7217e1731ec34c58f6ba57248#a4db799563c9ccd7217e1731ec34c58f6ba57248"
+dependencies = [
+ "craft-testkit",
+]
+
+[[package]]
 name = "craft-menu"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=a4db799563c9ccd7217e1731ec34c58f6ba57248#a4db799563c9ccd7217e1731ec34c58f6ba57248"
@@ -1607,6 +1615,11 @@ dependencies = [
  "vectorcraft-geom",
  "vectorcraft-pathops",
 ]
+
+[[package]]
+name = "craft-testkit"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=a4db799563c9ccd7217e1731ec34c58f6ba57248#a4db799563c9ccd7217e1731ec34c58f6ba57248"
 
 [[package]]
 name = "craft-tga"
@@ -2083,7 +2096,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2400,6 +2413,7 @@ dependencies = [
 name = "encodercraft-cli"
 version = "0.1.0-beta.2"
 dependencies = [
+ "craft-media-testkit",
  "encodercraft-color",
  "encodercraft-core",
  "encodercraft-demux",
@@ -2896,7 +2910,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5800,7 +5814,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6714,7 +6728,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6727,7 +6741,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6784,7 +6798,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7651,7 +7665,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8685,7 +8699,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
