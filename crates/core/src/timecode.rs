@@ -57,6 +57,11 @@ impl Rational64 {
     pub fn invert(&self) -> Result<Self, EncoderError> {
         Self::new(self.den, self.num)
     }
+
+    /// This fraction as a craft-time frame rate, for its timecode arithmetic.
+    pub fn frame_rate(&self) -> craft_time::FrameRate {
+        craft_time::FrameRate { num: self.num, den: self.den }
+    }
 }
 
 fn gcd(mut a: i64, mut b: i64) -> i64 {
@@ -95,25 +100,26 @@ impl MediaTimecode {
         Self::new(0, 0, 0, 0, false, rate)
     }
 
-    /// Calculates the total continuous frame index from this timecode.
+    /// The timecode of frame `frame` (counted from zero) at `rate`. Hours wrap at 100, the most
+    /// two digits hold. Drop-frame numbering only applies at the NTSC rates craft-time drops at.
+    pub fn from_frame_index(frame: u64, rate: Rational64, drop_frame: bool) -> Self {
+        let frame = i64::try_from(frame).unwrap_or(i64::MAX);
+        let (_, hours, minutes, seconds, frames) = craft_time::frames_to_fields(frame, rate.frame_rate(), drop_frame);
+        let field = |value: i64| u8::try_from(value).unwrap_or(u8::MAX);
+        Self::new(field(hours % 100), field(minutes), field(seconds), field(frames), drop_frame, rate)
+    }
+
+    /// Calculates the total continuous frame index from this timecode. The drop-frame flag only
+    /// counts at the NTSC rates (29.97, 59.94, 119.88): no other rate drops frame numbers.
     pub fn to_frame_index(&self) -> i64 {
-        let nominal_fps = ((self.rate.num as f64) / (self.rate.den as f64)).round() as i64;
-        let nominal_fps = nominal_fps.max(1);
-
-        let total_seconds =
-            (self.hours as i64).saturating_mul(3600).saturating_add((self.minutes as i64).saturating_mul(60)).saturating_add(self.seconds as i64);
-
-        let raw_frames = total_seconds.saturating_mul(nominal_fps).saturating_add(self.frames as i64);
-
-        if self.drop_frame && (nominal_fps == 30 || nominal_fps == 60) {
-            let drop_count = if nominal_fps == 30 { 2 } else { 4 };
-            let total_minutes = (self.hours as i64).saturating_mul(60).saturating_add(self.minutes as i64);
-            let tens_of_minutes = total_minutes / 10;
-            let dropped = (total_minutes.saturating_sub(tens_of_minutes)).saturating_mul(drop_count);
-            raw_frames.saturating_sub(dropped)
-        } else {
-            raw_frames
-        }
+        craft_time::fields_to_frames(
+            i64::from(self.hours),
+            i64::from(self.minutes),
+            i64::from(self.seconds),
+            i64::from(self.frames),
+            self.rate.frame_rate(),
+            self.drop_frame,
+        )
     }
 
     /// Formats the timecode as an industry-standard SMPTE string.
@@ -187,5 +193,28 @@ mod tests {
     fn test_timecode_frame_index() {
         let tc = MediaTimecode::new(0, 0, 1, 0, false, Rational64::FPS_25);
         assert_eq!(tc.to_frame_index(), 25);
+    }
+
+    #[test]
+    fn drop_frame_only_drops_at_the_ntsc_rates() {
+        let hour = |rate, drop_frame| MediaTimecode::new(1, 0, 0, 0, drop_frame, rate).to_frame_index();
+        for whole in [Rational64::FPS_30, Rational64::FPS_60] {
+            assert_eq!(hour(whole, true), hour(whole, false), "{whole:?} has no drop-frame numbering");
+        }
+        assert!(hour(Rational64::FPS_29_97, true) < hour(Rational64::FPS_29_97, false));
+        let fps_119_88 = Rational64::new(120_000, 1_001).unwrap();
+        assert_eq!(hour(fps_119_88, true), 4 * hour(Rational64::FPS_29_97, true), "119.88 drops four times as many frame numbers");
+    }
+
+    #[test]
+    fn a_frame_index_round_trips_through_its_timecode() {
+        let rates = [(Rational64::FPS_25, false), (Rational64::FPS_23_976, false), (Rational64::FPS_29_97, true), (Rational64::FPS_59_94, true)];
+        for (rate, drop_frame) in rates {
+            // Either side of a minute that drops frame numbers, a tenth minute that doesn't, and an hour in.
+            for frame in [0, 1_799, 1_800, 1_801, 17_982, 17_983, 107_891, 107_892] {
+                let tc = MediaTimecode::from_frame_index(frame, rate, drop_frame);
+                assert_eq!(tc.to_frame_index(), frame as i64, "{rate:?} drop {drop_frame} frame {frame} -> {}", tc.to_smpte_string());
+            }
+        }
     }
 }
